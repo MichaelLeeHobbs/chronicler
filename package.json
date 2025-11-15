@@ -87,6 +87,8 @@
     "typescript": "^5.9.3",
     "vitest": "^4.0.9"
   },
-  "dependencies": {},
+  "dependencies": {
+    "stderr-lib": "^1.0.0"
+  },
   "packageManager": "pnpm@10.18.0"
 }

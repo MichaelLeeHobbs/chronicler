@@ -1,20 +1,25 @@
-export type ChronicleEntry = {
-  timestamp: Date;
-  message: string;
-  data?: Record<string, unknown>;
-};
-
-export const createEntry = (message: string, data?: Record<string, unknown>): ChronicleEntry => ({
-  timestamp: new Date(),
-  message,
-  data,
-});
-
-export const formatEntry = (entry: ChronicleEntry): string => {
-  const base = `[${entry.timestamp.toISOString()}] ${entry.message}`;
-  if (!entry.data) {
-    return base;
-  }
-
-  return `${base} ${JSON.stringify(entry.data)}`;
-};
+export { type LogBackend } from './core/backend';
+export { type Chronicler, type ChroniclerConfig, createChronicle } from './core/chronicle';
+export {
+  type ContextRecord,
+  ContextStore,
+  type ContextValidationResult,
+  sanitizeContextInput,
+} from './core/context';
+export { InvalidConfigError, ReservedFieldError, UnsupportedLogLevelError } from './core/errors';
+export {
+  type CorrelationEventGroup,
+  defineCorrelationGroup,
+  defineEvent,
+  defineEventGroup,
+  type EventDefinition,
+  type EventFields,
+  type LogLevel,
+  type SystemEventGroup,
+} from './core/events';
+export {
+  type FieldDefinition,
+  type FieldDefinitions,
+  type FieldType,
+  type InferFields,
+} from './core/fields';

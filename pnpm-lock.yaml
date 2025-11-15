@@ -6,6 +6,10 @@ settings:
 
 importers:
   .:
+    dependencies:
+      stderr-lib:
+        specifier: ^1.0.0
+        version: 1.0.0
     devDependencies:
       '@changesets/cli':
         specifier: ^2.29.7
@@ -3744,6 +3748,13 @@ packages:
         integrity: sha512-5GS12FdOZNliM5mAOxFRg7Ir0pWz8MdpYm6AY6VPkGpbA7ZzmbzNcBJQ0GPvvyWgcY7QAhCgf9Uy89I03faLkg==,
       }
 
+  stderr-lib@1.0.0:
+    resolution:
+      {
+        integrity: sha512-SPYqrTByCeJZgh/BmJPxv9+ScBV0zos/yDMFFLDa3Go9D7VycXzC9M2OCdVfds3Ifud5M7YOMdXTf74jZTVdXg==,
+      }
+    engines: { node: '>=18' }
+
   stop-iteration-iterator@1.1.0:
     resolution:
       {
@@ -6507,6 +6518,8 @@ snapshots:
   stackback@0.0.2: {}
 
   std-env@3.10.0: {}
+
+  stderr-lib@1.0.0: {}
 
   stop-iteration-iterator@1.1.0:
     dependencies:
