@@ -1,0 +1,1086 @@
+# Chronicler Logger - TypeScript Specification (v2.0)
+
+**A type-safe, structured logging system for Node.js applications with hierarchical event organization and correlation tracking.**
+
+---
+
+## 🎯 Core Philosophy
+
+1. **Type Safety First**: Full TypeScript inference with compile-time event validation
+2. **Never Crash Once Valid**: A properly initialized Chronicler instance will never throw errors or crash your application during logging operations
+3. **Fail Fast on Initialization**: Invalid configuration throws immediately during setup
+4. **Structured & Searchable**: Everything is JSON, optimized for CloudWatch Insights
+5. **Zero Ambiguity**: Reserved namespace prevents field collisions
+6. **Self-Documenting**: Event definitions generate documentation
+
+---
+
+## 📦 Core Type System
+
+### Field Definitions
+
+```typescript
+type FieldType = 'string' | 'number' | 'boolean' | 'error';
+
+interface FieldDefinition {
+  type: FieldType;
+  required: boolean;
+  doc: string;
+}
+
+type FieldDefinitions = Record<string, FieldDefinition>;
+
+// Core type inference - converts field definitions to runtime types
+type InferFields<F extends FieldDefinitions> = {
+  [K in keyof F as F[K]['required'] extends true ? K : never]: InferFieldType<F[K]>;
+} & {
+  [K in keyof F as F[K]['required'] extends false ? K : never]?: InferFieldType<F[K]>;
+};
+
+type InferFieldType<T extends FieldDefinition> = T['type'] extends 'string'
+  ? string
+  : T['type'] extends 'number'
+    ? number
+    : T['type'] extends 'boolean'
+      ? boolean
+      : T['type'] extends 'error'
+        ? unknown // Errors are always unknown for safety
+        : never;
+```
+
+### Reserved Fields System
+
+```typescript
+// Top-level reserved fields
+type ReservedTopLevelFields =
+  | 'eventKey'
+  | 'level'
+  | 'message'
+  | 'correlationId'
+  | 'forkId'
+  | 'timestamp'
+  | 'hostname'
+  | 'environment'
+  | 'version'
+  | 'service'
+  | 'fields'
+  | '_perf'
+  | '_validation';
+
+// Nested reserved fields under _validation
+type ReservedValidationFields =
+  | 'missingFields'
+  | 'typeErrors'
+  | 'contextCollisions'
+  | 'multipleCompletes';
+
+// Nested reserved fields under _perf
+type ReservedPerfFields = 'heapUsed' | 'heapTotal' | 'external' | 'rss';
+
+// Combined reserved field check
+type AllReservedFields =
+  | ReservedTopLevelFields
+  | `_validation.${ReservedValidationFields}`
+  | `_perf.${ReservedPerfFields}`;
+```
+
+### Context Types
+
+```typescript
+// Simple, flat values only - no nesting, no reserved fields
+type SimpleValue = string | number | boolean | null;
+type ContextValue = SimpleValue | SimpleValue[];
+
+type Context = {
+  [K in string]: K extends ReservedTopLevelFields ? never : ContextValue;
+};
+
+// Metadata (from config) must also avoid reserved fields
+type MetadataContext = {
+  [K in string]: K extends ReservedTopLevelFields ? never : SimpleValue;
+};
+```
+
+### Event Definitions
+
+```typescript
+interface EventDefinition<F extends FieldDefinitions = FieldDefinitions> {
+  key: string;
+  level: LogLevel;
+  message: string;
+  doc: string;
+  fields?: F;
+}
+
+interface SystemEventGroup {
+  key: string;
+  type: 'system';
+  doc: string;
+  events?: Record<string, EventDefinition<any>>;
+  groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
+}
+
+interface CorrelationEventGroup {
+  key: string;
+  type: 'correlation';
+  doc: string;
+  timeout: number; // Milliseconds of inactivity before auto-timeout
+  events?: Record<string, EventDefinition<any>>;
+  groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
+}
+
+// Auto-generated events for correlation groups
+type CorrelationAutoEvents = {
+  start: EventDefinition<{}>;
+  complete: EventDefinition<{}>;
+  timeout: EventDefinition<{}>;
+  metadataWarning: EventDefinition<{
+    attemptedKey: { type: 'string'; required: true; doc: string };
+    existingValue: { type: 'string'; required: true; doc: string };
+    attemptedValue: { type: 'string'; required: true; doc: string };
+  }>;
+};
+
+// Helper type that adds auto-generated events to correlation groups
+type WithAutoEvents<E> = E & CorrelationAutoEvents;
+```
+
+### Helper Functions
+
+```typescript
+// Identity functions that provide type inference
+function defineEvent<F extends FieldDefinitions>(
+  definition: EventDefinition<F>,
+): EventDefinition<F> {
+  return definition;
+}
+
+function defineEventGroup<G extends SystemEventGroup | CorrelationEventGroup>(group: G): G {
+  return group;
+}
+
+function defineCorrelationGroup<
+  K extends string,
+  E extends Record<string, EventDefinition<any>>,
+  G extends Record<string, SystemEventGroup | CorrelationEventGroup>,
+>(group: {
+  key: K;
+  type: 'correlation';
+  doc: string;
+  timeout: number;
+  events?: E;
+  groups?: G;
+}): {
+  key: K;
+  type: 'correlation';
+  doc: string;
+  timeout: number;
+  events: WithAutoEvents<E>;
+  groups: G;
+} {
+  // At runtime, auto-events are generated by Chronicler during initialization
+  return group as any;
+}
+```
+
+---
+
+## 🏗️ Chronicler Interface
+
+### Configuration
+
+```typescript
+type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+interface LogBackend {
+  // MUST be synchronous - async backends are not supported
+  log(level: LogLevel, message: string, data: Record<string, unknown>): void;
+  supportsLevel(level: LogLevel): boolean;
+}
+
+interface ChroniclerConfig {
+  // Required
+  backend: LogBackend;
+
+  // Global metadata (validated against reserved fields at initialization)
+  metadata: MetadataContext;
+
+  // Optional monitoring
+  monitoring?: {
+    memory?: boolean; // Enables _perf.* fields
+    // Note: cpu monitoring is not currently implemented
+  };
+
+  // Optional correlation ID generation
+  correlationIdGenerator?: () => string;
+  // Default: () => `${hostname}_${Date.now()}`
+}
+```
+
+### Core Interface
+
+```typescript
+interface Chronicler {
+  // Log a standard event
+  event<F extends FieldDefinitions>(event: EventDefinition<F>, fields: InferFields<F>): void;
+
+  // Add runtime context (validated at runtime, never throws)
+  addContext(context: Context): void;
+
+  // Create correlation tracking context
+  startCorrelation<F extends FieldDefinitions>(
+    group: CorrelationEventGroup,
+    fields: InferFields<F>,
+  ): CorrelationChronicle;
+
+  // Create isolated logging context
+  fork(context: Context): ForkChronicle;
+}
+
+interface CorrelationChronicle extends Chronicler {
+  // End correlation successfully (can be called multiple times)
+  complete(): void;
+
+  // Manual timeout trigger (typically not needed - see auto-timeout below)
+  timeout(): void;
+
+  // Note: Calling complete() clears the auto-timeout timer
+  // Note: Multiple complete() calls log a _validation.multipleCompletes warning
+}
+
+interface ForkChronicle extends Omit<Chronicler, 'startCorrelation'> {
+  // Forks can only do system events and create sub-forks
+  // No complete() or timeout() - only parent correlation can complete
+}
+```
+
+### Initialization
+
+```typescript
+function createChronicle(config: ChroniclerConfig): Chronicler;
+
+// Throws during initialization:
+// - UnsupportedLogLevelError: Backend doesn't support required log level
+// - ReservedFieldError: Metadata uses reserved field names
+// - InvalidConfigError: Invalid configuration structure
+```
+
+---
+
+## 🔄 Auto-Timeout Behavior (UPDATED)
+
+**Automatic Activity-Based Timeout:**
+
+When `startCorrelation()` is called:
+
+1. Chronicler logs the auto-generated `.start` event
+2. An activity timer starts with duration from `group.timeout`
+3. **Every log event resets the timer** (indicates activity)
+4. If timer expires without activity:
+   - Logs auto-generated `.timeout` event **once**
+   - Clears the timer
+5. When `complete()` is called:
+   - Logs auto-generated `.complete` event
+   - **Clears the timeout timer**
+   - Calculates `duration` from start to complete
+6. Subsequent `complete()` calls:
+   - Log `.complete` event with `_validation.multipleCompletes: true`
+   - Do NOT calculate duration (timer already cleared)
+
+**Example:**
+
+```typescript
+const correlation = logger.startCorrelation(
+  events.api.dicomQuery,  // timeout: 30000
+  { userId: "123" }
+);
+
+// Logs: api.dicomQuery.start
+
+correlation.event(events.api.dicomQuery.queryExecuted, { ... });
+// Timer resets to 30000ms
+
+// ... 35 seconds of no logging ...
+// Auto-logs: api.dicomQuery.timeout
+
+correlation.complete();  // Logs complete with _validation.multipleCompletes: true
+```
+
+---
+
+## 📝 Event Definition Structure
+
+### Example Event Hierarchy
+
+```typescript
+// src/events/index.ts
+export const events = {
+  system: defineEventGroup({
+    key: 'system',
+    type: 'system',
+    doc: 'System-level events',
+    events: {
+      startup: defineEvent({
+        key: 'system.startup',
+        level: 'info',
+        message: 'Application started',
+        doc: 'Logged when application initializes',
+        fields: {
+          port: { type: 'number', required: true, doc: 'Server port' },
+          mode: { type: 'string', required: false, doc: 'Runtime mode' },
+        },
+      }),
+      shutdown: defineEvent({
+        key: 'system.shutdown',
+        level: 'info',
+        message: 'Application stopped',
+        doc: 'Logged during graceful shutdown',
+      }),
+    },
+  }),
+
+  api: defineEventGroup({
+    key: 'api',
+    type: 'system',
+    doc: 'API-related events',
+    groups: {
+      dicomQuery: defineCorrelationGroup({
+        key: 'api.dicomQuery',
+        type: 'correlation',
+        doc: 'DICOM query operation tracking',
+        timeout: 30000, // 30 second inactivity timeout
+        events: {
+          queryExecuted: defineEvent({
+            key: 'api.dicomQuery.queryExecuted',
+            level: 'info',
+            message: 'DICOM query executed',
+            doc: 'Database query completed',
+            fields: {
+              resultCount: { type: 'number', required: true, doc: 'Results returned' },
+              duration: { type: 'number', required: true, doc: 'Query duration in ms' },
+            },
+          }),
+          queryFailed: defineEvent({
+            key: 'api.dicomQuery.queryFailed',
+            level: 'error',
+            message: 'DICOM query failed',
+            doc: 'Database query error',
+            fields: {
+              error: { type: 'error', required: true, doc: 'Error object' },
+              retryable: { type: 'boolean', required: true, doc: 'Can retry' },
+            },
+          }),
+        },
+      }),
+    },
+  }),
+};
+
+// Type inference works!
+type Events = typeof events;
+// events.system.events.startup: EventDefinition<{ port: ..., mode: ... }>
+// events.api.groups.dicomQuery: CorrelationEventGroup with auto-events
+```
+
+### Event Key Validation
+
+**Event keys MUST match their hierarchical path:**
+
+```typescript
+defineEventGroup({
+  key: 'system',
+  events: {
+    startup: {
+      key: 'system.startup', // ✓ Correct
+      // key: 'api.wrong'    // ✗ Runtime validation error
+    },
+  },
+});
+```
+
+Chronicler validates key paths during initialization and throws `InvalidEventKeyError` if paths don't match.
+
+---
+
+## 📊 Log Output Format
+
+### Standard Event Log
+
+```json
+{
+  "eventKey": "system.startup",
+  "level": "info",
+  "message": "Application started",
+  "timestamp": "2024-11-15T14:30:00.123Z",
+  "hostname": "server1",
+  "environment": "production",
+  "version": "1.2.3",
+  "service": "dicom-api",
+  "fields": {
+    "port": 3000,
+    "mode": "cluster"
+  }
+}
+```
+
+### Correlation Event Log
+
+```json
+{
+  "eventKey": "api.dicomQuery.start",
+  "level": "info",
+  "message": "DICOM query started",
+  "correlationId": "server1_1731668400123",
+  "forkId": "0",
+  "timestamp": "2024-11-15T14:30:00.123Z",
+  "hostname": "server1",
+  "environment": "production",
+  "version": "1.2.3",
+  "service": "dicom-api",
+  "fields": {
+    "userId": "user123",
+    "studyId": "STUDY001"
+  }
+}
+```
+
+### Complete Event with Duration
+
+```json
+{
+  "eventKey": "api.dicomQuery.complete",
+  "level": "info",
+  "message": "DICOM query completed",
+  "correlationId": "server1_1731668400123",
+  "forkId": "0",
+  "timestamp": "2024-11-15T14:30:03.623Z",
+  "duration": 3500,
+  "hostname": "server1",
+  "environment": "production",
+  "fields": {
+    "userId": "user123",
+    "studyId": "STUDY001"
+  }
+}
+```
+
+### Validation Errors (Non-Crashing)
+
+```json
+{
+  "eventKey": "api.dicomQuery.queryExecuted",
+  "level": "info",
+  "message": "DICOM query executed",
+  "correlationId": "server1_1731668400123",
+  "timestamp": "2024-11-15T14:30:02.456Z",
+  "fields": {
+    "resultCount": 42
+  },
+  "_validation": {
+    "missingFields": ["duration"],
+    "typeErrors": []
+  }
+}
+```
+
+### Memory Monitoring
+
+```json
+{
+  "eventKey": "api.dicomQuery.queryExecuted",
+  "level": "info",
+  "message": "DICOM query executed",
+  "timestamp": "2024-11-15T14:30:02.456Z",
+  "fields": { ... },
+  "_perf": {
+    "heapUsed": 45678912,
+    "heapTotal": 67108864,
+    "external": 1234567,
+    "rss": 89012345
+  }
+}
+```
+
+### Timestamp Format
+
+**Format:** ISO 8601 with UTC timezone  
+**Precision:** Milliseconds (3 decimal places)  
+**Exact Format:** `YYYY-MM-DDTHH:mm:ss.sssZ`  
+**Example:** `2024-11-15T14:30:00.123Z`
+
+**Note:** Sub-millisecond precision is not supported. High-performance applications requiring microsecond precision would not typically use JavaScript-based logging.
+
+---
+
+## 🔀 Fork and Context Inheritance
+
+### Fork ID Generation
+
+**Algorithm:**
+
+- Root logger: `forkId = "0"`
+- First fork: `forkId = "1"`
+- Second fork: `forkId = "2"`
+- Fork of fork: `forkId = "2.1"`, `"2.2"`, etc.
+
+**Implementation:**
+
+```typescript
+class Chronicler {
+  private forkCounter = 0;
+  private forkId: string;
+
+  fork(context: Context): ForkChronicle {
+    this.forkCounter++;
+    const childForkId =
+      this.forkId === '0' ? String(this.forkCounter) : `${this.forkId}.${this.forkCounter}`;
+
+    return new ForkChronicle(childForkId, this.inheritedContext + context);
+  }
+}
+```
+
+**Thread Safety:**
+Fork counters are instance-specific. In async scenarios:
+
+- Each Chronicler instance has its own counter
+- Forks created in parallel from the same parent get sequential IDs
+- JavaScript's single-threaded event loop prevents race conditions
+- IDs may not be chronologically ordered but will be unique
+
+**Example:**
+
+```typescript
+const correlation = logger.startCorrelation(...);  // forkId: "0"
+
+const [fork1, fork2] = await Promise.all([
+  correlation.fork({ taskId: "A" }),  // forkId: "1"
+  correlation.fork({ taskId: "B" })   // forkId: "2"
+]);
+
+const fork1_1 = fork1.fork({ subtask: "X" });  // forkId: "1.1"
+```
+
+### Context Inheritance
+
+**Forks inherit ALL parent context:**
+
+```typescript
+logger.addContext({ userId: '123', requestId: 'abc' });
+const correlation = logger.startCorrelation(events.api.dicomQuery, { studyId: 'STUDY001' });
+
+// correlation has: { userId: "123", requestId: "abc", studyId: "STUDY001" }
+
+const fork = correlation.fork({ taskId: 'task1' });
+
+// fork has: { userId: "123", requestId: "abc", studyId: "STUDY001", taskId: "task1" }
+
+fork.addContext({ subtaskId: 'sub1' });
+
+// fork now has all above + { subtaskId: "sub1" }
+// BUT parent correlation is unchanged (no upward propagation)
+```
+
+**Collision Handling:**
+
+```typescript
+logger.addContext({ count: 1 });
+logger.addContext({ count: 2 }); // Logs _validation.contextCollisions
+
+// Later logs will have count: 1 (original value preserved)
+// Collision is logged but subsequent logs show the original value
+```
+
+---
+
+## ❌ Error Handling
+
+### Error Type Handling
+
+**All error fields use `unknown` type:**
+
+```typescript
+fields: {
+  error: { type: 'error', required: true, doc: 'Error object' }
+}
+
+// Usage:
+logger.event(events.api.dicomQuery.queryFailed, {
+  error: e,  // e is unknown from catch block
+  retryable: true
+});
+```
+
+**Error Serialization (stderr-lib):**
+
+Chronicler uses `stderr` library for safe error serialization:
+
+```typescript
+import { stderr } from 'stderr-lib';
+
+// stderr NEVER throws - internally wraps all operations in try/catch
+const errorString = stderr(fields.error, { patchToString: true }).toString();
+```
+
+**stderr guarantees:**
+
+- Never throws exceptions (internal try/catch with safe fallback)
+- Handles circular references
+- Extracts stack traces
+- Normalizes error-like objects
+
+### Validation Philosophy
+
+**Once initialized, Chronicler NEVER throws or crashes:**
+
+```typescript
+// ✓ Missing required field - logs with _validation.missingFields
+logger.event(events.api.dicomQuery.queryExecuted, {
+  // Missing: duration
+  resultCount: 42,
+});
+
+// ✓ Wrong type - logs with _validation.typeErrors
+logger.event(events.api.dicomQuery.queryExecuted, {
+  resultCount: 'not a number', // Should be number
+  duration: 100,
+});
+
+// ✓ Reserved field collision - logs with _validation.contextCollisions
+logger.addContext({ eventKey: 'HACKED' });
+
+// ✓ Nested context (flattened automatically)
+logger.addContext({
+  simple: 'value',
+  nested: { deeply: { bad: 'data' } }, // Flattened to nested.deeply.bad
+});
+```
+
+**Validation errors are logged as metadata, never thrown.**
+
+---
+
+## 🛠️ Build System Integration
+
+### CLI Configuration
+
+```typescript
+// chronicler.config.ts
+import type { ChroniclerCliConfig } from 'chronicler';
+
+export default {
+  // Where to find event definitions
+  eventsFile: './src/events/index.ts',
+
+  // Documentation generation
+  docs: {
+    outputPath: './docs/chronicler-events.md', // Default
+    format: 'markdown', // 'markdown' | 'json'
+  },
+
+  // Validation options
+  validation: {
+    enforceKeyPaths: true, // Event keys must match hierarchy
+    checkReservedFields: true,
+  },
+} satisfies ChroniclerCliConfig;
+```
+
+### CLI Commands
+
+```bash
+# Validate event definitions
+npx chronicler validate
+
+# Generate documentation
+npx chronicler docs
+
+# Generate docs as JSON
+npx chronicler docs --format=json --output=./docs/events.json
+
+# Watch mode
+npx chronicler docs --watch
+```
+
+### Generated Documentation Example
+
+```markdown
+# Chronicler Events
+
+## system
+
+System-level events
+
+### system.startup
+
+**Level:** info  
+**Message:** Application started  
+**Description:** Logged when application initializes
+
+**Fields:**
+
+- `port` (number, required): Server port
+- `mode` (string, optional): Runtime mode
+
+---
+
+## api.dicomQuery [CORRELATION]
+
+**Timeout:** 30000ms (activity-based)  
+**Description:** DICOM query operation tracking
+
+**Auto-Generated Events:**
+
+- `api.dicomQuery.start`
+- `api.dicomQuery.complete` (includes `duration`)
+- `api.dicomQuery.timeout`
+- `api.dicomQuery.metadataWarning`
+
+### api.dicomQuery.queryExecuted
+
+**Level:** info  
+**Message:** DICOM query executed  
+**Description:** Database query completed
+
+**Fields:**
+
+- `resultCount` (number, required): Results returned
+- `duration` (number, required): Query duration in ms
+```
+
+### JSON Output Format
+
+```json
+{
+  "events": [
+    {
+      "key": "system.startup",
+      "level": "info",
+      "message": "Application started",
+      "doc": "Logged when application initializes",
+      "type": "system",
+      "fields": [
+        {
+          "name": "port",
+          "type": "number",
+          "required": true,
+          "doc": "Server port"
+        },
+        {
+          "name": "mode",
+          "type": "string",
+          "required": false,
+          "doc": "Runtime mode"
+        }
+      ]
+    },
+    {
+      "key": "api.dicomQuery",
+      "type": "correlation",
+      "timeout": 30000,
+      "doc": "DICOM query operation tracking",
+      "autoEvents": ["start", "complete", "timeout", "metadataWarning"],
+      "events": [...]
+    }
+  ]
+}
+```
+
+---
+
+## 📊 CloudWatch Insights Queries
+
+### Find All Correlation Timeouts
+
+```
+fields @timestamp, eventKey, correlationId, forkId, fields.userId
+| filter eventKey like /\.timeout$/
+| sort @timestamp desc
+| limit 100
+```
+
+### Calculate Average Operation Duration
+
+```
+fields eventKey, duration
+| filter eventKey = "api.dicomQuery.complete" and duration > 0
+| stats avg(duration) as avgDuration, max(duration) as maxDuration, count() as completedQueries by bin(1h)
+```
+
+### Find Validation Errors
+
+```
+fields @timestamp, eventKey, _validation.missingFields, _validation.typeErrors
+| filter ispresent(_validation)
+| sort @timestamp desc
+```
+
+### Track Memory Usage Over Time
+
+```
+fields @timestamp, _perf.heapUsed, _perf.rss
+| filter ispresent(_perf)
+| stats avg(_perf.heapUsed) as avgHeap, max(_perf.rss) as maxRSS by bin(5m)
+```
+
+### Correlation Flow Analysis
+
+```
+fields @timestamp, eventKey, correlationId, forkId, duration
+| filter correlationId = "server1_1731668400123"
+| sort @timestamp asc
+```
+
+---
+
+## 🚀 Usage Examples
+
+### Basic Setup
+
+```typescript
+import { createChronicle } from 'chronicler';
+import winston from 'winston';
+import { events } from './events';
+
+// Winston backend (must be synchronous)
+const winstonLogger = winston.createLogger({
+  transports: [new winston.transports.Console()],
+});
+
+const logger = createChronicle({
+  backend: {
+    log: (level, message, data) => {
+      winstonLogger.log(level, message, data);
+    },
+    supportsLevel: (level) => ['debug', 'info', 'warn', 'error'].includes(level),
+  },
+  metadata: {
+    hostname: os.hostname(),
+    environment: process.env.NODE_ENV,
+    version: packageJson.version,
+    service: 'dicom-api',
+  },
+  monitoring: {
+    memory: true,
+  },
+});
+
+// Throws if backend doesn't support required levels or metadata uses reserved fields
+```
+
+### System Events
+
+```typescript
+logger.event(events.system.startup, {
+  port: 3000,
+  mode: 'cluster',
+});
+
+logger.addContext({ deploymentId: 'deploy-123' });
+
+logger.event(events.system.shutdown, {});
+```
+
+### Correlation Tracking
+
+```typescript
+async function handleDicomQuery(userId: string, studyId: string) {
+  const correlation = logger.startCorrelation(
+    events.api.dicomQuery,
+    { userId, studyId }
+  );
+  // Logs: api.dicomQuery.start
+  // Starts 30s activity timer
+
+  try {
+    const start = Date.now();
+    const results = await db.query(...);
+
+    correlation.event(events.api.dicomQuery.queryExecuted, {
+      resultCount: results.length,
+      duration: Date.now() - start
+    });
+    // Resets activity timer
+
+    correlation.complete();
+    // Logs: api.dicomQuery.complete with total duration
+    // Clears activity timer
+
+  } catch (e) {
+    correlation.event(events.api.dicomQuery.queryFailed, {
+      error: e,  // unknown type, safely serialized
+      retryable: isRetryable(e)
+    });
+    // Resets activity timer
+
+    correlation.complete();
+    // Still complete the correlation
+  }
+}
+
+// If no logs for 30s, auto-logs: api.dicomQuery.timeout
+```
+
+### Forking for Parallel Tasks
+
+```typescript
+async function processStudy(userId: string, studyId: string) {
+  const correlation = logger.startCorrelation(events.api.dicomQuery, { userId, studyId });
+
+  const series = await fetchSeries(studyId);
+
+  // Process series in parallel with isolated contexts
+  await Promise.all(
+    series.map(async (s, index) => {
+      const fork = correlation.fork({
+        seriesIndex: index,
+        seriesId: s.id,
+      });
+      // forkId: "1", "2", "3", etc.
+
+      await processSeries(fork, s);
+    }),
+  );
+
+  correlation.complete();
+}
+
+function processSeries(fork: ForkChronicle, series: Series) {
+  fork.event(events.api.dicomQuery.seriesProcessed, {
+    instanceCount: series.instances.length,
+  });
+
+  // fork.complete();  // ✗ Not available - only parent can complete
+}
+```
+
+### Metadata Collision Handling
+
+```typescript
+logger.addContext({ userId: '123', sessionId: 'abc' });
+
+logger.addContext({ userId: '456' });
+// Logs _validation.contextCollisions warning
+// userId remains "123" in subsequent logs
+
+logger.addContext({ eventKey: 'HACKED' });
+// Logs _validation.contextCollisions warning
+// Reserved field rejected
+```
+
+### Multiple Complete Calls
+
+```typescript
+const correlation = logger.startCorrelation(events.api.dicomQuery, { userId: '123' });
+
+// ... do work ...
+
+correlation.complete();
+// Logs: api.dicomQuery.complete with duration: 3500
+
+correlation.complete();
+// Logs: api.dicomQuery.complete with _validation.multipleCompletes: true
+// No duration calculated (timer already cleared)
+```
+
+---
+
+## 📋 Implementation Checklist
+
+### Phase 1: Core Types & Validation
+
+- [ ] `InferFields<F>` type with required/optional handling
+- [ ] `InferFieldType<T>` for all field types
+- [ ] Complete `ReservedFields` type checking
+- [ ] `Context` type with reserved field prevention
+- [ ] `MetadataContext` validation
+- [ ] Field nesting prevention/flattening
+
+### Phase 2: Chronicler Class
+
+- [ ] `LogBackend` interface implementation
+- [ ] Synchronous-only backend enforcement
+- [ ] `createChronicle()` factory with validation
+- [ ] Initialization error throwing
+- [ ] `event()` with full type inference
+- [ ] `addContext()` with collision detection
+- [ ] stderr integration for error serialization
+
+### Phase 3: Correlation Tracking
+
+- [ ] `startCorrelation()` implementation
+- [ ] Auto-generated correlation events (start/complete/timeout/metadataWarning)
+- [ ] Activity-based timeout system
+  - [ ] Timer reset on every log
+  - [ ] Auto-timeout after inactivity
+  - [ ] Timer clear on complete()
+- [ ] Duration calculation (start to complete)
+- [ ] Multiple complete() detection
+- [ ] `CorrelationChronicle` interface
+
+### Phase 4: Fork System
+
+- [ ] Fork ID generation algorithm
+- [ ] Counter-based hierarchical IDs ("1", "2.1", "2.1.1")
+- [ ] Context inheritance (full parent context)
+- [ ] `ForkChronicle` interface (no complete/timeout)
+- [ ] Async-safe fork ID assignment
+
+### Phase 5: Validation System
+
+- [ ] Non-throwing validation architecture
+- [ ] `_validation.missingFields` detection
+- [ ] `_validation.typeErrors` detection
+- [ ] `_validation.contextCollisions` detection
+- [ ] `_validation.multipleCompletes` detection
+- [ ] Runtime field validation
+- [ ] Event key path validation
+
+### Phase 6: Performance Monitoring
+
+- [ ] Memory monitoring toggle
+- [ ] `_perf.heapUsed`, `.heapTotal`, `.external`, `.rss`
+- [ ] Performance impact measurement
+
+### Phase 7: Build System
+
+- [ ] CLI configuration (`chronicler.config.ts`)
+- [ ] `npx chronicler validate` command
+- [ ] Event definition AST parsing
+- [ ] Event key path enforcement
+- [ ] `npx chronicler docs` command
+- [ ] Markdown documentation generation
+- [ ] JSON documentation generation
+- [ ] Watch mode
+
+### Phase 8: Testing
+
+- [ ] Type inference tests (tsd)
+- [ ] Runtime validation tests
+- [ ] Correlation lifecycle tests
+- [ ] Auto-timeout tests
+- [ ] Fork context inheritance tests
+- [ ] Reserved field collision tests
+- [ ] Error serialization tests
+- [ ] Build system integration tests
+
+### Phase 9: Documentation
+
+- [ ] API documentation
+- [ ] CloudWatch query examples
+- [ ] Migration guide
+- [ ] Best practices guide
+
+---
+
+## 🎯 Success Criteria
+
+- ✅ **Zero `any` types** - Full type safety with `unknown` for errors
+- ✅ **Never crashes during logging** - Once initialized, all errors are logged not thrown
+- ✅ **Fail fast on init** - Invalid config throws immediately
+- ✅ **No field collisions** - Reserved namespace prevents conflicts
+- ✅ **Automatic timeout** - Activity-based timeout system
+- ✅ **Simple forking** - Forks inherit context, no lifecycle complexity
+- ✅ **Full CloudWatch compatibility** - Optimized JSON structure
+- ✅ **Self-documenting** - CLI generates docs from definitions
+- ✅ **Type inference** - Full IDE autocomplete for events and fields
