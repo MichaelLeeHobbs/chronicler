@@ -1,6 +1,5 @@
+import type { LogLevel } from './errors';
 import type { FieldDefinitions, InferFields } from './fields';
-
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface EventDefinition<F extends FieldDefinitions = FieldDefinitions> {
   key: string;

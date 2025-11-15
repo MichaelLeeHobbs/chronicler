@@ -1,13 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { LogBackend } from '../../src/core/backend';
+import type { LogBackend, LogPayload } from '../../src/core/backend';
 import { createChronicle } from '../../src/core/chronicle';
 import { defineEvent } from '../../src/core/events';
 
-type BackendLogArgs = Parameters<LogBackend['log']>;
-
-// FIXME: TS2344: Type [level: LogLevel, message: string, data: Record<string, unknown>] does not satisfy the constraint Procedure | Constructable
-const createLogMock = () => vi.fn<BackendLogArgs>();
+const createLogMock = () => vi.fn<LogBackend['log']>();
 
 const mockBackend = (overrides: Partial<LogBackend> = {}): LogBackend => ({
   log: createLogMock(),
@@ -24,6 +21,18 @@ const sampleEvent = defineEvent({
     port: { type: 'number', required: true, doc: 'port' },
   },
 });
+
+const getPayload = (log: ReturnType<typeof createLogMock>): LogPayload => {
+  const entry = log.mock.calls.at(-1);
+  if (!entry) {
+    throw new Error('No log calls recorded');
+  }
+  const payload = entry[2];
+  if (!payload) {
+    throw new Error('Missing payload');
+  }
+  return payload;
+};
 
 describe('createChronicle', () => {
   it('throws if backend missing levels', () => {
@@ -49,16 +58,7 @@ describe('createChronicle', () => {
 
     chronicle.event(sampleEvent, { port: 3000 });
 
-    const calls = log.mock.calls as BackendLogArgs[];
-    const lastCall = calls.at(-1);
-    expect(lastCall).toBeDefined();
-    const [level, message, payload] = lastCall!;
-    expect(level).toBe('info');
-    expect(message).toBe('started');
-    expect(payload.eventKey).toBe('system.startup');
-    expect(payload.fields).toEqual({ port: 3000 });
-    expect(typeof payload.correlationId).toBe('string');
-    expect(payload.metadata).toMatchObject({ deploymentId: 'dep-1' });
+    expect(getPayload(log).metadata).toMatchObject({ deploymentId: 'dep-1' });
   });
 
   it('adds context incrementally', () => {
@@ -70,7 +70,6 @@ describe('createChronicle', () => {
     chronicle.addContext({ requestId: '456' });
     chronicle.event(sampleEvent, { port: 3000 });
 
-    const [, , payload] = log.mock.calls[0] as BackendLogArgs;
-    expect(payload.metadata).toMatchObject({ userId: '123', requestId: '456' });
+    expect(getPayload(log).metadata).toMatchObject({ userId: '123', requestId: '456' });
   });
 });

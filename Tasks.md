@@ -15,10 +15,10 @@
 
 | Status | Task                           | Description                                                                                                       | Tests                                                     | Deps    |
 | ------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------- |
-| ☐      | 1.1 Field inference primitives | Implement `FieldType`, `FieldDefinition`, `InferFieldType`, `InferFields` w/ strict TS coverage.                  | `pnpm test`, `pnpm run typecheck`, add `tsd` suite later. | —       |
-| ☐      | 1.2 Reserved field registry    | Encode `ReservedTopLevelFields`, `_validation`, `_perf`, `AllReservedFields`; expose helpers to validate inputs.  | Unit tests for allow/deny matrices.                       | 1.1     |
-| ☐      | 1.3 Context & metadata types   | Enforce flat values, arrays, reserved-name blocking (compile-time + runtime validator skeleton).                  | Tests proving reserved names rejected and arrays allowed. | 1.2     |
-| ☐      | 1.4 Event definition builders  | `defineEvent`, `defineEventGroup`, `defineCorrelationGroup` helpers that preserve inference + auto-events typing. | Type tests + runtime smoke verifying identity.            | 1.1–1.3 |
+| ☑     | 1.1 Field inference primitives | Implement `FieldType`, `FieldDefinition`, `InferFieldType`, `InferFields` w/ strict TS coverage.                  | `pnpm test`, `pnpm run typecheck`, add `tsd` suite later. | —       |
+| ☑     | 1.2 Reserved field registry    | Encode `ReservedTopLevelFields`, `_validation`, `_perf`, `AllReservedFields`; expose helpers to validate inputs.  | Unit tests for allow/deny matrices.                       | 1.1     |
+| ☑     | 1.3 Context & metadata types   | Enforce flat values, arrays, reserved-name blocking (compile-time + runtime validator skeleton).                  | Tests proving reserved names rejected and arrays allowed. | 1.2     |
+| ☑     | 1.4 Event definition builders  | `defineEvent`, `defineEventGroup`, `defineCorrelationGroup` helpers that preserve inference + auto-events typing. | Type tests + runtime smoke verifying identity.            | 1.1–1.3 |
 
 ## 2. Runtime Foundations
 

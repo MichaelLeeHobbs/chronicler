@@ -1,7 +1,12 @@
 import { ensureBackendSupportsLevels, type LogBackend } from './backend';
 import { ContextStore } from './context';
-import { InvalidConfigError, ReservedFieldError, UnsupportedLogLevelError } from './errors';
-import type { EventDefinition } from './events';
+import {
+  DEFAULT_REQUIRED_LEVELS,
+  InvalidConfigError,
+  ReservedFieldError,
+  UnsupportedLogLevelError,
+} from './errors';
+import type { EventDefinition, LogLevel } from './events';
 import type { FieldDefinitions, InferFields } from './fields';
 import { assertNoReservedKeys } from './reserved';
 
@@ -11,10 +16,11 @@ export interface ChroniclerConfig {
   correlationIdGenerator?: () => string;
 }
 
-const REQUIRED_LEVELS: EventDefinition['level'][] = ['debug', 'info', 'warn', 'error'];
+const REQUIRED_LEVELS = DEFAULT_REQUIRED_LEVELS as readonly LogLevel[];
 
 export interface Chronicler {
   event<F extends FieldDefinitions>(event: EventDefinition<F>, fields: InferFields<F>): void;
+
   addContext(context: Record<string, unknown>): void;
 }
 
