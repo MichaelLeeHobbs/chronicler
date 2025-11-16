@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { LogBackend, LogPayload } from '../../src/core/backend';
+import type { Chronicler } from '../../src/core/chronicle';
 import { createChronicle } from '../../src/core/chronicle';
 import { defineEvent } from '../../src/core/events';
 
@@ -145,5 +146,22 @@ describe('createChronicle', () => {
     expect(typeof perf.heapTotal).toBe('number');
     expect(typeof perf.external).toBe('number');
     expect(typeof perf.rss).toBe('number');
+  });
+});
+
+const createChronicleInstance = (
+  configOverrides: Partial<Parameters<typeof createChronicle>[0]> = {},
+): Chronicler => {
+  return createChronicle({ backend: mockBackend(), metadata: {}, ...configOverrides });
+};
+
+describe('createChronicleExtended', () => {
+  it('verifies startCorrelation availability', () => {
+    const logSpy = createLogMock();
+    const backend = mockBackend({ log: logSpy });
+    const chronicle = createChronicleInstance({ backend, metadata: {} });
+
+    expect(logSpy).toBeDefined();
+    expect(typeof chronicle.startCorrelation).toBe('function');
   });
 });

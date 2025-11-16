@@ -65,8 +65,9 @@ export const validateFields = <F extends FieldDefinitions>(
 export const buildValidationMetadata = (
   fieldValidation: FieldValidationResult,
   contextCollisions: string[],
+  overrides?: Partial<ValidationMetadata>,
 ): ValidationMetadata | undefined => {
-  const metadata: ValidationMetadata = {};
+  const metadata: ValidationMetadata = { ...(overrides ?? {}) };
 
   if (fieldValidation.missingFields.length > 0) {
     metadata.missingFields = [...fieldValidation.missingFields];

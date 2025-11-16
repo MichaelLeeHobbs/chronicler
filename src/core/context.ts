@@ -13,9 +13,16 @@ export type Context = Partial<Record<ContextKey, ContextValue>>;
 type MetadataValue = SimpleValue;
 export type MetadataContext = Partial<Record<ContextKey, MetadataValue>>;
 
+export interface ContextCollisionDetail {
+  key: string;
+  existingValue: ContextValue | undefined;
+  attemptedValue: ContextValue;
+}
+
 export interface ContextValidationResult {
   collisions: string[];
   reserved: string[];
+  collisionDetails: ContextCollisionDetail[];
 }
 
 const flatten = (value: unknown): ContextValue | undefined => {
@@ -75,6 +82,7 @@ export const sanitizeContextInput = (
   const sanitized: ContextRecord = {};
   const collisions: string[] = [];
   const reserved: string[] = [];
+  const collisionDetails: ContextCollisionDetail[] = [];
 
   for (const [key, rawValue] of Object.entries(context)) {
     if (isReservedTopLevelField(key)) {
@@ -90,19 +98,24 @@ export const sanitizeContextInput = (
 
     if (key in existingContext || key in sanitized) {
       collisions.push(key);
+      const existingValue = (key in sanitized ? sanitized[key] : existingContext[key]) as
+        | ContextValue
+        | undefined;
+      collisionDetails.push({ key, existingValue, attemptedValue: flattened });
       continue;
     }
 
     sanitized[key] = flattened;
   }
 
-  return { context: sanitized, validation: { collisions, reserved } };
+  return { context: sanitized, validation: { collisions, reserved, collisionDetails } };
 };
 
 export class ContextStore {
   private context: ContextRecord = {};
   private history: ContextValidationResult[] = [];
   private pendingCollisions = new Set<string>();
+  private pendingCollisionDetails: ContextCollisionDetail[] = [];
 
   constructor(initial: Record<string, unknown> = {}) {
     const { context, validation } = sanitizeContextInput(initial);
@@ -133,7 +146,14 @@ export class ContextStore {
     return collisions;
   }
 
+  consumeCollisionDetails(): ContextCollisionDetail[] {
+    const details = [...this.pendingCollisionDetails];
+    this.pendingCollisionDetails = [];
+    return details;
+  }
+
   private track(validation: ContextValidationResult): void {
     validation.collisions.forEach((key) => this.pendingCollisions.add(key));
+    this.pendingCollisionDetails.push(...validation.collisionDetails);
   }
 }

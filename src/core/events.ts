@@ -34,7 +34,13 @@ type AutoEventFields = Record<string, FieldDefinitions>;
 
 const correlationAutoFields: AutoEventFields = {
   start: {},
-  complete: {},
+  complete: {
+    duration: {
+      type: 'number',
+      required: false,
+      doc: 'Duration of the correlation in milliseconds',
+    },
+  },
   timeout: {},
   metadataWarning: {
     attemptedKey: { type: 'string', required: true, doc: 'Key attempted to override' },
@@ -74,6 +80,7 @@ const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
     level: 'info',
     message: `${groupKey} completed`,
     doc: 'Auto-generated correlation completion event',
+    fields: correlationAutoFields.complete,
   },
   timeout: {
     key: `${groupKey}.timeout`,
