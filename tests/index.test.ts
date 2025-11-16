@@ -1,16 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createChronicle, defineEvent } from '../src';
-import type { LogBackend, LogPayload } from '../src/core/backend';
+import { MockLoggerBackend } from './helpers/mock-logger';
 
 describe('chronicler public API', () => {
   it('creates a chronicle and logs events', () => {
-    const log = vi.fn<LogBackend['log']>();
+    const mock = new MockLoggerBackend();
     const chronicle = createChronicle({
-      backend: {
-        log,
-        supportsLevel: () => true,
-      },
+      backend: mock.backend,
       metadata: { deploymentId: 'dep-1' },
     });
 
@@ -26,9 +23,9 @@ describe('chronicler public API', () => {
 
     chronicle.event(event, { port: 3000 });
 
-    const [, , payload] = log.mock.calls[0] as [string, string, LogPayload];
-    expect(payload.eventKey).toBe('system.startup');
-    expect(payload.fields).toEqual({ port: 3000 });
-    expect(payload.timestamp).toEqual(expect.any(String));
+    const payload = mock.getLastPayload();
+    expect(payload?.eventKey).toBe('system.startup');
+    expect(payload?.fields).toEqual({ port: 3000 });
+    expect(payload?.timestamp).toEqual(expect.any(String));
   });
 });

@@ -5,44 +5,9 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import type { LogBackend, LogPayload } from '../../src/core/backend';
 import { createChronicle } from '../../src/core/chronicle';
 import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../src/core/events';
-
-/**
- * Mock backend that captures all logs for assertion
- */
-class MockBackend implements LogBackend {
-  public logs: {
-    level: string;
-    message: string;
-    payload: LogPayload;
-  }[] = [];
-
-  log(level: string, message: string, payload: LogPayload): void {
-    this.logs.push({ level, message, payload });
-  }
-
-  supportsLevel(): boolean {
-    return true;
-  }
-
-  getPayloads(): LogPayload[] {
-    return this.logs.map((log) => log.payload);
-  }
-
-  findByKey(key: string): LogPayload | undefined {
-    return this.getPayloads().find((p) => p.eventKey === key);
-  }
-
-  findAllByKey(key: string): LogPayload[] {
-    return this.getPayloads().filter((p) => p.eventKey === key);
-  }
-
-  clear(): void {
-    this.logs = [];
-  }
-}
+import { MockLoggerBackend } from '../helpers/mock-logger';
 
 describe('Integration Tests', () => {
   const systemEvents = defineEventGroup({
@@ -100,9 +65,9 @@ describe('Integration Tests', () => {
 
   describe('End-to-End Application Flow', () => {
     it('complete application lifecycle with correlation and forks', () => {
-      const backend = new MockBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {
           application: 'test-api',
           env: 'test',
@@ -152,12 +117,12 @@ describe('Integration Tests', () => {
       chronicle.event(systemEvents.events.shutdown, {});
 
       // Assertions
-      const payloads = backend.getPayloads();
+      const payloads = mock.getPayloads();
 
       expect(payloads.length).toBeGreaterThan(6); // At least: startup, start, validated, 2 forks, processed, complete, shutdown
 
       // Check startup event
-      const startup = backend.findByKey('system.startup');
+      const startup = mock.findByKey('system.startup');
       expect(startup).toBeDefined();
       expect(startup?.fields.port).toBe(3000);
       expect(startup?.metadata.application).toBe('test-api');
@@ -167,13 +132,13 @@ describe('Integration Tests', () => {
       expect(startup?._perf?.cpuUser).toBeGreaterThanOrEqual(0);
 
       // Check correlation start
-      const start = backend.findByKey('api.request.start');
+      const start = mock.findByKey('api.request.start');
       expect(start).toBeDefined();
       expect(start?.metadata.requestId).toBe('req-456');
       expect(start?.correlationId).toBeDefined();
 
       // Check validated event
-      const validated = backend.findByKey('api.request.validated');
+      const validated = mock.findByKey('api.request.validated');
       expect(validated).toBeDefined();
       expect(validated?.fields.method).toBe('POST');
       expect(validated?.fields.path).toBe('/api/users');
@@ -192,13 +157,13 @@ describe('Integration Tests', () => {
       expect(fork1Log?.metadata.deploymentId).toBe('deploy-123'); // Inherited
 
       // Check correlation complete
-      const complete = backend.findByKey('api.request.complete');
+      const complete = mock.findByKey('api.request.complete');
       expect(complete).toBeDefined();
       expect(complete?.fields.duration).toBeGreaterThan(0);
       expect(complete?.correlationId).toBe(start?.correlationId);
 
       // Check shutdown
-      const shutdown = backend.findByKey('system.shutdown');
+      const shutdown = mock.findByKey('system.shutdown');
       expect(shutdown).toBeDefined();
     });
   });
@@ -206,15 +171,15 @@ describe('Integration Tests', () => {
   describe('Correlation Timeout Handling', () => {
     it('emits timeout event when no activity occurs', () => {
       vi.useFakeTimers();
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: {} });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       chronicle.startCorrelation(requestCorrelation);
 
       // Advance time beyond timeout
       vi.advanceTimersByTime(6000);
 
-      const timeout = backend.findByKey('api.request.timeout');
+      const timeout = mock.findByKey('api.request.timeout');
       expect(timeout).toBeDefined();
       expect(timeout?.correlationId).toBeDefined();
 
@@ -223,8 +188,8 @@ describe('Integration Tests', () => {
 
     it('resets timer on activity including fork activity', () => {
       vi.useFakeTimers();
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: {} });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       const correlation = chronicle.startCorrelation(requestCorrelation);
 
@@ -244,14 +209,14 @@ describe('Integration Tests', () => {
       vi.advanceTimersByTime(4000);
 
       // Should NOT have timed out yet
-      let timeout = backend.findByKey('api.request.timeout');
+      let timeout = mock.findByKey('api.request.timeout');
       expect(timeout).toBeUndefined();
 
       // Advance beyond timeout from last activity
       vi.advanceTimersByTime(2000);
 
       // NOW should have timed out
-      timeout = backend.findByKey('api.request.timeout');
+      timeout = mock.findByKey('api.request.timeout');
       expect(timeout).toBeDefined();
 
       vi.useRealTimers();
@@ -260,22 +225,22 @@ describe('Integration Tests', () => {
 
   describe('Context Collision Detection', () => {
     it('detects and warns about metadata collisions', () => {
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: { userId: '123' } });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: { userId: '123' } });
 
       chronicle.addContext({ sessionId: 'abc' });
       chronicle.addContext({ userId: '456' }); // Collision!
 
       chronicle.event(systemEvents.events.startup, { port: 3000 });
 
-      const payload = backend.getPayloads()[0];
+      const payload = mock.getPayloads()[0];
       expect(payload._validation?.contextCollisions).toContain('userId');
       expect(payload.metadata.userId).toBe('123'); // Original preserved
     });
 
     it('emits metadata warning in correlations', () => {
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: {} });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       const correlation = chronicle.startCorrelation(requestCorrelation, {
         userId: 'original',
@@ -283,7 +248,7 @@ describe('Integration Tests', () => {
 
       correlation.addContext({ userId: 'attempted' }); // Collision
 
-      const warning = backend.findByKey('api.request.metadataWarning');
+      const warning = mock.findByKey('api.request.metadataWarning');
       expect(warning).toBeDefined();
       expect(warning?.fields.attemptedKey).toBe('userId');
     });
@@ -291,32 +256,32 @@ describe('Integration Tests', () => {
 
   describe('Validation Errors', () => {
     it('tracks missing required fields', () => {
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: {} });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       // @ts-expect-error - intentionally missing required field for testing
       chronicle.event(systemEvents.events.startup, {});
 
-      const payload = backend.getPayloads()[0];
+      const payload = mock.getPayloads()[0];
       expect(payload._validation?.missingFields).toContain('port');
     });
 
     it('tracks type errors', () => {
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: {} });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       // @ts-expect-error - intentionally wrong type for testing
       chronicle.event(systemEvents.events.startup, { port: 'not-a-number' });
 
-      const payload = backend.getPayloads()[0];
+      const payload = mock.getPayloads()[0];
       expect(payload._validation?.typeErrors).toContain('port');
     });
   });
 
   describe('Fork Hierarchy', () => {
     it('maintains correct fork IDs through deep nesting', () => {
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: {} });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       const fork1 = chronicle.fork({ level: '1' });
       const fork1_1 = fork1.fork({ level: '1.1' });
@@ -327,7 +292,7 @@ describe('Integration Tests', () => {
       fork1_1.event(systemEvents.events.startup, { port: 2 });
       fork1_1_1.event(systemEvents.events.startup, { port: 3 });
 
-      const payloads = backend.getPayloads();
+      const payloads = mock.getPayloads();
       expect(payloads[0].forkId).toBe('0');
       expect(payloads[1].forkId).toBe('1');
       expect(payloads[2].forkId).toBe('1.1');
@@ -335,8 +300,8 @@ describe('Integration Tests', () => {
     });
 
     it('isolates context between fork branches', () => {
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: { shared: 'value' } });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: { shared: 'value' } });
 
       const branch1 = chronicle.fork({ branch: '1', data: 'branch1-data' });
       const branch2 = chronicle.fork({ branch: '2', data: 'branch2-data' });
@@ -347,7 +312,7 @@ describe('Integration Tests', () => {
       branch1.event(systemEvents.events.startup, { port: 1 });
       branch2.event(systemEvents.events.startup, { port: 2 });
 
-      const payloads = backend.getPayloads();
+      const payloads = mock.getPayloads();
       const b1 = payloads.find((p) => p.fields.port === 1);
       const b2 = payloads.find((p) => p.fields.port === 2);
 
@@ -370,9 +335,9 @@ describe('Integration Tests', () => {
 
   describe('Performance Monitoring Integration', () => {
     it('includes performance metrics across all log types', () => {
-      const backend = new MockBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         monitoring: { memory: true, cpu: true },
       });
@@ -393,7 +358,7 @@ describe('Integration Tests', () => {
       fork.event(systemEvents.events.startup, { port: 4000 });
 
       // All should have perf metrics
-      const payloads = backend.getPayloads();
+      const payloads = mock.getPayloads();
       payloads.forEach((payload) => {
         expect(payload._perf).toBeDefined();
         expect(payload._perf?.heapUsed).toBeGreaterThan(0);
@@ -405,14 +370,14 @@ describe('Integration Tests', () => {
 
   describe('Multiple Correlation Completes', () => {
     it('allows multiple complete() calls with validation warning', () => {
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: {} });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       const correlation = chronicle.startCorrelation(requestCorrelation);
       correlation.complete();
       correlation.complete(); // Second complete
 
-      const completes = backend.findAllByKey('api.request.complete');
+      const completes = mock.findAllByKey('api.request.complete');
       expect(completes.length).toBe(2);
 
       // First complete should have duration
@@ -437,8 +402,8 @@ describe('Integration Tests', () => {
         },
       });
 
-      const backend = new MockBackend();
-      const chronicle = createChronicle({ backend, metadata: {} });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       const error = new Error('Test error');
       error.stack = 'Stack trace here';
@@ -448,7 +413,7 @@ describe('Integration Tests', () => {
         code: 'ERR_TEST',
       });
 
-      const payload = backend.getPayloads()[0];
+      const payload = mock.getPayloads()[0];
       expect(payload.fields.error).toBeDefined();
       // Error should be serialized as string by stderr-lib
       expect(typeof payload.fields.error).toBe('string');

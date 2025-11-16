@@ -1,17 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import type { LogBackend, LogPayload } from '../../src/core/backend';
 import { createChronicle } from '../../src/core/chronicle';
 import { defineEvent } from '../../src/core/events';
-
-const createBackend = () => {
-  const log = vi.fn<LogBackend['log']>();
-  const backend: LogBackend = {
-    log,
-    supportsLevel: () => true,
-  };
-  return { backend, log };
-};
+import { MockLoggerBackend } from '../helpers/mock-logger';
 
 const sampleEvent = defineEvent({
   key: 'perf.test',
@@ -23,36 +14,28 @@ const sampleEvent = defineEvent({
   },
 });
 
-const lastPayload = (log: ReturnType<typeof vi.fn>): LogPayload => {
-  const call = log.mock.calls.at(-1);
-  if (!call) {
-    throw new Error('no log');
-  }
-  return call[2] as LogPayload;
-};
-
 describe('Performance Monitoring', () => {
   describe('6.1 Memory Monitoring', () => {
     it('does not include _perf when monitoring disabled', () => {
-      const { backend, log } = createBackend();
-      const chronicle = createChronicle({ backend, metadata: {} });
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       chronicle.event(sampleEvent, { action: 'test' });
 
-      expect(lastPayload(log)._perf).toBeUndefined();
+      expect(mock.getLastPayload()?._perf).toBeUndefined();
     });
 
     it('includes memory metrics when memory monitoring enabled', () => {
-      const { backend, log } = createBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         monitoring: { memory: true },
       });
 
       chronicle.event(sampleEvent, { action: 'test' });
 
-      const perf = lastPayload(log)._perf;
+      const perf = mock.getLastPayload()?._perf;
       expect(perf).toBeDefined();
       expect(typeof perf!.heapUsed).toBe('number');
       expect(typeof perf!.heapTotal).toBe('number');
@@ -64,16 +47,16 @@ describe('Performance Monitoring', () => {
 
   describe('6.2 CPU Monitoring', () => {
     it('includes CPU metrics when cpu monitoring enabled', () => {
-      const { backend, log } = createBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         monitoring: { cpu: true },
       });
 
       chronicle.event(sampleEvent, { action: 'test' });
 
-      const perf = lastPayload(log)._perf;
+      const perf = mock.getLastPayload()?._perf;
       expect(perf).toBeDefined();
       expect(typeof perf!.cpuUser).toBe('number');
       expect(typeof perf!.cpuSystem).toBe('number');
@@ -82,9 +65,9 @@ describe('Performance Monitoring', () => {
     });
 
     it('tracks CPU delta between events', () => {
-      const { backend, log } = createBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         monitoring: { cpu: true },
       });
@@ -99,27 +82,27 @@ describe('Performance Monitoring', () => {
 
       // Second event should show CPU usage delta
       chronicle.event(sampleEvent, { action: 'second' });
-      const secondPayload = lastPayload(log);
+      const secondPayload = mock.getLastPayload();
 
-      expect(secondPayload._perf?.cpuUser).toBeDefined();
-      expect(secondPayload._perf?.cpuSystem).toBeDefined();
+      expect(secondPayload?._perf?.cpuUser).toBeDefined();
+      expect(secondPayload?._perf?.cpuSystem).toBeDefined();
 
       // CPU usage should be measurable (though exact values vary)
-      expect(typeof secondPayload._perf!.cpuUser).toBe('number');
-      expect(typeof secondPayload._perf!.cpuSystem).toBe('number');
+      expect(typeof secondPayload?._perf!.cpuUser).toBe('number');
+      expect(typeof secondPayload?._perf!.cpuSystem).toBe('number');
     });
 
     it('does not include CPU metrics when cpu monitoring disabled', () => {
-      const { backend, log } = createBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         monitoring: { memory: true }, // Only memory, not CPU
       });
 
       chronicle.event(sampleEvent, { action: 'test' });
 
-      const perf = lastPayload(log)._perf;
+      const perf = mock.getLastPayload()?._perf;
       expect(perf).toBeDefined();
       expect(perf!.cpuUser).toBeUndefined();
       expect(perf!.cpuSystem).toBeUndefined();
@@ -128,16 +111,16 @@ describe('Performance Monitoring', () => {
 
   describe('6.3 Combined Monitoring', () => {
     it('includes both memory and CPU when both enabled', () => {
-      const { backend, log } = createBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         monitoring: { memory: true, cpu: true },
       });
 
       chronicle.event(sampleEvent, { action: 'test' });
 
-      const perf = lastPayload(log)._perf;
+      const perf = mock.getLastPayload()?._perf;
       expect(perf).toBeDefined();
 
       // Memory metrics
@@ -152,9 +135,9 @@ describe('Performance Monitoring', () => {
     });
 
     it('propagates monitoring config through forks', () => {
-      const { backend, log } = createBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         monitoring: { memory: true, cpu: true },
       });
@@ -162,16 +145,16 @@ describe('Performance Monitoring', () => {
       const fork = chronicle.fork({ task: 'child' });
       fork.event(sampleEvent, { action: 'fork-event' });
 
-      const perf = lastPayload(log)._perf;
+      const perf = mock.getLastPayload()?._perf;
       expect(perf).toBeDefined();
       expect(perf!.heapUsed).toBeGreaterThan(0);
       expect(typeof perf!.cpuUser).toBe('number');
     });
 
     it('propagates monitoring config through correlations', () => {
-      const { backend, log } = createBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         monitoring: { memory: true, cpu: true },
       });
@@ -188,7 +171,7 @@ describe('Performance Monitoring', () => {
 
       correlation.event(sampleEvent, { action: 'corr-event' });
 
-      const payloads = log.mock.calls.map((call) => call[2]);
+      const payloads = mock.getPayloads();
 
       // Start event should have perf
       expect(payloads[0]._perf).toBeDefined();
@@ -202,9 +185,9 @@ describe('Performance Monitoring', () => {
 
   describe('6.4 Performance Overhead', () => {
     it('has minimal overhead when monitoring disabled', () => {
-      const { backend, log } = createBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         // No monitoring
       });
@@ -217,13 +200,13 @@ describe('Performance Monitoring', () => {
 
       // Should complete quickly (< 100ms for 1000 events)
       expect(elapsed).toBeLessThan(100);
-      expect(log.mock.calls.length).toBe(1000);
+      expect(mock.getPayloads().length).toBe(1000);
     });
 
     it('sampling overhead is acceptable', () => {
-      const { backend, log } = createBackend();
+      const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
-        backend,
+        backend: mock.backend,
         metadata: {},
         monitoring: { memory: true, cpu: true },
       });
@@ -238,7 +221,7 @@ describe('Performance Monitoring', () => {
       expect(elapsed).toBeLessThan(50);
 
       // Verify all have perf data
-      const payloads = log.mock.calls.map((call) => call[2]);
+      const payloads = mock.getPayloads();
       payloads.forEach((payload) => {
         expect(payload._perf).toBeDefined();
       });

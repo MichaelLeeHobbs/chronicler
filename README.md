@@ -145,39 +145,36 @@ Top-level in payload: `eventKey, level, message, correlationId, forkId, timestam
 
 - Fields declared as `error` are serialized via `stderr-lib` (string). Safe to ship to log sinks.
 
-## Using with Winston (full example app in Task 10)
+## Using with Winston
 
-To integrate with Winston, implement the `LogBackend` interface and map Chronicler levels to Winston:
+To integrate with Winston, create a simple backend object that maps Chronicler levels to Winston:
 
 ```ts
 import winston from 'winston';
-import type { LogBackend, LogPayload } from 'chronicler';
-
-const levelMap: Record<string, string> = {
-  fatal: 'error',
-  critical: 'error',
-  alert: 'error',
-  error: 'error',
-  warn: 'warn',
-  audit: 'info',
-  info: 'info',
-  debug: 'debug',
-  trace: 'silly',
-};
-
-class WinstonBackend implements LogBackend {
-  constructor(private logger: winston.Logger) {}
-  supportsLevel(): boolean {
-    return true;
-  }
-  log(level: string, message: string, payload: LogPayload) {
-    this.logger.log({ level: levelMap[level] ?? 'info', message, payload });
-  }
-}
+import { createChronicle } from 'chronicler';
 
 const logger = winston.createLogger({
   level: 'info',
-  transports: [new winston.transports.Console({ format: winston.format.json() })],
+  format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
+  transports: [new winston.transports.Console()],
+});
+
+// Create backend adapter - just an object with level methods
+const winstonBackend = {
+  fatal: (msg: string, data: unknown) => logger.error(msg, data),
+  critical: (msg: string, data: unknown) => logger.error(msg, data),
+  alert: (msg: string, data: unknown) => logger.error(msg, data),
+  error: (msg: string, data: unknown) => logger.error(msg, data),
+  warn: (msg: string, data: unknown) => logger.warn(msg, data),
+  audit: (msg: string, data: unknown) => logger.info(msg, data),
+  info: (msg: string, data: unknown) => logger.info(msg, data),
+  debug: (msg: string, data: unknown) => logger.debug(msg, data),
+  trace: (msg: string, data: unknown) => logger.silly(msg, data),
+};
+
+const chronicle = createChronicle({
+  backend: winstonBackend,
+  metadata: { service: 'my-app', env: 'production' },
 });
 ```
 

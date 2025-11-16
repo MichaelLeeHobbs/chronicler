@@ -1,7 +1,8 @@
 import {
-  ensureBackendSupportsLevels,
+  callBackendMethod,
   type LogBackend,
   type LogPayload,
+  validateBackendMethods,
   type ValidationMetadata,
 } from './backend';
 import { type ContextCollisionDetail, ContextStore, type ContextValidationResult } from './context';
@@ -119,7 +120,7 @@ const createChronicleInstance = (
         correlationIdProvider,
         forkId,
       );
-      config.backend.log(eventDef.level, eventDef.message, payload);
+      callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
       hooks.onActivity?.();
     },
     addContext(context) {
@@ -264,7 +265,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.forkId,
       overrides,
     );
-    this.config.backend.log(eventDef.level, eventDef.message, payload);
+    callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
     if (touchTimer) {
       this.timer.touch();
     }
@@ -322,9 +323,9 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
     throw new InvalidConfigError('A backend must be provided');
   }
 
-  const unsupported = ensureBackendSupportsLevels(config.backend, REQUIRED_LEVELS);
-  if (unsupported.length > 0) {
-    throw new UnsupportedLogLevelError(unsupported.join(', '));
+  const missing = validateBackendMethods(config.backend, REQUIRED_LEVELS);
+  if (missing.length > 0) {
+    throw new UnsupportedLogLevelError(missing.join(', '));
   }
 
   const reservedMetadata = assertNoReservedKeys(config.metadata);

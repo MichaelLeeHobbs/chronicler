@@ -1,4 +1,4 @@
-import type { LogLevel } from './events';
+// import type { LogLevel } from './events';
 
 export interface ValidationMetadata {
   missingFields?: string[];
@@ -28,15 +28,41 @@ export interface LogPayload {
   [key: string]: unknown;
 }
 
-export interface LogBackend {
-  log(level: LogLevel, message: string, data: LogPayload): void;
+export type LogBackend = Record<string, (message: string, payload: LogPayload) => void>;
 
-  supportsLevel(level: LogLevel): boolean;
-}
+/**
+ * Validate that backend has all required log level methods
+ * @param backend - Logger object to validate
+ * @param levels - Required log levels
+ * @returns Array of missing log levels
+ */
+export const validateBackendMethods = (backend: LogBackend, levels: string[]): string[] => {
+  const missing: string[] = [];
+  for (const level of levels) {
+    if (typeof backend[level] !== 'function') {
+      missing.push(level);
+    }
+  }
+  return missing;
+};
 
-export const ensureBackendSupportsLevels = (
+/**
+ * Call a backend logger method
+ * @param backend - Logger object
+ * @param level - Log level
+ * @param message - Log message
+ * @param payload - Log payload
+ * @throws Error if the backend does not support the log level
+ */
+export const callBackendMethod = (
   backend: LogBackend,
-  levels: LogLevel[],
-): LogLevel[] => {
-  return levels.filter((level) => !backend.supportsLevel(level));
+  level: string,
+  message: string,
+  payload: LogPayload,
+): void => {
+  if (typeof backend[level] === 'function') {
+    backend[level](message, payload);
+  } else {
+    throw new Error(`Backend does not support log level: ${level}`);
+  }
 };

@@ -511,8 +511,8 @@ const sourceFile = program.getSourceFile(filePath);
   "generated": "2025-11-16T...",
   "eventCount": 23,
   "groupCount": 3,
-  "groups": [...],
-  "standaloneEvents": [...]
+  "groups": ["..."],
+  "standaloneEvents": ["..."]
 }
 ```
 
@@ -633,26 +633,6 @@ $ chronicler validate --config ./config/chronicler.config.ts
    - Total: 101 tests across 14 test files
 
 **Implementation Details:**
-
-**Mock Backend Pattern:**
-
-```typescript
-class MockBackend implements LogBackend {
-  public logs: Array<{
-    level: string;
-    message: string;
-    payload: LogPayload;
-  }> = [];
-
-  log(level: string, message: string, payload: LogPayload): void {
-    this.logs.push({ level, message, payload });
-  }
-
-  findByKey(key: string): LogPayload | undefined {
-    return this.getPayloads().find((p) => p.eventKey === key);
-  }
-}
-```
 
 **Type Tests Pattern:**
 

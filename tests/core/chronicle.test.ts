@@ -1,17 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import type { LogBackend, LogPayload } from '../../src/core/backend';
 import type { Chronicler } from '../../src/core/chronicle';
 import { createChronicle } from '../../src/core/chronicle';
 import { defineEvent } from '../../src/core/events';
-
-const createLogMock = () => vi.fn<LogBackend['log']>();
-
-const mockBackend = (overrides: Partial<LogBackend> = {}): LogBackend => ({
-  log: createLogMock(),
-  supportsLevel: () => true,
-  ...overrides,
-});
+import { MockLoggerBackend } from '../helpers/mock-logger';
 
 const sampleEvent = defineEvent({
   key: 'system.startup',
@@ -33,111 +25,100 @@ const errorEvent = defineEvent({
   },
 });
 
-const getPayload = (log: ReturnType<typeof createLogMock>): LogPayload => {
-  const entry = log.mock.calls.at(-1);
-  if (!entry) {
-    throw new Error('No log calls recorded');
-  }
-  const payload = entry[2];
-  if (!payload) {
-    throw new Error('Missing payload');
-  }
-  return payload;
-};
-
 describe('createChronicle', () => {
   it('throws if backend missing levels', () => {
-    const backend = mockBackend({ supportsLevel: (level) => level !== 'error' });
+    const mock = new MockLoggerBackend();
 
-    expect(() => createChronicle({ backend, metadata: {} })).toThrow(
+    // delete (mock.backend as any).error; // Remove error method
+    delete mock.backend.error; // Remove error method
+
+    expect(() => createChronicle({ backend: mock.backend, metadata: {} })).toThrow(
       'Log backend does not support level: error',
     );
   });
 
   it('throws when metadata uses reserved keys', () => {
-    const backend = mockBackend();
+    const mock = new MockLoggerBackend();
 
-    expect(() => createChronicle({ backend, metadata: { eventKey: 'bad' } })).toThrow(
+    expect(() => createChronicle({ backend: mock.backend, metadata: { eventKey: 'bad' } })).toThrow(
       'Reserved fields cannot be used in metadata: eventKey',
     );
   });
 
   it('logs events with metadata', () => {
-    const log = createLogMock();
-    const backend = mockBackend({ log });
-    const chronicle = createChronicle({ backend, metadata: { deploymentId: 'dep-1' } });
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: { deploymentId: 'dep-1' },
+    });
 
     chronicle.event(sampleEvent, { port: 3000 });
 
-    const payload = getPayload(log);
-    expect(payload.metadata).toMatchObject({ deploymentId: 'dep-1' });
-    expect(payload.fields).toEqual({ port: 3000 });
-    expect(payload.timestamp).toEqual(expect.any(String));
+    const payload = mock.getLastPayload();
+    expect(payload?.metadata).toMatchObject({ deploymentId: 'dep-1' });
+    expect(payload?.fields).toEqual({ port: 3000 });
+    expect(payload?.timestamp).toEqual(expect.any(String));
   });
 
   it('adds context incrementally', () => {
-    const log = createLogMock();
-    const backend = mockBackend({ log });
-    const chronicle = createChronicle({ backend, metadata: {} });
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
     chronicle.addContext({ userId: '123' });
     chronicle.addContext({ requestId: '456' });
     chronicle.event(sampleEvent, { port: 3000 });
 
-    expect(getPayload(log).metadata).toMatchObject({ userId: '123', requestId: '456' });
+    const payload = mock.getLastPayload();
+    expect(payload?.metadata).toMatchObject({ userId: '123', requestId: '456' });
   });
 
   it('captures validation errors without throwing', () => {
-    const log = createLogMock();
-    const backend = mockBackend({ log });
-    const chronicle = createChronicle({ backend, metadata: {} });
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
     chronicle.event(sampleEvent, { port: undefined as never } as unknown as { port: number });
 
-    const payload = getPayload(log);
-    expect(payload._validation?.missingFields).toEqual(['port']);
-    expect(payload.fields).toEqual({});
+    const payload = mock.getLastPayload();
+    expect(payload?._validation?.missingFields).toEqual(['port']);
+    expect(payload?.fields).toEqual({});
   });
 
   it('serializes error fields using stderr', () => {
-    const log = createLogMock();
-    const backend = mockBackend({ log });
-    const chronicle = createChronicle({ backend, metadata: {} });
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
     const err = new Error('failure');
     chronicle.event(errorEvent, { error: err });
 
-    const payload = getPayload(log);
-    expect(typeof payload.fields.error).toBe('string');
-    expect(payload.fields.error as string).toContain('failure');
+    const payload = mock.findByLevel('error');
+    expect(typeof payload?.fields.error).toBe('string');
+    expect(payload?.fields.error as string).toContain('failure');
   });
 
   it('records context collision warnings in validation metadata', () => {
-    const log = createLogMock();
-    const backend = mockBackend({ log });
-    const chronicle = createChronicle({ backend, metadata: {} });
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
     chronicle.addContext({ userId: '123' });
     chronicle.addContext({ userId: '456' });
     chronicle.event(sampleEvent, { port: 3000 });
 
-    const payload = getPayload(log);
-    expect(payload._validation?.contextCollisions).toEqual(['userId']);
+    const payload = mock.getLastPayload();
+    expect(payload?._validation?.contextCollisions).toEqual(['userId']);
   });
 
   it('attaches perf metrics when monitoring enabled', () => {
-    const log = createLogMock();
-    const backend = mockBackend({ log });
+    const mock = new MockLoggerBackend();
     const chronicle = createChronicle({
-      backend,
+      backend: mock.backend,
       metadata: {},
       monitoring: { memory: true },
     });
 
     chronicle.event(sampleEvent, { port: 3000 });
 
-    const payload = getPayload(log);
-    const perf = payload._perf;
+    const payload = mock.getLastPayload();
+    const perf = payload?._perf;
     expect(perf).toBeDefined();
     if (!perf) {
       throw new Error('Expected perf sample when monitoring enabled');
@@ -152,16 +133,19 @@ describe('createChronicle', () => {
 const createChronicleInstance = (
   configOverrides: Partial<Parameters<typeof createChronicle>[0]> = {},
 ): Chronicler => {
-  return createChronicle({ backend: mockBackend(), metadata: {}, ...configOverrides });
+  return createChronicle({
+    backend: new MockLoggerBackend().backend,
+    metadata: {},
+    ...configOverrides,
+  });
 };
 
 describe('createChronicleExtended', () => {
   it('verifies startCorrelation availability', () => {
-    const logSpy = createLogMock();
-    const backend = mockBackend({ log: logSpy });
-    const chronicle = createChronicleInstance({ backend, metadata: {} });
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicleInstance({ backend: mock.backend, metadata: {} });
 
-    expect(logSpy).toBeDefined();
+    expect(mock.backend.info).toBeDefined();
     expect(typeof chronicle.startCorrelation).toBe('function');
   });
 });

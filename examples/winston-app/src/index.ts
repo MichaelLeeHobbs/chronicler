@@ -2,29 +2,6 @@ import * as winston from 'winston';
 import { createChronicle } from 'chronicler';
 import { request, system } from './events';
 
-// Map Chronicler levels to Winston levels
-const levelMap: Record<string, string> = {
-  fatal: 'error',
-  critical: 'error',
-  alert: 'error',
-  error: 'error',
-  warn: 'warn',
-  audit: 'info',
-  info: 'info',
-  debug: 'debug',
-  trace: 'silly',
-};
-
-class WinstonBackend {
-  constructor(private logger: winston.Logger) {}
-  supportsLevel(): boolean {
-    return true;
-  }
-  log(level: string, message: string, payload: any): void {
-    this.logger.log({ level: levelMap[level] ?? 'info', message, payload });
-  }
-}
-
 // Configure Winston
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -32,9 +9,22 @@ const logger = winston.createLogger({
   transports: [new winston.transports.Console()],
 });
 
+// Create backend adapter that maps Chronicler levels to Winston methods
+const winstonBackend = {
+  fatal: (msg: string, data: unknown) => logger.error(msg, data),
+  critical: (msg: string, data: unknown) => logger.error(msg, data),
+  alert: (msg: string, data: unknown) => logger.error(msg, data),
+  error: (msg: string, data: unknown) => logger.error(msg, data),
+  warn: (msg: string, data: unknown) => logger.warn(msg, data),
+  audit: (msg: string, data: unknown) => logger.info(msg, data),
+  info: (msg: string, data: unknown) => logger.info(msg, data),
+  debug: (msg: string, data: unknown) => logger.debug(msg, data),
+  trace: (msg: string, data: unknown) => logger.silly(msg, data),
+};
+
 // Create chronicle
 const chronicle = createChronicle({
-  backend: new WinstonBackend(logger) as any,
+  backend: winstonBackend,
   metadata: { service: 'winston-app', env: process.env.NODE_ENV ?? 'dev' },
   monitoring: { memory: true },
 });
