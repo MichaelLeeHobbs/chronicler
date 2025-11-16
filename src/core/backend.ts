@@ -63,7 +63,7 @@ export type LogBackend = Record<LogLevel, (message: string, payload: LogPayload)
  * @returns Array of missing log levels
  */
 export const validateBackendMethods = (backend: LogBackend, levels: LogLevel[]): string[] => {
-  const missing: string[] = [];
+  const missing: LogLevel[] = [];
   for (const level of levels) {
     if (typeof backend[level] !== 'function') {
       missing.push(level);

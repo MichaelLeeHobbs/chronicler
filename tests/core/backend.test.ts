@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   callBackendMethod,
   type LogBackend,
+  LogLevel,
   type LogPayload,
   validateBackendMethods,
 } from '../../src/core/backend';
@@ -11,6 +12,7 @@ import { MockLoggerBackend } from '../helpers/mock-logger';
 describe('Backend Validation', () => {
   describe('validateBackendMethods', () => {
     it('returns empty array when all required methods exist', () => {
+      // @ts-expect-error Testing partial backend
       const backend: LogBackend = {
         info: () => void 0,
         error: () => void 0,
@@ -22,6 +24,7 @@ describe('Backend Validation', () => {
     });
 
     it('returns missing levels when methods do not exist', () => {
+      // @ts-expect-error Testing partial backend
       const backend: LogBackend = {
         info: () => void 0,
       };
@@ -42,6 +45,7 @@ describe('Backend Validation', () => {
     });
 
     it('handles empty backend object', () => {
+      // @ts-expect-error Testing partial backend
       const backend: LogBackend = {};
 
       const missing = validateBackendMethods(backend, ['info', 'error', 'warn']);
@@ -61,7 +65,7 @@ describe('Backend Validation', () => {
         trace: () => void 0,
       };
 
-      const allLevels = [
+      const allLevels: LogLevel[] = [
         'fatal',
         'critical',
         'alert',
@@ -102,6 +106,7 @@ describe('Backend Validation', () => {
     });
 
     it('throws error when method does not exist', () => {
+      // @ts-expect-error Testing partial backend
       const backend: LogBackend = {};
       const payload: LogPayload = {
         eventKey: 'test',

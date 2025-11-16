@@ -29,7 +29,7 @@ describe('createChronicle', () => {
   it('throws if backend missing levels', () => {
     const mock = new MockLoggerBackend();
 
-    // delete (mock.backend as any).error; // Remove error method
+    // @ts-expect-error -- deleting method for test
     delete mock.backend.error; // Remove error method
 
     expect(() => createChronicle({ backend: mock.backend, metadata: {} })).toThrow(
