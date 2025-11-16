@@ -8,7 +8,12 @@ import {
   validateBackendMethods,
   type ValidationMetadata,
 } from './backend';
-import { type ContextCollisionDetail, ContextStore, type ContextValidationResult } from './context';
+import {
+  type ContextCollisionDetail,
+  type ContextRecord,
+  ContextStore,
+  type ContextValidationResult,
+} from './context';
 import { InvalidConfigError, ReservedFieldError, UnsupportedLogLevelError } from './errors';
 import {
   type CorrelationAutoEvents,
@@ -19,7 +24,7 @@ import {
   type LogLevel,
 } from './events';
 import type { FieldDefinitions, InferFields } from './fields';
-import { type PerfOptions, samplePerformance } from './perf';
+import { type PerfContext, type PerfOptions, samplePerformance } from './perf';
 import { assertNoReservedKeys } from './reserved';
 import { buildValidationMetadata, validateFields } from './validation';
 
@@ -36,18 +41,15 @@ const DEFAULT_HOSTNAME = process.env.HOSTNAME ?? os.hostname();
 export interface Chronicler {
   event<F extends FieldDefinitions>(event: EventDefinition<F>, fields: InferFields<F>): void;
 
-  addContext(context: Record<string, unknown>): void;
+  addContext(context: ContextRecord): void;
 
-  startCorrelation(
-    group: CorrelationEventGroup,
-    metadata?: Record<string, unknown>,
-  ): CorrelationChronicle;
+  startCorrelation(group: CorrelationEventGroup, metadata?: ContextRecord): CorrelationChronicle;
 
-  fork(context?: Record<string, unknown>): Chronicler;
+  fork(context?: ContextRecord): Chronicler;
 }
 
 export interface CorrelationChronicle extends Chronicler {
-  complete(fields?: Record<string, unknown>): void;
+  complete(fields?: ContextRecord): void;
 
   timeout(): void;
 }
@@ -57,8 +59,9 @@ const buildPayload = (
   contextStore: ContextStore,
   eventDef: EventDefinition,
   fields: InferFields<FieldDefinitions>,
-  correlationIdProvider: () => string,
+  currentCorrelationId: () => string,
   forkId: string,
+  perfContext?: PerfContext,
   validationOverrides?: Partial<ValidationMetadata>,
 ): LogPayload => {
   const fieldValidation = validateFields(eventDef, fields);
@@ -67,11 +70,11 @@ const buildPayload = (
     contextStore.consumeCollisions(),
     validationOverrides,
   );
-  const perfSample = samplePerformance(config.monitoring ?? {});
+  const perfSample = samplePerformance(config.monitoring ?? {}, perfContext);
   const payload: LogPayload = {
     eventKey: eventDef.key,
     fields: fieldValidation.normalizedFields,
-    correlationId: correlationIdProvider(),
+    correlationId: currentCorrelationId(),
     forkId,
     metadata: contextStore.snapshot(),
     timestamp: new Date().toISOString(),
@@ -98,15 +101,25 @@ type NormalizedCorrelationGroup = Omit<CorrelationEventGroup, 'events' | 'timeou
   events: EventRecord & CorrelationAutoEvents;
 };
 
+/**
+ * Create a Chronicle instance
+ *
+ * @param currentCorrelationId - Function that returns the current correlation ID for this chronicle.
+ *   For root chronicles: generates a NEW ID each time (no correlation, events are independent).
+ *   For correlation chronicles: returns the SAME ID (all events share the correlation ID).
+ * @param correlationIdGenerator - Function that creates NEW correlation IDs.
+ *   Passed through to enable child correlations to generate their own IDs.
+ */
 const createChronicleInstance = (
   config: ChroniclerConfig,
   contextStore: ContextStore,
-  correlationIdProvider: () => string,
+  currentCorrelationId: () => string,
   correlationIdGenerator: () => string,
   forkId: string,
   hooks: ChronicleHooks = {},
 ): Chronicler => {
   let forkCounter = 0;
+  const perfContext: PerfContext = {}; // Instance-specific performance context
 
   return {
     event(eventDef, fields) {
@@ -115,8 +128,9 @@ const createChronicleInstance = (
         contextStore,
         eventDef,
         fields,
-        correlationIdProvider,
+        currentCorrelationId,
         forkId,
+        perfContext, // Pass instance-specific context
       );
       callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
       hooks.onActivity?.();
@@ -132,7 +146,7 @@ const createChronicleInstance = (
       const forkChronicle = createChronicleInstance(
         config,
         forkStore,
-        correlationIdProvider,
+        currentCorrelationId,
         correlationIdGenerator,
         childForkId,
         hooks,
@@ -165,12 +179,13 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   private completionCount = 0;
   private readonly startedAt = Date.now();
   private readonly autoEvents: CorrelationAutoEvents;
+  private readonly perfContext: PerfContext = {}; // Instance-specific performance context
 
   constructor(
     private readonly config: ChroniclerConfig,
     private readonly group: NormalizedCorrelationGroup,
     private readonly contextStore: ContextStore,
-    private readonly correlationIdProvider: () => string,
+    private readonly currentCorrelationId: () => string,
     private readonly correlationIdGenerator: () => string,
     private readonly forkId: string,
   ) {
@@ -178,7 +193,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     this.delegate = createChronicleInstance(
       config,
       contextStore,
-      correlationIdProvider,
+      currentCorrelationId,
       correlationIdGenerator,
       forkId,
       {
@@ -196,18 +211,15 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     this.delegate.event(eventDef, fields);
   }
 
-  addContext(context: Record<string, unknown>): void {
+  addContext(context: ContextRecord): void {
     this.delegate.addContext(context);
   }
 
-  fork(context?: Record<string, unknown>): Chronicler {
+  fork(context?: ContextRecord): Chronicler {
     return this.delegate.fork(context);
   }
 
-  startCorrelation(
-    group: CorrelationEventGroup,
-    metadata?: Record<string, unknown>,
-  ): CorrelationChronicle {
+  startCorrelation(group: CorrelationEventGroup, metadata?: ContextRecord): CorrelationChronicle {
     return this.delegate.startCorrelation(group, metadata);
   }
 
@@ -259,8 +271,9 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.contextStore,
       eventDef,
       fields as InferFields<FieldDefinitions>,
-      this.correlationIdProvider,
+      this.currentCorrelationId,
       this.forkId,
+      this.perfContext, // Pass instance-specific context
       overrides,
     );
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);

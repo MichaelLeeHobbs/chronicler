@@ -8,13 +8,6 @@ export type ContextRecord = Record<string, ContextValue>;
 
 export type ContextKey = Exclude<string, ReservedTopLevelField>;
 
-// FIXME: This is not used anywhere. Consider removing.
-export type Context = Partial<Record<ContextKey, ContextValue>>;
-
-type MetadataValue = SimpleValue;
-// FIXME: This is not used anywhere. Consider removing.
-export type MetadataContext = Partial<Record<ContextKey, MetadataValue>>;
-
 export interface ContextCollisionDetail {
   key: string;
   existingValue: ContextValue | undefined;
@@ -27,58 +20,52 @@ export interface ContextValidationResult {
   collisionDetails: ContextCollisionDetail[];
 }
 
-const flatten = (value: unknown): ContextValue | undefined => {
+/**
+ * Defensive normalization of context values.
+ *
+ * TypeScript types enforce ContextValue at compile time via the ContextRecord type,
+ * but this provides runtime safety against:
+ * - Type bypassing (e.g., via `as any`)
+ * - Mixed-type arrays that slip through
+ * - Invalid values from external sources
+ *
+ * Accepts primitives (string, number, boolean, null) and arrays of primitives.
+ * Returns undefined for invalid types (objects, functions, etc.)
+ */
+const normalizeValue = (value: unknown): ContextValue | undefined => {
+  // Handle null explicitly
   if (value === null) {
     return null;
   }
 
+  // Handle primitives
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return value;
   }
 
+  // Handle arrays of primitives
   if (Array.isArray(value)) {
-    const flattened: SimpleValue[] = [];
-
+    const normalized: SimpleValue[] = [];
     for (const item of value) {
-      const result = flatten(item);
-      if (result === undefined) {
-        continue;
+      if (
+        item === null ||
+        typeof item === 'string' ||
+        typeof item === 'number' ||
+        typeof item === 'boolean'
+      ) {
+        normalized.push(item as SimpleValue);
       }
-
-      if (Array.isArray(result)) {
-        flattened.push(...result);
-      } else {
-        flattened.push(result);
-      }
+      // Skip invalid items (objects, nested arrays, undefined, etc.)
     }
-
-    return flattened;
+    return normalized;
   }
 
-  if (typeof value === 'object') {
-    const entries: SimpleValue[] = [];
-
-    for (const item of Object.values(value)) {
-      const result = flatten(item);
-      if (result === undefined) {
-        continue;
-      }
-
-      if (Array.isArray(result)) {
-        entries.push(...result);
-      } else {
-        entries.push(result);
-      }
-    }
-
-    return entries;
-  }
-
+  // Invalid type - return undefined to skip
   return undefined;
 };
 
 export const sanitizeContextInput = (
-  context: Record<string, unknown>,
+  context: ContextRecord,
   existingContext: ContextRecord = {},
 ): { context: ContextRecord; validation: ContextValidationResult } => {
   const sanitized: ContextRecord = {};
@@ -92,11 +79,11 @@ export const sanitizeContextInput = (
       continue;
     }
 
-    // FIXME: Is this needed? The caller should not be able to pass in Array or Object values.
-    //  Is this from something we are doing? We are allowed to use arrays or objects for validation purposes i.e. _perf and _validation
-    const flattened = flatten(rawValue);
+    // Normalize value to allowed ContextValue types
+    const normalized = normalizeValue(rawValue);
 
-    if (flattened === undefined) {
+    if (normalized === undefined) {
+      // Invalid type - skip this key
       continue;
     }
 
@@ -105,11 +92,11 @@ export const sanitizeContextInput = (
       const existingValue = (key in sanitized ? sanitized[key] : existingContext[key]) as
         | ContextValue
         | undefined;
-      collisionDetails.push({ key, existingValue, attemptedValue: flattened });
+      collisionDetails.push({ key, existingValue, attemptedValue: normalized });
       continue;
     }
 
-    sanitized[key] = flattened;
+    sanitized[key] = normalized;
   }
 
   return { context: sanitized, validation: { collisions, reserved, collisionDetails } };
@@ -117,21 +104,17 @@ export const sanitizeContextInput = (
 
 export class ContextStore {
   private readonly context: ContextRecord = {};
-  private history: ContextValidationResult[] = [];
   private pendingCollisions = new Set<string>();
-  private pendingCollisionDetails: ContextCollisionDetail[] = [];
 
-  constructor(initial: Record<string, unknown> = {}) {
+  constructor(initial: ContextRecord = {}) {
     const { context, validation } = sanitizeContextInput(initial);
     this.context = { ...context };
-    this.history.push(validation);
     this.track(validation);
   }
 
-  add(raw: Record<string, unknown>): ContextValidationResult {
+  add(raw: ContextRecord): ContextValidationResult {
     const { context, validation } = sanitizeContextInput(raw, this.context);
     Object.assign(this.context, context);
-    this.history.push(validation);
     this.track(validation);
     return validation;
   }
@@ -140,26 +123,13 @@ export class ContextStore {
     return { ...this.context };
   }
 
-  // FIXME: This is not used anywhere. Consider removing.
-  getValidationHistory(): ContextValidationResult[] {
-    return [...this.history];
-  }
-
   consumeCollisions(): string[] {
     const collisions = Array.from(this.pendingCollisions);
     this.pendingCollisions.clear();
     return collisions;
   }
 
-  // FIXME: This is not used anywhere. Consider removing.
-  consumeCollisionDetails(): ContextCollisionDetail[] {
-    const details = [...this.pendingCollisionDetails];
-    this.pendingCollisionDetails = [];
-    return details;
-  }
-
   private track(validation: ContextValidationResult): void {
     validation.collisions.forEach((key) => this.pendingCollisions.add(key));
-    this.pendingCollisionDetails.push(...validation.collisionDetails);
   }
 }

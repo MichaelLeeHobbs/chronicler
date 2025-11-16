@@ -19,12 +19,12 @@
 
 ### Critical Fixes
 
-| #   | Issue                                                                    | Impact | Status |
-| --- | ------------------------------------------------------------------------ | ------ | ------ |
-| C-1 | Backend type safety (`\| unknown` defeats TypeScript)                    | Medium | ☐      |
-| C-2 | CPU monitoring uses module-level state (breaks with multiple chronicles) | High   | ☐      |
-| C-3 | Memory leak in CorrelationTimer (doesn't clear before re-setting)        | High   | ☐      |
-| C-4 | Circular reference handling in Winston example                           | Low    | ☐      |
+| #   | Issue                                                                    | Impact | Status             |
+| --- | ------------------------------------------------------------------------ | ------ | ------------------ |
+| C-1 | Backend type safety (`\| unknown` defeats TypeScript)                    | Medium | ☐                  |
+| C-2 | CPU monitoring uses module-level state (breaks with multiple chronicles) | High   | ☑ **FIXED**       |
+| C-3 | Memory leak in CorrelationTimer (doesn't clear before re-setting)        | High   | ☑ **VERIFIED OK** |
+| C-4 | Circular reference handling in Winston example                           | Low    | ☐                  |
 
 ### Code Quality Improvements
 

@@ -5,10 +5,7 @@ const RESERVED_TOP_LEVEL_FIELDS = [
   'correlationId', // Used in Payload
   'forkId', // Used in Payload
   'timestamp', // Used in Payload
-  'hostname', // TODO: Why was this reserved? It's not used anywhere.
-  // 'environment', // TODO: Why was this reserved? It's not used anywhere.
-  // 'version', // TODO: Why was this reserved? It's not used anywhere.
-  // 'service', // TODO: Why was this reserved? It's not used anywhere.
+  'hostname', // Used in correlationId generation
   'fields', // Used in Payload
   '_perf', // Used in Payload
   '_validation', // Used in Payload

@@ -5,14 +5,28 @@ export interface PerfOptions {
   cpu?: boolean;
 }
 
+/**
+ * Performance sampling context for a Chronicle instance
+ * Tracks CPU usage baseline for delta calculations
+ */
+export interface PerfContext {
+  lastCpuUsage?: NodeJS.CpuUsage;
+}
+
 const canSampleMemory = typeof process !== 'undefined' && typeof process.memoryUsage === 'function';
 const canSampleCpu = typeof process !== 'undefined' && typeof process.cpuUsage === 'function';
 
-// Track previous CPU usage for delta calculation
-let previousCpuUsage: NodeJS.CpuUsage | undefined;
-
-// TODO: We want to support Delta Memory usage over intervals, so we need to cache previous values
-export const samplePerformance = (options: PerfOptions): PerformanceSample | undefined => {
+/**
+ * Sample performance metrics (memory and/or CPU)
+ *
+ * @param options - What to sample (memory, cpu)
+ * @param context - Performance context for this chronicle instance (required for CPU tracking)
+ * @returns Performance sample or undefined if nothing to sample
+ */
+export const samplePerformance = (
+  options: PerfOptions,
+  context?: PerfContext,
+): PerformanceSample | undefined => {
   const shouldSampleMemory = options.memory && canSampleMemory;
   const shouldSampleCpu = options.cpu && canSampleCpu;
 
@@ -35,9 +49,12 @@ export const samplePerformance = (options: PerfOptions): PerformanceSample | und
     sample.rss = usage.rss;
   }
 
-  if (shouldSampleCpu) {
-    const currentCpuUsage = process.cpuUsage(previousCpuUsage);
-    previousCpuUsage = process.cpuUsage(); // Update for next measurement
+  if (shouldSampleCpu && context) {
+    // Calculate CPU delta from last measurement
+    const currentCpuUsage = process.cpuUsage(context.lastCpuUsage);
+
+    // Update context for next measurement
+    context.lastCpuUsage = process.cpuUsage();
 
     // Convert from microseconds to milliseconds
     sample.cpuUser = currentCpuUsage.user / 1000;
