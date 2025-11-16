@@ -63,6 +63,9 @@
     "tests/**/*.{ts,tsx,js,jsx,cjs,mjs}": [
       "pnpm exec eslint --fix --max-warnings=0"
     ],
+    "./*.{ts,tsx,js,cjs,mjs}": [
+      "pnpm exec eslint --fix --max-warnings=0"
+    ],
     "*.{json,md,yml,yaml,ts,tsx,js,jsx,cjs,mjs}": [
       "pnpm exec prettier --write"
     ]
