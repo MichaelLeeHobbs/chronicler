@@ -24,15 +24,15 @@
 
 | Status | Task                          | Description                                                                                                                                                        | Tests                                                                  | Deps     |
 | ------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | -------- |
-| ☐      | 2.1 Log backend contract      | Implement `LogBackend`, synchronous-only enforcement, error messages.                                                                                              | Unit tests mocking backend behaviors.                                  | 1.x      |
-| ☐      | 2.2 Chronicle state container | Skeleton `createChronicle` returning object with `event`, `addContext`, `startCorrelation`, `fork`. Include metadata validation + default correlationId generator. | Unit tests for initialization success/failure.                         | 2.1      |
-| ☐      | 2.3 Context manager           | Runtime layer that stores immutable base metadata + additive contexts per Chronicle instance, tracks collisions & flattening.                                      | Unit tests verifying collisions, nested flattening, reserved handling. | 1.3, 2.2 |
+| ☑     | 2.1 Log backend contract      | Implement `LogBackend`, synchronous-only enforcement, error messages.                                                                                              | Unit tests mocking backend behaviors.                                  | 1.x      |
+| ☑     | 2.2 Chronicle state container | Skeleton `createChronicle` returning object with `event`, `addContext`, `startCorrelation`, `fork`. Include metadata validation + default correlationId generator. | Unit tests for initialization success/failure.                         | 2.1      |
+| ☑     | 2.3 Context manager           | Runtime layer that stores immutable base metadata + additive contexts per Chronicle instance, tracks collisions & flattening.                                      | Unit tests verifying collisions, nested flattening, reserved handling. | 1.3, 2.2 |
 
 ## 3. Event Emission & Validation
 
 | Status | Task                        | Description                                                                                                                             | Tests                                                       | Deps |
 | ------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---- |
-| ☐      | 3.1 Field validation engine | Validate required/optional fields, type coercion rejection, produce `_validation.missingFields` / `typeErrors`. Never throw after init. | Extensive unit tests covering each field type & error path. | 2.2  |
+| ☐▶    | 3.1 Field validation engine | Validate required/optional fields, type coercion rejection, produce `_validation.missingFields` / `typeErrors`. Never throw after init. | Extensive unit tests covering each field type & error path. | 2.2  |
 | ☐      | 3.2 Log envelope builder    | Compose final log object (timestamp, metadata, context, `_perf`, `_validation`). Hook memory metrics toggle.                            | Unit tests verifying shape + perf fields.                   | 3.1  |
 | ☐      | 3.3 Error serialization     | Integrate `stderr-lib` to serialize `error` fields safely.                                                                              | Tests with real Error, circular refs, custom objects.       | 3.1  |
 

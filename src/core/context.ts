@@ -102,17 +102,20 @@ export const sanitizeContextInput = (
 export class ContextStore {
   private context: ContextRecord = {};
   private history: ContextValidationResult[] = [];
+  private pendingCollisions = new Set<string>();
 
   constructor(initial: Record<string, unknown> = {}) {
     const { context, validation } = sanitizeContextInput(initial);
     this.context = { ...context };
     this.history.push(validation);
+    this.track(validation);
   }
 
   add(raw: Record<string, unknown>): ContextValidationResult {
     const { context, validation } = sanitizeContextInput(raw, this.context);
     Object.assign(this.context, context);
     this.history.push(validation);
+    this.track(validation);
     return validation;
   }
 
@@ -122,5 +125,15 @@ export class ContextStore {
 
   getValidationHistory(): ContextValidationResult[] {
     return [...this.history];
+  }
+
+  consumeCollisions(): string[] {
+    const collisions = Array.from(this.pendingCollisions);
+    this.pendingCollisions.clear();
+    return collisions;
+  }
+
+  private track(validation: ContextValidationResult): void {
+    validation.collisions.forEach((key) => this.pendingCollisions.add(key));
   }
 }

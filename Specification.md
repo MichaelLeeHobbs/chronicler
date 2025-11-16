@@ -483,6 +483,17 @@ Chronicler validates key paths during initialization and throws `InvalidEventKey
 }
 ```
 
+Error fields are normalized using `stderr-lib`, ensuring safe serialization even for exotic inputs:
+
+```ts
+try {
+  await risky();
+} catch (error) {
+  chronicle.event(events.api.queryFailed, { error });
+  // `error` becomes a string produced by stderr(...).toString(), never throws.
+}
+```
+
 ### Memory Monitoring
 
 ```json
