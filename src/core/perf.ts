@@ -11,6 +11,7 @@ const canSampleCpu = typeof process !== 'undefined' && typeof process.cpuUsage =
 // Track previous CPU usage for delta calculation
 let previousCpuUsage: NodeJS.CpuUsage | undefined;
 
+// TODO: We want to support Delta Memory usage over intervals, so we need to cache previous values
 export const samplePerformance = (options: PerfOptions): PerformanceSample | undefined => {
   const shouldSampleMemory = options.memory && canSampleMemory;
   const shouldSampleCpu = options.cpu && canSampleCpu;

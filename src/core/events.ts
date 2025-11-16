@@ -3,12 +3,12 @@ import type { FieldDefinitions, InferFields } from './fields';
 
 export type { LogLevel };
 
-export interface EventDefinition<F extends FieldDefinitions = FieldDefinitions> {
+export interface EventDefinition<Fields extends FieldDefinitions = FieldDefinitions> {
   key: string;
   level: LogLevel;
   message: string;
   doc: string;
-  fields?: F;
+  fields?: Fields;
 }
 
 export type EventRecord = Record<string, EventDefinition>;
@@ -50,21 +50,22 @@ const correlationAutoFields: AutoEventFields = {
 };
 
 export type CorrelationAutoEvents = {
-  [K in keyof typeof correlationAutoFields]: EventDefinition<(typeof correlationAutoFields)[K]>;
+  [Key in keyof typeof correlationAutoFields]: EventDefinition<(typeof correlationAutoFields)[Key]>;
 };
 
 type EmptyEventRecord = Record<never, EventDefinition>;
-type WithAutoEvents<E extends EventRecord | undefined> = (E extends EventRecord
-  ? E
+type WithAutoEvents<Event extends EventRecord | undefined> = (Event extends EventRecord
+  ? Event
   : EmptyEventRecord) &
   CorrelationAutoEvents;
 
-export const defineEvent = <F extends FieldDefinitions>(
-  event: EventDefinition<F>,
-): EventDefinition<F> => event;
+export const defineEvent = <Field extends FieldDefinitions>(
+  event: EventDefinition<Field>,
+): EventDefinition<Field> => event;
 
-export const defineEventGroup = <G extends SystemEventGroup | CorrelationEventGroup>(group: G): G =>
-  group;
+export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEventGroup>(
+  group: Group,
+): Group => group;
 
 const DEFAULT_CORRELATION_TIMEOUT = 300_000;
 
@@ -97,9 +98,12 @@ const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
   },
 });
 
-export const defineCorrelationGroup = <G extends CorrelationEventGroup>(
-  group: G,
-): Omit<G, 'events' | 'timeout'> & { events: WithAutoEvents<G['events']>; timeout: number } => {
+export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
+  group: Group,
+): Omit<Group, 'events' | 'timeout'> & {
+  events: WithAutoEvents<Group['events']>;
+  timeout: number;
+} => {
   const autoEvents = buildAutoEvents(group.key);
 
   return {
@@ -108,13 +112,13 @@ export const defineCorrelationGroup = <G extends CorrelationEventGroup>(
     events: {
       ...(group.events ?? {}),
       ...autoEvents,
-    } as WithAutoEvents<G['events']>,
+    } as WithAutoEvents<Group['events']>,
   };
 };
 
-export type EventFields<T extends EventDefinition> =
-  T extends EventDefinition<infer F>
-    ? F extends FieldDefinitions
-      ? InferFields<F>
+export type EventFields<Event extends EventDefinition> =
+  Event extends EventDefinition<infer Field>
+    ? Field extends FieldDefinitions
+      ? InferFields<Field>
       : Record<string, never>
     : never;

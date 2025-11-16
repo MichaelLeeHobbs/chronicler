@@ -1,47 +1,45 @@
 export type FieldType = 'string' | 'number' | 'boolean' | 'error';
 
-export interface FieldDefinition<TType extends FieldType = FieldType> {
-  type: TType;
+export interface FieldDefinition<FType extends FieldType = FieldType> {
+  type: FType;
   required: boolean;
   doc: string;
 }
 
 export type FieldDefinitions = Record<string, FieldDefinition>;
 
-type RequiredKeys<F extends FieldDefinitions> = {
-  [K in keyof F]-?: F[K]['required'] extends true ? K : never;
-}[keyof F];
+type RequiredKeys<Field extends FieldDefinitions> = {
+  [Key in keyof Field]-?: Field[Key]['required'] extends true ? Key : never;
+}[keyof Field];
 
-type OptionalKeys<F extends FieldDefinitions> = {
-  [K in keyof F]-?: F[K]['required'] extends true ? never : K;
-}[keyof F];
+type OptionalKeys<Field extends FieldDefinitions> = {
+  [Key in keyof Field]-?: Field[Key]['required'] extends true ? never : Key;
+}[keyof Field];
 
-export type InferFieldType<T extends FieldDefinition> = T['type'] extends 'string'
+export type InferFieldType<Field extends FieldDefinition> = Field['type'] extends 'string'
   ? string
-  : T['type'] extends 'number'
+  : Field['type'] extends 'number'
     ? number
-    : T['type'] extends 'boolean'
+    : Field['type'] extends 'boolean'
       ? boolean
-      : T['type'] extends 'error'
+      : Field['type'] extends 'error'
         ? unknown
         : never;
 
-type Simplify<T> = { [K in keyof T]: T[K] } extends infer O ? { [K in keyof O]: O[K] } : never;
+type Simplify<T> = { [Key in keyof T]: T[Key] } extends infer O
+  ? { [Key in keyof O]: O[Key] }
+  : never;
 
 type EmptyRecord = Record<never, never>;
 
-type BuildRequired<F extends FieldDefinitions> =
-  RequiredKeys<F> extends never
+type BuildRequired<Fields extends FieldDefinitions> =
+  RequiredKeys<Fields> extends never
     ? EmptyRecord
-    : {
-        [K in RequiredKeys<F>]: InferFieldType<F[K]>;
-      };
+    : { [Key in RequiredKeys<Fields>]: InferFieldType<Fields[Key]> };
 
-type BuildOptional<F extends FieldDefinitions> =
-  OptionalKeys<F> extends never
+type BuildOptional<Fields extends FieldDefinitions> =
+  OptionalKeys<Fields> extends never
     ? EmptyRecord
-    : {
-        [K in OptionalKeys<F>]?: InferFieldType<F[K]>;
-      };
+    : { [Key in OptionalKeys<Fields>]?: InferFieldType<Fields[Key]> };
 
 export type InferFields<F extends FieldDefinitions> = Simplify<BuildRequired<F> & BuildOptional<F>>;

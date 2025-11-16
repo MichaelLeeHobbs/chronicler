@@ -8,9 +8,11 @@ export type ContextRecord = Record<string, ContextValue>;
 
 export type ContextKey = Exclude<string, ReservedTopLevelField>;
 
+// FIXME: This is not used anywhere. Consider removing.
 export type Context = Partial<Record<ContextKey, ContextValue>>;
 
 type MetadataValue = SimpleValue;
+// FIXME: This is not used anywhere. Consider removing.
 export type MetadataContext = Partial<Record<ContextKey, MetadataValue>>;
 
 export interface ContextCollisionDetail {
@@ -90,6 +92,8 @@ export const sanitizeContextInput = (
       continue;
     }
 
+    // FIXME: Is this needed? The caller should not be able to pass in Array or Object values.
+    //  Is this from something we are doing? We are allowed to use arrays or objects for validation purposes i.e. _perf and _validation
     const flattened = flatten(rawValue);
 
     if (flattened === undefined) {
@@ -112,7 +116,7 @@ export const sanitizeContextInput = (
 };
 
 export class ContextStore {
-  private context: ContextRecord = {};
+  private readonly context: ContextRecord = {};
   private history: ContextValidationResult[] = [];
   private pendingCollisions = new Set<string>();
   private pendingCollisionDetails: ContextCollisionDetail[] = [];
@@ -136,6 +140,7 @@ export class ContextStore {
     return { ...this.context };
   }
 
+  // FIXME: This is not used anywhere. Consider removing.
   getValidationHistory(): ContextValidationResult[] {
     return [...this.history];
   }
@@ -146,6 +151,7 @@ export class ContextStore {
     return collisions;
   }
 
+  // FIXME: This is not used anywhere. Consider removing.
   consumeCollisionDetails(): ContextCollisionDetail[] {
     const details = [...this.pendingCollisionDetails];
     this.pendingCollisionDetails = [];

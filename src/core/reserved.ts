@@ -1,17 +1,17 @@
 const RESERVED_TOP_LEVEL_FIELDS = [
-  'eventKey',
-  'level',
-  'message',
-  'correlationId',
-  'forkId',
-  'timestamp',
-  'hostname',
-  // 'environment', // Why was this reserved? It's not used anywhere.
-  // 'version', // Why was this reserved? It's not used anywhere.
-  // 'service', // Why was this reserved? It's not used anywhere.
-  'fields',
-  '_perf',
-  '_validation',
+  'eventKey', // Used in Payload
+  'level', // Used in Payload
+  'message', // Used in Payload
+  'correlationId', // Used in Payload
+  'forkId', // Used in Payload
+  'timestamp', // Used in Payload
+  'hostname', // TODO: Why was this reserved? It's not used anywhere.
+  // 'environment', // TODO: Why was this reserved? It's not used anywhere.
+  // 'version', // TODO: Why was this reserved? It's not used anywhere.
+  // 'service', // TODO: Why was this reserved? It's not used anywhere.
+  'fields', // Used in Payload
+  '_perf', // Used in Payload
+  '_validation', // Used in Payload
 ] as const;
 
 const RESERVED_VALIDATION_FIELDS = [
