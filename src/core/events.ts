@@ -1,4 +1,4 @@
-import type { LogLevel } from './errors';
+import { LogLevel } from './backend';
 import type { FieldDefinitions, InferFields } from './fields';
 
 export type { LogLevel };

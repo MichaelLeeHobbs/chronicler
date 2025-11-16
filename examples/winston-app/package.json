@@ -16,6 +16,7 @@
     "winston-transport": "^4.9.0"
   },
   "devDependencies": {
+    "@types/node": "^24.10.1",
     "@types/express": "^5",
     "tsx": "^4",
     "typescript": "^5"

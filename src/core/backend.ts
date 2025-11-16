@@ -28,7 +28,33 @@ export interface LogPayload {
   [key: string]: unknown;
 }
 
-export type LogBackend = Record<string, (message: string, payload: LogPayload) => void>;
+export const LOG_LEVELS = {
+  fatal: 0,
+  critical: 1,
+  alert: 2,
+  error: 3,
+  warn: 4,
+  audit: 5,
+  info: 6,
+  debug: 7,
+  trace: 8,
+} as const;
+
+export type LogLevel = keyof typeof LOG_LEVELS;
+
+export const DEFAULT_REQUIRED_LEVELS: LogLevel[] = [
+  'fatal',
+  'critical',
+  'alert',
+  'error',
+  'warn',
+  'audit',
+  'info',
+  'debug',
+  'trace',
+];
+
+export type LogBackend = Record<LogLevel, (message: string, payload: LogPayload) => void>;
 
 /**
  * Validate that backend has all required log level methods
@@ -36,7 +62,7 @@ export type LogBackend = Record<string, (message: string, payload: LogPayload) =
  * @param levels - Required log levels
  * @returns Array of missing log levels
  */
-export const validateBackendMethods = (backend: LogBackend, levels: string[]): string[] => {
+export const validateBackendMethods = (backend: LogBackend, levels: LogLevel[]): string[] => {
   const missing: string[] = [];
   for (const level of levels) {
     if (typeof backend[level] !== 'function') {
@@ -56,7 +82,7 @@ export const validateBackendMethods = (backend: LogBackend, levels: string[]): s
  */
 export const callBackendMethod = (
   backend: LogBackend,
-  level: string,
+  level: LogLevel,
   message: string,
   payload: LogPayload,
 ): void => {

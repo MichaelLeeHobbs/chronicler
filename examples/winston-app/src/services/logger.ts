@@ -3,7 +3,7 @@
  * Supports development (console) and production (CloudWatch) modes
  */
 
-import winston from 'winston';
+import winston, { type LeveledLogMethod } from 'winston';
 
 import { config } from '../config/index.js';
 import { MockCloudWatchTransport } from './mock-cloudwatch.js';
@@ -42,6 +42,10 @@ export const customLevels = {
 
 export type LogLevel = keyof typeof customLevels.levels;
 
+type CustomLogger = winston.Logger & {
+  [L in LogLevel]: LeveledLogMethod;
+};
+
 // Register colors for console output
 winston.addColors(customLevels.colors);
 
@@ -75,7 +79,7 @@ function createLogger(
     level?: LogLevel;
     logGroupName?: string;
   },
-): winston.Logger {
+): CustomLogger {
   const transports: winston.transport[] = [];
 
   if (isProduction) {
@@ -104,7 +108,7 @@ function createLogger(
     format: isProduction ? prodFormat : devFormat,
     defaultMeta: { stream: streamName },
     transports,
-  });
+  }) as CustomLogger;
 }
 
 /**
@@ -119,12 +123,6 @@ export const loggerAudit = createLogger('audit');
 
 // HTTP request logger
 export const loggerHttp = createLogger('http');
-
-/**
- * Get or create a logger for a specific stream
- */
-export const getLogger = (streamName: string, opts?: Parameters<typeof createLogger>[1]) =>
-  createLogger(streamName, opts);
 
 // Default export: main logger
 export default loggerMain;

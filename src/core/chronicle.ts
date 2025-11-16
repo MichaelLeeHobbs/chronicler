@@ -1,17 +1,15 @@
+import * as os from 'node:os';
+
 import {
   callBackendMethod,
+  DEFAULT_REQUIRED_LEVELS,
   type LogBackend,
   type LogPayload,
   validateBackendMethods,
   type ValidationMetadata,
 } from './backend';
 import { type ContextCollisionDetail, ContextStore, type ContextValidationResult } from './context';
-import {
-  DEFAULT_REQUIRED_LEVELS,
-  InvalidConfigError,
-  ReservedFieldError,
-  UnsupportedLogLevelError,
-} from './errors';
+import { InvalidConfigError, ReservedFieldError, UnsupportedLogLevelError } from './errors';
 import {
   type CorrelationAutoEvents,
   type CorrelationEventGroup,
@@ -33,7 +31,7 @@ export interface ChroniclerConfig {
 }
 
 const REQUIRED_LEVELS: LogLevel[] = [...DEFAULT_REQUIRED_LEVELS];
-const DEFAULT_HOSTNAME = 'host';
+const DEFAULT_HOSTNAME = process.env.HOSTNAME ?? os.hostname();
 
 export interface Chronicler {
   event<F extends FieldDefinitions>(event: EventDefinition<F>, fields: InferFields<F>): void;
