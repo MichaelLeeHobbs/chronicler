@@ -272,7 +272,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
 }
 
 class CorrelationTimer {
-  private timeoutId?: ReturnType<typeof setTimeout>;
+  private timeoutId?: NodeJS.Timeout;
 
   constructor(
     private readonly timeoutMs: number,

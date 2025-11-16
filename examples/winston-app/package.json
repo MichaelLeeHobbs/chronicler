@@ -1,0 +1,19 @@
+{
+  "name": "winston-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "node --enable-source-maps dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "docs": "tsx ../../src/cli/index.ts docs"
+  },
+  "dependencies": {
+    "winston": "^3",
+    "chronicler": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

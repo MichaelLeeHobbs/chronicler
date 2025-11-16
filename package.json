@@ -20,12 +20,12 @@
   "homepage": "https://github.com/your-org/chronicler#readme",
   "type": "module",
   "main": "./dist/index.cjs",
-  "module": "./dist/index.mjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
+      "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
     "./package.json": "./package.json"
@@ -57,7 +57,10 @@
     "prepublishOnly": "pnpm run build"
   },
   "lint-staged": {
-    "*.{ts,tsx,js,jsx,cjs,mjs}": [
+    "src/**/*.{ts,tsx,js,jsx,cjs,mjs}": [
+      "pnpm exec eslint --fix --max-warnings=0"
+    ],
+    "tests/**/*.{ts,tsx,js,jsx,cjs,mjs}": [
       "pnpm exec eslint --fix --max-warnings=0"
     ],
     "*.{json,md,yml,yaml,ts,tsx,js,jsx,cjs,mjs}": [

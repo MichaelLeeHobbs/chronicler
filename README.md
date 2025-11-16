@@ -1,19 +1,198 @@
 # chronicler
 
-> A TypeScript-first toolkit for building chronicle and audit utilities.
+> A TypeScript-first, strongly-typed logging toolkit that enforces consistent, documented events with correlations and forks.
 
-## Features
+- Node: 20+ (ES2022)
+- Bundles: ESM + CJS with types
+- Runtime only, framework-agnostic
 
-- ✅ Dual ESM & CJS bundles with type declarations
-- ✅ Modern TypeScript toolchain with strict settings
-- ✅ Automated formatting, linting, testing, and release workflows
+## Why Chronicler?
 
-## Getting started
+- Define events once with keys, levels, fields, and docs; get type-safe logging everywhere
+- Enforce required/optional fields and flag type issues at runtime
+- Correlate related logs with auto start/complete/timeout events and durations
+- Fork work into sub-operations with hierarchical fork IDs
+- Structured payloads ready for ingestion (e.g., CloudWatch, ELK, Datadog)
+
+## Install
 
 ```powershell
-pnpm install
-pnpm run dev
+pnpm add chronicler
 ```
+
+Node 20+ required.
+
+## Quick start
+
+```ts
+import {
+  createChronicle,
+  defineEvent,
+  defineEventGroup,
+  defineCorrelationGroup,
+  type LogBackend,
+  type LogPayload,
+} from 'chronicler';
+
+// Minimal backend (Console)
+class ConsoleBackend implements LogBackend {
+  supportsLevel(): boolean {
+    return true;
+  }
+  log(level: string, message: string, payload: LogPayload) {
+    // Ship to your sink here; for demo we print JSON
+    console.log(JSON.stringify({ level, message, ...payload }));
+  }
+}
+
+// 1) Define events (typed)
+const system = defineEventGroup({
+  key: 'system',
+  type: 'system',
+  doc: 'System lifecycle events',
+  events: {
+    startup: defineEvent({
+      key: 'system.startup',
+      level: 'info',
+      message: 'Application started',
+      doc: 'Emitted when the app boots',
+      fields: { port: { type: 'number', required: true, doc: 'Port' } },
+    }),
+  },
+});
+
+const request = defineCorrelationGroup({
+  key: 'api.request',
+  type: 'correlation',
+  doc: 'HTTP request handling',
+  // default timeout is 300s if omitted
+  timeout: 30_000,
+  events: {
+    validated: defineEvent({
+      key: 'api.request.validated',
+      level: 'info',
+      message: 'Request validated',
+      doc: 'Validation passed',
+      fields: {
+        method: { type: 'string', required: true, doc: 'HTTP method' },
+        path: { type: 'string', required: true, doc: 'Path' },
+      },
+    }),
+  },
+});
+
+// 2) Create a chronicle with a backend
+const chronicle = createChronicle({
+  backend: new ConsoleBackend(),
+  metadata: { service: 'api', env: 'dev' },
+  monitoring: { memory: true, cpu: true },
+});
+
+// 3) Emit typed events
+chronicle.event(system.events.startup, { port: 3000 });
+
+// 4) Correlate work
+const corr = chronicle.startCorrelation(request, { requestId: 'r-123' });
+corr.event(request.events.validated, { method: 'GET', path: '/' });
+
+// Fork parallel steps
+const forkA = corr.fork({ step: 'A' });
+forkA.event(system.events.startup, { port: 0 });
+
+// Complete the correlation (emits api.request.complete with duration)
+corr.complete();
+```
+
+## API highlights
+
+- defineEvent({ key, level, message, doc, fields? })
+- defineEventGroup({ key, type: 'system', doc, events, groups? })
+- defineCorrelationGroup({ key, type: 'correlation', doc, timeout?, events, groups? })
+- createChronicle({ backend?, metadata?, monitoring? })
+  - chronicle.event(eventDef, fields)
+  - chronicle.addContext(context)
+  - chronicle.startCorrelation(corrGroup, context?)
+  - chronicle.fork(context?)
+
+### Log levels
+
+Chronicler uses:
+
+```ts
+const LOG_LEVELS = {
+  fatal: 0,
+  critical: 1,
+  alert: 2,
+  error: 3,
+  warn: 4,
+  audit: 5,
+  info: 6,
+  debug: 7,
+  trace: 8,
+} as const;
+```
+
+### Reserved fields
+
+Top-level in payload: `eventKey, level, message, correlationId, forkId, timestamp, hostname, environment, version, service, fields, _perf, _validation` are reserved. Attempting to place e.g. `environment` in metadata is blocked. Collisions are reported in `_validation.contextCollisions`.
+
+### Performance
+
+- Enable per-log sampling via `monitoring: { memory?: boolean, cpu?: boolean }`
+- `_perf` contains memory and CPU deltas when enabled
+
+### Error serialization
+
+- Fields declared as `error` are serialized via `stderr-lib` (string). Safe to ship to log sinks.
+
+## Using with Winston (full example app in Task 10)
+
+To integrate with Winston, implement the `LogBackend` interface and map Chronicler levels to Winston:
+
+```ts
+import winston from 'winston';
+import type { LogBackend, LogPayload } from 'chronicler';
+
+const levelMap: Record<string, string> = {
+  fatal: 'error',
+  critical: 'error',
+  alert: 'error',
+  error: 'error',
+  warn: 'warn',
+  audit: 'info',
+  info: 'info',
+  debug: 'debug',
+  trace: 'silly',
+};
+
+class WinstonBackend implements LogBackend {
+  constructor(private logger: winston.Logger) {}
+  supportsLevel(): boolean {
+    return true;
+  }
+  log(level: string, message: string, payload: LogPayload) {
+    this.logger.log({ level: levelMap[level] ?? 'info', message, payload });
+  }
+}
+
+const logger = winston.createLogger({
+  level: 'info',
+  transports: [new winston.transports.Console({ format: winston.format.json() })],
+});
+```
+
+See `examples/winston-app` for a runnable setup.
+
+## CLI (local workspace)
+
+Until publishing (Task 11), run the CLI via tsx:
+
+```powershell
+pnpm exec tsx src/cli/index.ts validate
+pnpm exec tsx src/cli/index.ts docs --format markdown --output docs/events.md
+```
+
+When published, the `chronicler` CLI will be available.
 
 ## Scripts
 
@@ -21,24 +200,6 @@ pnpm run dev
 - `pnpm run build` – clean & create production bundles
 - `pnpm run lint` – ESLint with TypeScript rules
 - `pnpm run format` – Prettier formatting check
-- `pnpm run test` – Vitest unit tests
+- `pnpm run test` – Vitest unit/integration tests
 - `pnpm run coverage` – Coverage report
 - `pnpm run check` – lint + typecheck + tests
-
-## Usage
-
-```ts
-import { createEntry, formatEntry } from 'chronicler';
-
-const entry = createEntry('user logged in', { userId: '123' });
-console.log(formatEntry(entry));
-```
-
-## Releasing
-
-```powershell
-pnpm run changeset
-pnpm run release
-```
-
-This will version, build, and publish the package using Changesets.

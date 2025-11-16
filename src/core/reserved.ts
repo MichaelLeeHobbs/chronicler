@@ -6,9 +6,9 @@ const RESERVED_TOP_LEVEL_FIELDS = [
   'forkId',
   'timestamp',
   'hostname',
-  'environment',
-  'version',
-  'service',
+  // 'environment', // Why was this reserved? It's not used anywhere.
+  // 'version', // Why was this reserved? It's not used anywhere.
+  // 'service', // Why was this reserved? It's not used anywhere.
   'fields',
   '_perf',
   '_validation',
