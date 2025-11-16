@@ -19,13 +19,12 @@ export interface ChroniclerConfig {
   monitoring?: PerfOptions;
 }
 
-export interface ChronicleBase {
+const REQUIRED_LEVELS: LogLevel[] = [...DEFAULT_REQUIRED_LEVELS];
+
+export interface Chronicler {
   event<F extends FieldDefinitions>(event: EventDefinition<F>, fields: InferFields<F>): void;
   addContext(context: Record<string, unknown>): void;
-  fork(extraContext?: Record<string, unknown>): ChronicleBase;
 }
-
-const REQUIRED_LEVELS: LogLevel[] = [...DEFAULT_REQUIRED_LEVELS];
 
 const buildPayload = (
   config: ChroniclerConfig,
@@ -40,51 +39,26 @@ const buildPayload = (
     contextStore.consumeCollisions(),
   );
   const perfSample = samplePerformance(config.monitoring ?? {});
-  const metadataSnapshot = contextStore.snapshot();
-
-  return {
+  const payload: LogPayload = {
     eventKey: eventDef.key,
     fields: fieldValidation.normalizedFields,
     correlationId: correlationIdGenerator(),
-    metadata: metadataSnapshot,
+    metadata: contextStore.snapshot(),
     timestamp: new Date().toISOString(),
-    _validation: validationMetadata,
-    _perf: perfSample,
-  };
-};
-
-const createChronicleInstance = (
-  baseConfig: ChroniclerConfig,
-  correlationIdGenerator: () => string,
-  contextStore: ContextStore,
-): ChronicleBase => {
-  const chronicle: ChronicleBase = {
-    event(eventDef, fields) {
-      const payload = buildPayload(
-        baseConfig,
-        contextStore,
-        eventDef,
-        fields,
-        correlationIdGenerator,
-      );
-      baseConfig.backend.log(eventDef.level, eventDef.message, payload);
-    },
-    addContext(context) {
-      contextStore.add(context);
-    },
-    fork(extraContext = {}) {
-      const childStore = new ContextStore(contextStore.snapshot());
-      if (Object.keys(extraContext).length > 0) {
-        childStore.add(extraContext);
-      }
-      return createChronicleInstance(baseConfig, correlationIdGenerator, childStore);
-    },
   };
 
-  return chronicle;
+  if (validationMetadata) {
+    payload._validation = validationMetadata;
+  }
+
+  if (perfSample) {
+    payload._perf = perfSample;
+  }
+
+  return payload;
 };
 
-export const createChronicle = (config: ChroniclerConfig): ChronicleBase => {
+export const createChronicle = (config: ChroniclerConfig): Chronicler => {
   if (!config.backend) {
     throw new InvalidConfigError('A backend must be provided');
   }
@@ -103,5 +77,21 @@ export const createChronicle = (config: ChroniclerConfig): ChronicleBase => {
   const correlationIdGenerator =
     config.correlationIdGenerator ?? (() => `${config.metadata.hostname ?? 'host'}_${Date.now()}`);
 
-  return createChronicleInstance(config, correlationIdGenerator, baseContextStore);
+  const chronicle: Chronicler = {
+    event(eventDef, fields) {
+      const payload = buildPayload(
+        config,
+        baseContextStore,
+        eventDef,
+        fields,
+        correlationIdGenerator,
+      );
+      config.backend.log(eventDef.level, eventDef.message, payload);
+    },
+    addContext(context) {
+      baseContextStore.add(context);
+    },
+  };
+
+  return chronicle;
 };

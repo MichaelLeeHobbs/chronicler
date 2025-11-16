@@ -22,6 +22,16 @@ const sampleEvent = defineEvent({
   },
 });
 
+const errorEvent = defineEvent({
+  key: 'system.failure',
+  level: 'error',
+  message: 'boom',
+  doc: 'error event',
+  fields: {
+    error: { type: 'error', required: true, doc: 'err' },
+  },
+});
+
 const getPayload = (log: ReturnType<typeof createLogMock>): LogPayload => {
   const entry = log.mock.calls.at(-1);
   if (!entry) {
@@ -51,14 +61,17 @@ describe('createChronicle', () => {
     );
   });
 
-  it('logs events with metadata and fields', () => {
+  it('logs events with metadata', () => {
     const log = createLogMock();
     const backend = mockBackend({ log });
     const chronicle = createChronicle({ backend, metadata: { deploymentId: 'dep-1' } });
 
     chronicle.event(sampleEvent, { port: 3000 });
 
-    expect(getPayload(log).metadata).toMatchObject({ deploymentId: 'dep-1' });
+    const payload = getPayload(log);
+    expect(payload.metadata).toMatchObject({ deploymentId: 'dep-1' });
+    expect(payload.fields).toEqual({ port: 3000 });
+    expect(payload.timestamp).toEqual(expect.any(String));
   });
 
   it('adds context incrementally', () => {
@@ -71,5 +84,66 @@ describe('createChronicle', () => {
     chronicle.event(sampleEvent, { port: 3000 });
 
     expect(getPayload(log).metadata).toMatchObject({ userId: '123', requestId: '456' });
+  });
+
+  it('captures validation errors without throwing', () => {
+    const log = createLogMock();
+    const backend = mockBackend({ log });
+    const chronicle = createChronicle({ backend, metadata: {} });
+
+    chronicle.event(sampleEvent, { port: undefined as never } as unknown as { port: number });
+
+    const payload = getPayload(log);
+    expect(payload._validation?.missingFields).toEqual(['port']);
+    expect(payload.fields).toEqual({});
+  });
+
+  it('serializes error fields using stderr', () => {
+    const log = createLogMock();
+    const backend = mockBackend({ log });
+    const chronicle = createChronicle({ backend, metadata: {} });
+
+    const err = new Error('failure');
+    chronicle.event(errorEvent, { error: err });
+
+    const payload = getPayload(log);
+    expect(typeof payload.fields.error).toBe('string');
+    expect(payload.fields.error as string).toContain('failure');
+  });
+
+  it('records context collision warnings in validation metadata', () => {
+    const log = createLogMock();
+    const backend = mockBackend({ log });
+    const chronicle = createChronicle({ backend, metadata: {} });
+
+    chronicle.addContext({ userId: '123' });
+    chronicle.addContext({ userId: '456' });
+    chronicle.event(sampleEvent, { port: 3000 });
+
+    const payload = getPayload(log);
+    expect(payload._validation?.contextCollisions).toEqual(['userId']);
+  });
+
+  it('attaches perf metrics when monitoring enabled', () => {
+    const log = createLogMock();
+    const backend = mockBackend({ log });
+    const chronicle = createChronicle({
+      backend,
+      metadata: {},
+      monitoring: { memory: true },
+    });
+
+    chronicle.event(sampleEvent, { port: 3000 });
+
+    const payload = getPayload(log);
+    const perf = payload._perf;
+    expect(perf).toBeDefined();
+    if (!perf) {
+      throw new Error('Expected perf sample when monitoring enabled');
+    }
+    expect(typeof perf.heapUsed).toBe('number');
+    expect(typeof perf.heapTotal).toBe('number');
+    expect(typeof perf.external).toBe('number');
+    expect(typeof perf.rss).toBe('number');
   });
 });

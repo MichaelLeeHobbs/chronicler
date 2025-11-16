@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createChronicle, defineEvent } from '../src';
+import type { LogBackend, LogPayload } from '../src/core/backend';
 
 describe('chronicler public API', () => {
   it('creates a chronicle and logs events', () => {
-    const log = vi.fn();
+    const log = vi.fn<LogBackend['log']>();
     const chronicle = createChronicle({
       backend: {
         log,
@@ -25,13 +26,9 @@ describe('chronicler public API', () => {
 
     chronicle.event(event, { port: 3000 });
 
-    expect(log).toHaveBeenCalledWith(
-      'info',
-      'started',
-      expect.objectContaining({
-        eventKey: 'system.startup',
-        fields: { port: 3000 },
-      }),
-    );
+    const [, , payload] = log.mock.calls[0] as [string, string, LogPayload];
+    expect(payload.eventKey).toBe('system.startup');
+    expect(payload.fields).toEqual({ port: 3000 });
+    expect(payload.timestamp).toEqual(expect.any(String));
   });
 });

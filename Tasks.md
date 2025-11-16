@@ -30,11 +30,14 @@
 
 ## 3. Event Emission & Validation
 
-| Status | Task                        | Description                                                                                                                             | Tests                                                       | Deps |
-| ------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---- |
-| ☐▶    | 3.1 Field validation engine | Validate required/optional fields, type coercion rejection, produce `_validation.missingFields` / `typeErrors`. Never throw after init. | Extensive unit tests covering each field type & error path. | 2.2  |
-| ☐      | 3.2 Log envelope builder    | Compose final log object (timestamp, metadata, context, `_perf`, `_validation`). Hook memory metrics toggle.                            | Unit tests verifying shape + perf fields.                   | 3.1  |
-| ☐      | 3.3 Error serialization     | Integrate `stderr-lib` to serialize `error` fields safely.                                                                              | Tests with real Error, circular refs, custom objects.       | 3.1  |
+| Status | Task | Description                 | Tests                                                                                                                                   | Deps                                                        |
+| ------ | ---- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | --- |
+| -      | ☐▶  | 3.1 Field validation engine | Validate required/optional fields, type coercion rejection, produce `_validation.missingFields` / `typeErrors`. Never throw after init. | Extensive unit tests covering each field type & error path. | 2.2 |
+| -      | ☐    | 3.2 Log envelope builder    | Compose final log object (timestamp, metadata, context, `_perf`, `_validation`). Hook memory metrics toggle.                            | Unit tests verifying shape + perf fields.                   | 3.1 |
+| -      | ☐    | 3.3 Error serialization     | Integrate `stderr-lib` to serialize `error` fields safely.                                                                              | Tests with real Error, circular refs, custom objects.       | 3.1 |
+| +      | ☑   | 3.1 Field validation engine | Validate required/optional fields, type coercion rejection, produce `_validation.missingFields` / `typeErrors`. Never throw after init. | Extensive unit tests covering each field type & error path. | 2.2 |
+| +      | ☑▶ | 3.2 Log envelope builder    | Compose final log object (timestamp, metadata, context, `_perf`, `_validation`). Hook memory metrics toggle.                            | Unit tests verifying shape + perf fields.                   | 3.1 |
+| +      | ☑▶ | 3.3 Error serialization     | Integrate `stderr-lib` to serialize `error` fields safely.                                                                              | Tests with real Error, circular refs, custom objects.       | 3.1 |
 
 ## 4. Correlation Lifecycle
 

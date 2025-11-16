@@ -42,4 +42,26 @@ describe('validateFields', () => {
 
     expect(result.normalizedFields.errorField).toContain('boom');
   });
+
+  it('preserves string error inputs as-is', () => {
+    const result = validateFields(event, {
+      requiredString: 'ok',
+      errorField: 'textual failure',
+    });
+
+    expect(result.normalizedFields.errorField).toContain('textual failure');
+  });
+
+  it('serializes complex error-like objects without throwing', () => {
+    const circular: { message: string; self?: unknown } = { message: 'loop' };
+    circular.self = circular;
+
+    const result = validateFields(event, {
+      requiredString: 'ok',
+      errorField: circular,
+    });
+
+    expect(typeof result.normalizedFields.errorField).toBe('string');
+    expect((result.normalizedFields.errorField as string).length).toBeGreaterThan(0);
+  });
 });
