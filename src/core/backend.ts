@@ -89,6 +89,9 @@ export const callBackendMethod = (
   if (typeof backend[level] === 'function') {
     backend[level](message, payload);
   } else {
+    // This should never happen if validateBackendMethods is used correctly
+    // TODO: This does sort of break our contract about not throwing errors from the logger
+    //   However, they somehow broke the contract first by providing an valid backend that latter became invalid
     throw new Error(`Backend does not support log level: ${level}`);
   }
 };

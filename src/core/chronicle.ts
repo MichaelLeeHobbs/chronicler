@@ -13,6 +13,7 @@ import {
   type ContextRecord,
   ContextStore,
   type ContextValidationResult,
+  ContextValue,
 } from './context';
 import { InvalidConfigError, ReservedFieldError, UnsupportedLogLevelError } from './errors';
 import {
@@ -307,13 +308,13 @@ class CorrelationTimer {
   }
 }
 
-const stringifyValue = (value: ContextCollisionDetail['existingValue']): string => {
-  if (value === undefined || value === null) {
-    return '';
-  }
-  if (Array.isArray(value)) {
-    return value.join(',');
-  }
+/**
+ * Convert ContextValue to string for logging in metadataWarning events.
+ * Handles primitives (string, number, boolean, null) and arrays.
+ */
+const stringifyValue = (value: ContextValue): string => {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return value.join(',');
   return String(value);
 };
 

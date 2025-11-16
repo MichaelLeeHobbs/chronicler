@@ -7,7 +7,7 @@ export type ContextRecord = Record<string, ContextValue>;
 
 export interface ContextCollisionDetail {
   key: string;
-  existingValue: ContextValue | undefined;
+  existingValue: ContextValue;
   attemptedValue: ContextValue;
 }
 
@@ -50,9 +50,7 @@ export const sanitizeContextInput = (
 
     if (key in existingContext || key in sanitized) {
       collisions.push(key);
-      const existingValue = (key in sanitized ? sanitized[key] : existingContext[key]) as
-        | ContextValue
-        | undefined;
+      const existingValue = (key in sanitized ? sanitized[key] : existingContext[key])!;
       collisionDetails.push({ key, existingValue, attemptedValue: rawValue });
       continue;
     }
