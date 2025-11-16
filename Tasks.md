@@ -158,6 +158,25 @@ This generates `logs.md` in the example directory with auto-generated event docu
 - `package.json`: Added `docs` script using CLI
 - `.gitignore`: Excludes generated `logs.md`
 
+## 11. Backend Refactoring
+
+| Status | Task                           | Description                                                                                                      | Tests                           | Deps |
+| ------ | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ------------------------------- | ---- |
+| ☐      | 11.1 Refactor backend contract | Change backend to interrogate logger methods directly (check `typeof logger.info === 'function'` for each level) | Unit tests for method detection | 2.1  |
+| ☐      | 11.2 Update validation logic   | Remove `supportsLevel()` method, validate by checking method existence on backend logger                         | Update backend.test.ts (new)    | 11.1 |
+| ☐      | 11.3 Update chronicle          | Adapt chronicle.ts to use new backend validation approach                                                        | Update chronicle.test.ts        | 11.2 |
+| ☐      | 11.4 Update type exports       | Ensure LogBackend interface reflects new contract without supportsLevel                                          | Type tests pass                 | 11.3 |
+
+## 12. Complex Express.js Example
+
+| Status | Task                       | Description                                                                                                              | Tests           | Deps |
+| ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------- | ---- |
+| ☐      | 12.1 Express app structure | Create proper MVP Express.js app with controllers/services/providers/routes separation                                   | Manual smoke    | 11.x |
+| ☐      | 12.2 Multi-logger setup    | Implement Winston logger factory with CloudWatch transport (prod) and console (dev), custom log levels, multiple streams | Manual + lint   | 12.1 |
+| ☐      | 12.3 Multiple chronicles   | Create separate chronicles for main, audit, and http loggers using the new backend contract                              | Manual smoke    | 12.2 |
+| ☐      | 12.4 Express middleware    | Add request logging middleware, error handlers, and audit trail examples                                                 | Manual + README | 12.3 |
+| ☐      | 12.5 Documentation         | Update README with multi-logger setup, environment config, CloudWatch setup, and architecture                            | Markdown lint   | 12.4 |
+
 ## P. Publishing
 
 | Status | Task      | Description                                           | Tests              | Deps |
@@ -178,6 +197,8 @@ This generates `logs.md` in the example directory with auto-generated event docu
 - Implement CPU monitoring (basic) in Phase 1, behind a flag.
 - Fork logs reset correlation activity timer.
 - Package name: publish as `chronicler` (unscoped).
+- **NEW: Backend uses method interrogation, no supportsLevel() wrapper**
+- **NEW: Examples show direct logger object usage without classes**
 
 ---
 
@@ -794,3 +815,792 @@ it('preserves event definition properties', () => {
 **Test Status**: 101/101 passing ✅  
 **Phase 1 & 2**: 100% Complete! 🎉  
 **Task 8**: 75% Complete (3 of 4 tasks done)
+
+### Session: Documentation & Example App (Tasks 9.1–9.3, 10.1–10.4 Complete)
+
+**What Was Built:**
+
+1. **README Expansion** (Task 9.1)
+   - Comprehensive API documentation with real examples
+   - Log levels, reserved fields, performance monitoring
+   - Winston integration pattern
+   - CLI usage instructions
+
+2. **CloudWatch Cookbook** (Task 9.2)
+   - Practical Insights queries for correlations, timeouts, slow requests
+   - Validation field queries (\_validation.\*)
+   - Performance metric queries (\_perf.\*)
+   - Fork filtering examples
+
+3. **Best Practices Guide** (Task 9.3)
+   - Event design guidelines
+   - Level usage recommendations
+   - Reserved field documentation
+   - Correlation/fork patterns
+   - Context hygiene tips
+
+4. **Winston Example App** (Task 10.1–10.4)
+   - Complete working example with Winston backend
+   - Event definitions in separate file for CLI parsing
+   - Documentation generation via `chronicler.config.ts`
+   - Generates `logs.md` automatically
+   - Full correlation + fork demo
+
+**Files Created:**
+
+- `docs/CloudWatch.md` - Query cookbook
+- `docs/BestPractices.md` - Usage guidelines
+- `examples/winston-app/` - Complete example app
+- `examples/winston-app/chronicler.config.ts` - CLI config
+- `examples/winston-app/src/events.ts` - Event definitions
+- `examples/winston-app/logs.md` - Auto-generated docs
+
+**Status:**
+
+- Task 9.1–9.3: ✅ Complete
+- Task 10.1–10.4: ✅ Complete
+
+---
+
+## 📝 Task 11: Backend Refactoring - Method Interrogation
+
+**Goal:** Change the backend contract to interrogate logger methods directly instead of using `supportsLevel()`.
+
+### Current Implementation Issues
+
+The current backend uses a `supportsLevel()` method that must be manually implemented:
+
+```typescript
+interface LogBackend {
+  log(level: LogLevel, message: string, data: Record<string, unknown>): void;
+  supportsLevel(level: LogLevel): boolean;
+}
+```
+
+**Problems:**
+
+- Requires wrapper classes for every logger (Winston, Pino, etc.)
+- Manual method that can lie or be forgotten
+- Doesn't match how real loggers work
+- Extra boilerplate for users
+
+### Target Implementation
+
+Interrogate the backend logger object directly:
+
+```typescript
+// Backend is any logger object with level methods
+type LogBackend = {
+  [level: string]: (message: string, data: Record<string, unknown>) => void;
+};
+
+// Validation checks method existence
+function validateBackend(backend: LogBackend, requiredLevels: LogLevel[]): string[] {
+  const missing: string[] = [];
+  for (const level of requiredLevels) {
+    if (typeof backend[level] !== 'function') {
+      missing.push(level);
+    }
+  }
+  return missing;
+}
+```
+
+**Benefits:**
+
+- Works with any logger object (Winston, Pino, console, custom)
+- No wrapper classes needed
+- Can't lie about support
+- Natural JavaScript pattern
+- Less code for users
+
+### Implementation Steps
+
+#### Task 11.1: Refactor backend.ts
+
+**Current:** `src/core/backend.ts` (43 lines)
+
+```typescript
+export interface LogBackend {
+  log(level: string, message: string, payload: LogPayload): void;
+  supportsLevel(level: string): boolean;
+}
+
+export function ensureBackendSupportsLevels(
+  backend: LogBackend,
+  requiredLevels: string[],
+): string[] {
+  return requiredLevels.filter((level) => !backend.supportsLevel(level));
+}
+```
+
+**Target:** Method interrogation approach
+
+```typescript
+// Backend is any logger object with level methods
+export type LogBackend = {
+  [level: string]: ((message: string, payload: LogPayload) => void) | unknown;
+};
+
+// Validate backend has required level methods
+export function validateBackendMethods(backend: LogBackend, requiredLevels: string[]): string[] {
+  const missing: string[] = [];
+  for (const level of requiredLevels) {
+    if (typeof backend[level] !== 'function') {
+      missing.push(level);
+    }
+  }
+  return missing;
+}
+
+// Call backend method directly
+export function callBackendMethod(
+  backend: LogBackend,
+  level: string,
+  message: string,
+  payload: LogPayload,
+): void {
+  const method = backend[level];
+  if (typeof method === 'function') {
+    method(message, payload);
+  } else {
+    throw new Error(`Backend does not support log level: ${level}`);
+  }
+}
+```
+
+**Changes:**
+
+- Remove `supportsLevel()` from interface
+- Change to index signature type
+- Rename validation function
+- Add method caller helper
+- Update error types
+
+#### Task 11.2: Create backend.test.ts
+
+**New file:** `tests/core/backend.test.ts`
+
+```typescript
+import { describe, expect, it } from 'vitest';
+import { validateBackendMethods, callBackendMethod, type LogBackend } from '../../src/core/backend';
+
+describe('Backend Validation', () => {
+  describe('validateBackendMethods', () => {
+    it('returns empty array when all required methods exist', () => {
+      const backend: LogBackend = {
+        info: (msg: string, data: unknown) => {},
+        error: (msg: string, data: unknown) => {},
+        warn: (msg: string, data: unknown) => {},
+      };
+
+      const missing = validateBackendMethods(backend, ['info', 'error', 'warn']);
+      expect(missing).toEqual([]);
+    });
+
+    it('returns missing levels when methods do not exist', () => {
+      const backend: LogBackend = {
+        info: (msg: string, data: unknown) => {},
+      };
+
+      const missing = validateBackendMethods(backend, ['info', 'error', 'warn']);
+      expect(missing).toEqual(['error', 'warn']);
+    });
+
+    it('detects non-function properties as missing', () => {
+      const backend: LogBackend = {
+        info: (msg: string, data: unknown) => {},
+        error: 'not a function',
+      };
+
+      const missing = validateBackendMethods(backend, ['info', 'error']);
+      expect(missing).toEqual(['error']);
+    });
+  });
+
+  describe('callBackendMethod', () => {
+    it('calls the backend method with message and payload', () => {
+      let called = false;
+      let capturedMessage = '';
+      let capturedPayload: unknown = null;
+
+      const backend: LogBackend = {
+        info: (msg: string, data: unknown) => {
+          called = true;
+          capturedMessage = msg;
+          capturedPayload = data;
+        },
+      };
+
+      const payload = { eventKey: 'test', fields: {} };
+      callBackendMethod(backend, 'info', 'Test message', payload);
+
+      expect(called).toBe(true);
+      expect(capturedMessage).toBe('Test message');
+      expect(capturedPayload).toEqual(payload);
+    });
+
+    it('throws error when method does not exist', () => {
+      const backend: LogBackend = {};
+
+      expect(() => {
+        callBackendMethod(backend, 'info', 'Test', {});
+      }).toThrow('Backend does not support log level: info');
+    });
+  });
+});
+```
+
+**Test coverage:**
+
+- Method existence validation
+- Missing method detection
+- Non-function property handling
+- Method invocation
+- Error handling
+
+#### Task 11.3: Update chronicle.ts
+
+**Current usage in:** `src/core/chronicle.ts`
+
+```typescript
+const unsupported = ensureBackendSupportsLevels(config.backend, REQUIRED_LEVELS);
+if (unsupported.length > 0) {
+  throw new UnsupportedLogLevelError(unsupported.join(', '));
+}
+
+// ...later
+config.backend.log(eventDef.level, eventDef.message, payload);
+```
+
+**Target:**
+
+```typescript
+const missing = validateBackendMethods(config.backend, REQUIRED_LEVELS);
+if (missing.length > 0) {
+  throw new UnsupportedLogLevelError(missing.join(', '));
+}
+
+// ...later
+callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
+```
+
+**Changes:**
+
+- Import new validation function
+- Import callBackendMethod
+- Update validation call
+- Replace direct `backend.log()` with `callBackendMethod()`
+- Update all log call sites (regular events, auto-events, etc.)
+
+#### Task 11.4: Update Examples
+
+**Winston example:** `examples/winston-app/src/index.ts`
+
+**Current wrapper:**
+
+```typescript
+class WinstonBackend {
+  constructor(private logger: winston.Logger) {}
+  supportsLevel(): boolean {
+    return true;
+  }
+  log(level: string, message: string, payload: any): void {
+    this.logger.log({ level: levelMap[level] ?? 'info', message, payload });
+  }
+}
+```
+
+**Target: No wrapper needed!**
+
+```typescript
+// Create a simple adapter that maps Chronicler levels to Winston
+const winstonBackend = {
+  fatal: (msg: string, data: unknown) => logger.error(msg, data),
+  critical: (msg: string, data: unknown) => logger.error(msg, data),
+  alert: (msg: string, data: unknown) => logger.error(msg, data),
+  error: (msg: string, data: unknown) => logger.error(msg, data),
+  warn: (msg: string, data: unknown) => logger.warn(msg, data),
+  audit: (msg: string, data: unknown) => logger.info(msg, data),
+  info: (msg: string, data: unknown) => logger.info(msg, data),
+  debug: (msg: string, data: unknown) => logger.debug(msg, data),
+  trace: (msg: string, data: unknown) => logger.silly(msg, data),
+};
+
+const chronicle = createChronicle({
+  backend: winstonBackend,
+  metadata: { service: 'winston-app', env: process.env.NODE_ENV ?? 'dev' },
+});
+```
+
+**Benefits:**
+
+- Simpler code
+- No class needed
+- Clear level mapping
+- Works with any logger
+
+### Testing Strategy
+
+1. **Unit tests:** `tests/core/backend.test.ts` (new)
+   - Validate method interrogation
+   - Test missing method detection
+   - Test method invocation
+
+2. **Integration tests:** Update existing tests
+   - `tests/core/chronicle.test.ts` - Update mock backends
+   - `tests/integration/end-to-end.test.ts` - Update MockBackend
+
+3. **Example verification:**
+   - `examples/winston-app` - Simplify to direct object
+   - Verify it still runs and logs correctly
+
+### Success Criteria
+
+✅ No more `supportsLevel()` method  
+✅ Backend is plain object with level methods  
+✅ Validation checks `typeof backend[level] === 'function'`  
+✅ All existing tests pass with updated mocks  
+✅ New backend.test.ts provides coverage  
+✅ Example app simplified and working  
+✅ README updated with new pattern
+
+### Files to Modify
+
+1. `src/core/backend.ts` - Refactor interface and validation
+2. `src/core/chronicle.ts` - Update to use new validation
+3. `tests/core/backend.test.ts` - NEW: Unit tests for backend
+4. `tests/core/chronicle.test.ts` - Update MockBackend
+5. `tests/integration/end-to-end.test.ts` - Update MockBackend
+6. `examples/winston-app/src/index.ts` - Simplify backend
+7. `README.md` - Update backend example
+
+---
+
+## 📝 Task 12: Complex Express.js Example
+
+**Goal:** Transform the winston-app example into a complete MVP Express.js application with proper architecture, multiple log streams, and CloudWatch integration.
+
+### Architecture
+
+```
+examples/winston-app/
+├── src/
+│   ├── index.ts                 # App entry point
+│   ├── app.ts                   # Express app setup
+│   ├── config/
+│   │   ├── index.ts            # Config aggregator
+│   │   ├── logger.ts           # Logger config
+│   │   └── server.ts           # Server config
+│   ├── services/
+│   │   ├── logger.ts           # Winston logger factory
+│   │   └── chronicler.ts       # Chronicler instances
+│   ├── middleware/
+│   │   ├── requestLogger.ts    # HTTP request logging
+│   │   ├── errorHandler.ts    # Error handling + logging
+│   │   └── audit.ts            # Audit trail middleware
+│   ├── controllers/
+│   │   ├── health.controller.ts   # Health check endpoints
+│   │   ├── user.controller.ts     # User CRUD (demo)
+│   │   └── admin.controller.ts    # Admin operations (audit demo)
+│   ├── routes/
+│   │   ├── index.ts            # Route aggregator
+│   │   ├── health.routes.ts    # Health routes
+│   │   ├── user.routes.ts      # User routes
+│   │   └── admin.routes.ts     # Admin routes
+│   └── events.ts               # Chronicler event definitions
+├── chronicler.config.ts         # CLI config
+├── package.json
+├── tsconfig.json
+└── README.md
+```
+
+### Task 12.1: Express App Structure
+
+**Core Setup:**
+
+1. **src/index.ts** - Entry point
+   - Load config
+   - Initialize logger
+   - Start server
+   - Graceful shutdown handling
+
+2. **src/app.ts** - Express app factory
+   - Middleware setup
+   - Route registration
+   - Error handling
+   - Export configured app
+
+3. **src/config/** - Configuration layer
+   - Environment variables
+   - Defaults and validation
+   - Type-safe config exports
+
+### Task 12.2: Multi-Logger Setup
+
+**src/services/logger.ts** - Winston factory with CloudWatch
+
+```typescript
+import winston, { LeveledLogMethod } from 'winston';
+import * as CircularJSON from 'circular-json';
+import * as config from '../config';
+
+const CloudWatchTransport = require('winston-aws-cloudwatch');
+
+const isProduction = config.environment === 'production';
+
+export const customLevels = {
+  levels: {
+    fatal: 0,
+    critical: 1,
+    error: 2,
+    alert: 3,
+    warn: 4,
+    audit: 5,
+    http: 6,
+    info: 7,
+    debug: 8,
+    trace: 9,
+  },
+  colors: {
+    fatal: 'red bold',
+    critical: 'red',
+    error: 'red',
+    alert: 'yellow',
+    warn: 'yellow',
+    audit: 'magenta',
+    http: 'cyan',
+    info: 'green',
+    debug: 'blue',
+    trace: 'grey',
+  },
+};
+
+export type LogLevels = keyof typeof customLevels.levels;
+
+type CustomLogger = winston.Logger & {
+  [L in LogLevels]: LeveledLogMethod;
+};
+
+winston.addColors(customLevels.colors);
+
+// Factory to create logger per stream
+function createLogger(
+  streamName: string,
+  opts?: {
+    level?: LogLevels;
+    cwOverrides?: Record<string, unknown>;
+    logGroupName?: string;
+  },
+): CustomLogger {
+  const transports: winston.transport[] = [];
+
+  if (isProduction) {
+    try {
+      const cloudWatchConfig = {
+        ...(config as any).awsCloudWatch,
+        logStreamName: streamName,
+        ...(opts?.logGroupName ? { logGroupName: opts.logGroupName } : {}),
+        ...(opts?.cwOverrides ?? {}),
+      };
+      transports.push(new CloudWatchTransport(cloudWatchConfig));
+    } catch (e) {
+      console.error(`Failed to create CloudWatch transport for ${streamName}`, e);
+      transports.push(new winston.transports.Console());
+    }
+  } else {
+    transports.push(new winston.transports.Console());
+  }
+
+  return winston.createLogger({
+    levels: customLevels.levels,
+    level: opts?.level ?? 'info',
+    format: isProduction
+      ? winston.format.combine(winston.format.timestamp(), winston.format.json())
+      : winston.format.combine(
+          winston.format.colorize({ all: true }),
+          winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+          winston.format.printf(({ timestamp, level, message, ...meta }) => {
+            const metaStr =
+              meta && Object.keys(meta).length ? CircularJSON.stringify(meta, null, 2) : '';
+            return `${timestamp} [${level}]: ${message}${metaStr ? ' ' + metaStr : ''}`;
+          }),
+        ),
+    defaultMeta: { stream: streamName },
+    transports,
+  }) as CustomLogger;
+}
+
+// Pre-configured loggers
+export const loggerMain = createLogger('main');
+export const loggerAudit = createLogger('audit');
+export const loggerHttp = createLogger('http');
+
+export const getLogger = (streamName: string, opts?: Parameters<typeof createLogger>[1]) =>
+  createLogger(streamName, opts);
+
+export default loggerMain;
+```
+
+**Features:**
+
+- Custom log levels matching Chronicler
+- CloudWatch transport in production
+- Console in development with colors
+- Separate streams for main/audit/http
+- Factory for additional streams
+
+### Task 12.3: Multiple Chronicles
+
+**src/services/chronicler.ts** - Chronicle instances per logger
+
+```typescript
+import { createChronicle } from 'chronicler';
+import { loggerMain, loggerAudit, loggerHttp, type LogLevels } from './logger';
+import { system, api, admin } from '../events';
+
+// Create backend adapters for each logger
+function createBackend(logger: any) {
+  return {
+    fatal: (msg: string, data: unknown) => logger.fatal(msg, data),
+    critical: (msg: string, data: unknown) => logger.critical(msg, data),
+    alert: (msg: string, data: unknown) => logger.alert(msg, data),
+    error: (msg: string, data: unknown) => logger.error(msg, data),
+    warn: (msg: string, data: unknown) => logger.warn(msg, data),
+    audit: (msg: string, data: unknown) => logger.audit(msg, data),
+    info: (msg: string, data: unknown) => logger.info(msg, data),
+    debug: (msg: string, data: unknown) => logger.debug(msg, data),
+    trace: (msg: string, data: unknown) => logger.trace(msg, data),
+  };
+}
+
+// Main chronicle for application logs
+export const chronicleMain = createChronicle({
+  backend: createBackend(loggerMain),
+  metadata: {
+    service: 'winston-app',
+    env: process.env.NODE_ENV ?? 'development',
+    version: process.env.APP_VERSION ?? '1.0.0',
+  },
+  monitoring: { memory: true, cpu: true },
+});
+
+// Audit chronicle for compliance/security logs
+export const chronicleAudit = createChronicle({
+  backend: createBackend(loggerAudit),
+  metadata: {
+    service: 'winston-app',
+    env: process.env.NODE_ENV ?? 'development',
+    stream: 'audit',
+  },
+  monitoring: { memory: false, cpu: false },
+});
+
+// HTTP chronicle for request/response logs
+export const chronicleHttp = createChronicle({
+  backend: createBackend(loggerHttp),
+  metadata: {
+    service: 'winston-app',
+    env: process.env.NODE_ENV ?? 'development',
+    stream: 'http',
+  },
+  monitoring: { memory: false, cpu: false },
+});
+```
+
+**Features:**
+
+- Three separate chronicles for different log types
+- Each uses its own Winston logger/stream
+- Different monitoring configs per use case
+- Shared metadata for correlation
+
+### Task 12.4: Express Middleware
+
+**src/middleware/requestLogger.ts** - HTTP request logging
+
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import { chronicleHttp } from '../services/chronicler';
+import { api } from '../events';
+
+export function requestLogger(req: Request, res: Response, next: NextFunction) {
+  const start = Date.now();
+  const correlation = chronicleHttp.startCorrelation(api.request, {
+    requestId: req.id || `req-${Date.now()}`,
+    ip: req.ip,
+    userAgent: req.get('user-agent'),
+  });
+
+  // Attach to request for use in handlers
+  (req as any).chronicle = correlation;
+
+  // Log on response finish
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    correlation.event(api.request.completed, {
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      duration,
+    });
+    correlation.complete();
+  });
+
+  next();
+}
+```
+
+**src/middleware/errorHandler.ts** - Error handling
+
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import { chronicleMain } from '../services/chronicler';
+import { system } from '../events';
+
+export function errorHandler(err: Error, req: Request, res: Response, next: NextFunction) {
+  chronicleMain.event(system.events.error, {
+    error: err,
+    path: req.path,
+    method: req.method,
+  });
+
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
+  });
+}
+```
+
+**src/middleware/audit.ts** - Audit trail
+
+```typescript
+import { Request, Response, NextFunction } from 'express';
+import { chronicleAudit } from '../services/chronicler';
+import { admin } from '../events';
+
+export function auditLog(action: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    chronicleAudit.event(admin.events.action, {
+      action,
+      userId: (req as any).user?.id || 'anonymous',
+      resource: req.path,
+      method: req.method,
+    });
+    next();
+  };
+}
+```
+
+### Task 12.5: Documentation
+
+**README.md sections:**
+
+1. **Architecture** - Explain MVC structure, logger separation
+2. **Configuration** - Environment variables, CloudWatch setup
+3. **Log Streams** - When to use main/audit/http
+4. **Running** - Development and production modes
+5. **CloudWatch Setup** - AWS credentials, IAM policies
+6. **Event Documentation** - Link to generated logs.md
+7. **Adding Features** - How to add controllers/routes
+
+**Environment Variables:**
+
+- `NODE_ENV` - development | production
+- `LOG_LEVEL` - Log level for Winston
+- `PORT` - Server port
+- `AWS_REGION` - CloudWatch region
+- `AWS_LOG_GROUP` - CloudWatch log group name
+- `APP_VERSION` - Application version
+
+### Dependencies to Add
+
+```json
+{
+  "dependencies": {
+    "express": "^4",
+    "winston": "^3",
+    "winston-aws-cloudwatch": "^latest",
+    "circular-json": "^0.5",
+    "chronicler": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/express": "^4",
+    "@types/circular-json": "^0.5",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}
+```
+
+### Success Criteria
+
+✅ Express app structure follows MVC pattern  
+✅ Three separate Winston loggers (main/audit/http)  
+✅ Three separate Chronicles using new backend contract  
+✅ CloudWatch transport configured for production  
+✅ Request logging middleware with correlations  
+✅ Error handling with logging  
+✅ Audit middleware for sensitive operations  
+✅ Complete README with setup instructions  
+✅ Event definitions generate docs via CLI  
+✅ App runs in development mode  
+✅ All logs route to correct streams
+
+### Files to Create
+
+**Configuration:**
+
+- `src/config/index.ts`
+- `src/config/logger.ts`
+- `src/config/server.ts`
+
+**Core:**
+
+- `src/index.ts`
+- `src/app.ts`
+
+**Services:**
+
+- `src/services/logger.ts`
+- `src/services/chronicler.ts`
+
+**Middleware:**
+
+- `src/middleware/requestLogger.ts`
+- `src/middleware/errorHandler.ts`
+- `src/middleware/audit.ts`
+
+**Controllers:**
+
+- `src/controllers/health.controller.ts`
+- `src/controllers/user.controller.ts`
+- `src/controllers/admin.controller.ts`
+
+**Routes:**
+
+- `src/routes/index.ts`
+- `src/routes/health.routes.ts`
+- `src/routes/user.routes.ts`
+- `src/routes/admin.routes.ts`
+
+**Events:**
+
+- `src/events.ts` (updated with api.request, admin.action, etc.)
+
+---
+
+## Decisions (Updated)
+
+- Keep field types simple: `string | number | boolean | error`. No
+  enums/dates/complex shapes in v1.
+- Use `stderr-lib` for error serialization.
+- `_validation.contextCollisions` is sufficient; no extra hooks.
+- Correlation timeout: default to 300 seconds when not specified.
+- CLI loads config/events via `tsx` for simplicity.
+- Use standard Markdown for docs formatting.
+- Implement CPU monitoring (basic) in Phase 1, behind a flag.
+- Fork logs reset correlation activity timer.
+- Package name: publish as `chronicler` (unscoped).
+- **NEW: Backend uses method interrogation, no supportsLevel() wrapper**
+- **NEW: Examples show direct logger object usage without classes**

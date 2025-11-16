@@ -190,16 +190,38 @@ function defineCorrelationGroup<
 ### Configuration
 
 ```typescript
-type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+type LogLevel =
+  | 'fatal'
+  | 'critical'
+  | 'alert'
+  | 'error'
+  | 'warn'
+  | 'audit'
+  | 'info'
+  | 'debug'
+  | 'trace';
 
 interface LogBackend {
-  // MUST be synchronous - async backends are not supported
-  log(level: LogLevel, message: string, data: Record<string, unknown>): void;
-  supportsLevel(level: LogLevel): boolean;
+  // The backend logger object with methods for each log level
+  // Chronicler will interrogate this object to ensure required log level methods exist
+  // e.g., typeof backend.info === 'function', typeof backend.error === 'function', etc.
+
+  // Each log level method should accept:
+  // - message: string
+  // - data: Record<string, unknown> (the complete log payload)
+
+  // Examples of valid backends:
+  // - Winston logger with custom levels
+  // - Pino logger
+  // - Console wrapper with level methods
+  // - Any object with fatal(), critical(), alert(), error(), warn(), audit(), info(), debug(), trace() methods
+
+  [level: string]: (message: string, data: Record<string, unknown>) => void;
 }
 
 interface ChroniclerConfig {
-  // Required
+  // Required: backend logger object
+  // Must have methods for all required log levels: fatal, critical, alert, error, warn, audit, info, debug, trace
   backend: LogBackend;
 
   // Global metadata (validated against reserved fields at initialization)
@@ -207,8 +229,8 @@ interface ChroniclerConfig {
 
   // Optional monitoring
   monitoring?: {
-    memory?: boolean; // Enables _perf.* fields
-    // Note: cpu monitoring is not currently implemented
+    memory?: boolean; // Enables _perf.* memory fields
+    cpu?: boolean; // Enables _perf.* CPU fields
   };
 
   // Optional correlation ID generation
@@ -257,7 +279,7 @@ interface ForkChronicle extends Omit<Chronicler, 'startCorrelation'> {
 ### Initialization
 
 ```typescript
-function createChronicle(config: ChroniclerConfig): Chronicler;
+function createChronicle(config: ChroniclerConfig): Chronicler {}
 
 // Throws during initialization:
 // - UnsupportedLogLevelError: Backend doesn't support required log level
@@ -502,7 +524,7 @@ try {
   "level": "info",
   "message": "DICOM query executed",
   "timestamp": "2024-11-15T14:30:02.456Z",
-  "fields": { ... },
+  "fields": { "fieldName": "..." },
   "_perf": {
     "heapUsed": 45678912,
     "heapTotal": 67108864,
@@ -562,14 +584,14 @@ Fork counters are instance-specific. In async scenarios:
 **Example:**
 
 ```typescript
-const correlation = logger.startCorrelation(...);  // forkId: "0"
+const correlation = logger.startCorrelation(/*...*/); // forkId: "0"
 
 const [fork1, fork2] = await Promise.all([
-  correlation.fork({ taskId: "A" }),  // forkId: "1"
-  correlation.fork({ taskId: "B" })   // forkId: "2"
+  correlation.fork({ taskId: 'A' }), // forkId: "1"
+  correlation.fork({ taskId: 'B' }), // forkId: "2"
 ]);
 
-const fork1_1 = fork1.fork({ subtask: "X" });  // forkId: "1.1"
+const fork1_1 = fork1.fork({ subtask: 'X' }); // forkId: "1.1"
 ```
 
 ### Context Inheritance
@@ -611,14 +633,36 @@ logger.addContext({ count: 2 }); // Logs _validation.contextCollisions
 **All error fields use `unknown` type:**
 
 ```typescript
-fields: {
-  error: { type: 'error', required: true, doc: 'Error object' }
-}
+const events = {
+  api: {
+    dicomQuery: defineCorrelationGroup({
+      key: 'api.dicomQuery',
+      type: 'correlation',
+      doc: 'DICOM query operation tracking',
+      timeout: 30000,
+      events: {
+        queryFailed: defineEvent({
+          key: 'api.dicomQuery.queryFailed',
+          level: 'error',
+          message: 'DICOM query failed',
+          doc: 'Database query error',
+          fields: {
+            error: {
+              type: 'error',
+              required: true,
+              doc: 'Error object',
+            },
+          },
+        }),
+      },
+    }),
+  },
+};
 
 // Usage:
 logger.event(events.api.dicomQuery.queryFailed, {
-  error: e,  // e is unknown from catch block
-  retryable: true
+  error: e, // e is unknown from catch block
+  retryable: true,
 });
 ```
 
@@ -791,7 +835,28 @@ System-level events
       "timeout": 30000,
       "doc": "DICOM query operation tracking",
       "autoEvents": ["start", "complete", "timeout", "metadataWarning"],
-      "events": [...]
+      "events": [
+        {
+          "key": "api.dicomQuery.queryExecuted",
+          "level": "info",
+          "message": "DICOM query executed",
+          "doc": "Database query completed",
+          "fields": [
+            {
+              "name": "resultCount",
+              "type": "number",
+              "required": true,
+              "doc": "Results returned"
+            },
+            {
+              "name": "duration",
+              "type": "number",
+              "required": true,
+              "doc": "Query duration in ms"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
@@ -896,31 +961,27 @@ logger.event(events.system.shutdown, {});
 
 ```typescript
 async function handleDicomQuery(userId: string, studyId: string) {
-  const correlation = logger.startCorrelation(
-    events.api.dicomQuery,
-    { userId, studyId }
-  );
+  const correlation = logger.startCorrelation(events.api.dicomQuery, { userId, studyId });
   // Logs: api.dicomQuery.start
   // Starts 30s activity timer
 
   try {
     const start = Date.now();
-    const results = await db.query(...);
+    const results = await db.query(/*...*/);
 
     correlation.event(events.api.dicomQuery.queryExecuted, {
       resultCount: results.length,
-      duration: Date.now() - start
+      duration: Date.now() - start,
     });
     // Resets activity timer
 
     correlation.complete();
     // Logs: api.dicomQuery.complete with total duration
     // Clears activity timer
-
   } catch (e) {
     correlation.event(events.api.dicomQuery.queryFailed, {
-      error: e,  // unknown type, safely serialized
-      retryable: isRetryable(e)
+      error: e, // unknown type, safely serialized
+      retryable: isRetryable(e),
     });
     // Resets activity timer
 
