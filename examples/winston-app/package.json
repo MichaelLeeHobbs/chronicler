@@ -4,15 +4,19 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "demo": "node demo.js",
     "start": "node --enable-source-maps dist/index.js",
     "build": "tsc -p tsconfig.json",
     "docs": "tsx ../../src/cli/index.ts docs"
   },
   "dependencies": {
+    "chronicler": "workspace:*",
+    "express": "^5.1.0",
     "winston": "^3",
-    "chronicler": "workspace:*"
+    "winston-transport": "^4.9.0"
   },
   "devDependencies": {
+    "@types/express": "^5",
     "tsx": "^4",
     "typescript": "^5"
   }

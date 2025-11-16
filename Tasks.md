@@ -171,11 +171,11 @@ This generates `logs.md` in the example directory with auto-generated event docu
 
 | Status | Task                       | Description                                                                                                              | Tests           | Deps |
 | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------- | ---- |
-| ☐      | 12.1 Express app structure | Create proper MVP Express.js app with controllers/services/providers/routes separation                                   | Manual smoke    | 11.x |
-| ☐      | 12.2 Multi-logger setup    | Implement Winston logger factory with CloudWatch transport (prod) and console (dev), custom log levels, multiple streams | Manual + lint   | 12.1 |
-| ☐      | 12.3 Multiple chronicles   | Create separate chronicles for main, audit, and http loggers using the new backend contract                              | Manual smoke    | 12.2 |
-| ☐      | 12.4 Express middleware    | Add request logging middleware, error handlers, and audit trail examples                                                 | Manual + README | 12.3 |
-| ☐      | 12.5 Documentation         | Update README with multi-logger setup, environment config, CloudWatch setup, and architecture                            | Markdown lint   | 12.4 |
+| ☑     | 12.1 Express app structure | Create proper MVP Express.js app with controllers/services/providers/routes separation                                   | Manual smoke    | 11.x |
+| ☑     | 12.2 Multi-logger setup    | Implement Winston logger factory with CloudWatch transport (prod) and console (dev), custom log levels, multiple streams | Manual + lint   | 12.1 |
+| ☑     | 12.3 Multiple chronicles   | Create separate chronicles for main, audit, and http loggers using the new backend contract                              | Manual smoke    | 12.2 |
+| ☑     | 12.4 Express middleware    | Add request logging middleware, error handlers, and audit trail examples                                                 | Manual + README | 12.3 |
+| ☑     | 12.5 Documentation         | Update README with multi-logger setup, environment config, CloudWatch setup, and architecture                            | Markdown lint   | 12.4 |
 
 ## P. Publishing
 

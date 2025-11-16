@@ -1,3 +1,4 @@
+export { ChroniclerCliConfig } from './cli/config';
 export { type LogBackend } from './core/backend';
 export { type Chronicler, type CorrelationChronicle, createChronicle } from './core/chronicle';
 export {

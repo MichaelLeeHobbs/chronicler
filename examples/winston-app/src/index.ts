@@ -1,49 +1,72 @@
-import * as winston from 'winston';
-import { createChronicle } from 'chronicler';
-import { request, system } from './events';
+/**
+ * Application entry point
+ */
 
-// Configure Winston
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL ?? 'info',
-  format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
-  transports: [new winston.transports.Console()],
+import { createApp } from './app.js';
+import { config } from './config/index.js';
+import { system } from './events.js';
+import { chronicleMain } from './services/chronicler.js';
+
+// Create Express app
+const app = createApp();
+const port = config.port;
+
+// Start server
+const server = app.listen(port, () => {
+  chronicleMain.event(system.events.startup, {
+    port,
+    env: config.environment,
+  });
+
+  console.log(`🚀 Server running on port ${port}`);
+  console.log(`📊 Environment: ${config.environment}`);
+  console.log(`📝 Log level: ${config.logger.level}`);
+  console.log('\nAvailable endpoints:');
+  console.log(`  GET  http://localhost:${port}/api/health`);
+  console.log(`  GET  http://localhost:${port}/api/users`);
+  console.log(`  POST http://localhost:${port}/api/users`);
+  console.log(`  POST http://localhost:${port}/api/admin/login`);
+  console.log(`  POST http://localhost:${port}/api/admin/action`);
 });
 
-// Create backend adapter that maps Chronicler levels to Winston methods
-const winstonBackend = {
-  fatal: (msg: string, data: unknown) => logger.error(msg, data),
-  critical: (msg: string, data: unknown) => logger.error(msg, data),
-  alert: (msg: string, data: unknown) => logger.error(msg, data),
-  error: (msg: string, data: unknown) => logger.error(msg, data),
-  warn: (msg: string, data: unknown) => logger.warn(msg, data),
-  audit: (msg: string, data: unknown) => logger.info(msg, data),
-  info: (msg: string, data: unknown) => logger.info(msg, data),
-  debug: (msg: string, data: unknown) => logger.debug(msg, data),
-  trace: (msg: string, data: unknown) => logger.silly(msg, data),
+// Graceful shutdown
+const shutdown = (signal: string) => {
+  chronicleMain.event(system.events.shutdown, {
+    reason: signal,
+  });
+
+  console.log(`\n${signal} received, shutting down gracefully...`);
+
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
+
+  // Force shutdown after 10 seconds
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
 };
 
-// Create chronicle
-const chronicle = createChronicle({
-  backend: winstonBackend,
-  metadata: { service: 'winston-app', env: process.env.NODE_ENV ?? 'dev' },
-  monitoring: { memory: true },
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+  chronicleMain.event(system.events.error, {
+    error,
+    context: 'uncaughtException',
+  });
+  console.error('Uncaught exception:', error);
+  process.exit(1);
 });
 
-async function main() {
-  const port = Number(process.env.PORT ?? 3000);
-  chronicle.event(system.events.startup, { port });
-
-  const corr = chronicle.startCorrelation(request, { requestId: 'req-123' });
-  corr.event(request.events.validated, { method: 'GET', path: '/' });
-
-  const fork = corr.fork({ step: 'background-task' });
-  fork.event(system.events.startup, { port: 0 });
-
-  await new Promise((r) => setTimeout(r, 100));
-  corr.complete();
-}
-
-main().catch((err) => {
-  logger.error('Example failed', { err });
+process.on('unhandledRejection', (reason) => {
+  chronicleMain.event(system.events.error, {
+    error: reason instanceof Error ? reason : new Error(String(reason)),
+    context: 'unhandledRejection',
+  });
+  console.error('Unhandled rejection:', reason);
   process.exit(1);
 });
