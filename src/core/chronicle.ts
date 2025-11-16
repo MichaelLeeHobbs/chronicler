@@ -49,7 +49,22 @@ export interface Chronicler {
   fork(context?: ContextRecord): Chronicler;
 }
 
-export interface CorrelationChronicle extends Chronicler {
+/**
+ * A correlation represents a logical unit of work with a defined lifecycle.
+ *
+ * Unlike a root Chronicler, a correlation:
+ * - Has a single shared correlation ID for all events
+ * - Has lifecycle events (start, complete, timeout, metadataWarning)
+ * - Can timeout if not completed within the configured duration
+ * - Cannot start nested correlations (use fork() for parallel work within a correlation)
+ */
+export interface CorrelationChronicle {
+  event<F extends FieldDefinitions>(event: EventDefinition<F>, fields: InferFields<F>): void;
+
+  addContext(context: ContextRecord): void;
+
+  fork(context?: ContextRecord): Chronicler;
+
   complete(fields?: ContextRecord): void;
 
   timeout(): void;
@@ -109,7 +124,8 @@ type NormalizedCorrelationGroup = Omit<CorrelationEventGroup, 'events' | 'timeou
  *   For root chronicles: generates a NEW ID each time (no correlation, events are independent).
  *   For correlation chronicles: returns the SAME ID (all events share the correlation ID).
  * @param correlationIdGenerator - Function that creates NEW correlation IDs.
- *   Passed through to enable child correlations to generate their own IDs.
+ *   Used when startCorrelation() is called on root chronicles.
+ *   Also used by forks to create child correlations.
  */
 const createChronicleInstance = (
   config: ChroniclerConfig,
@@ -174,13 +190,13 @@ const createChronicleInstance = (
 };
 
 class CorrelationChronicleImpl implements CorrelationChronicle {
-  private readonly delegate: Chronicler;
   private readonly timer: CorrelationTimer;
   private completed = false;
   private completionCount = 0;
   private readonly startedAt = Date.now();
   private readonly autoEvents: CorrelationAutoEvents;
-  private readonly perfContext: PerfContext = {}; // Instance-specific performance context
+  private readonly perfContext: PerfContext = {};
+  private forkCounter = 0;
 
   constructor(
     private readonly config: ChroniclerConfig,
@@ -191,40 +207,57 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     private readonly forkId: string,
   ) {
     this.timer = new CorrelationTimer(this.group.timeout, () => this.timeout());
-    this.delegate = createChronicleInstance(
-      config,
-      contextStore,
-      currentCorrelationId,
-      correlationIdGenerator,
-      forkId,
-      {
-        onActivity: () => this.timer.touch(),
-        onContextValidation: (validation) =>
-          this.emitMetadataWarnings(validation.collisionDetails ?? []),
-      },
-    );
     this.autoEvents = getAutoEvents(this.group.events);
     this.timer.touch();
     this.emitAutoEvent(this.autoEvents.start, {});
   }
 
   event<F extends FieldDefinitions>(eventDef: EventDefinition<F>, fields: InferFields<F>): void {
-    this.delegate.event(eventDef, fields);
+    const payload = buildPayload(
+      this.config,
+      this.contextStore,
+      eventDef,
+      fields,
+      this.currentCorrelationId,
+      this.forkId,
+      this.perfContext,
+    );
+    callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
+    this.timer.touch();
   }
 
   addContext(context: ContextRecord): void {
-    this.delegate.addContext(context);
+    const validation = this.contextStore.add(context);
+    if (validation.collisionDetails && validation.collisionDetails.length > 0) {
+      this.emitMetadataWarnings(validation.collisionDetails);
+    }
   }
 
-  fork(context?: ContextRecord): Chronicler {
-    return this.delegate.fork(context);
+  fork(extraContext?: ContextRecord): Chronicler {
+    this.forkCounter++;
+    const childForkId =
+      this.forkId === '0' ? String(this.forkCounter) : `${this.forkId}.${this.forkCounter}`;
+    const forkStore = new ContextStore(this.contextStore.snapshot());
+
+    const forkChronicle = createChronicleInstance(
+      this.config,
+      forkStore,
+      this.currentCorrelationId,
+      this.correlationIdGenerator,
+      childForkId,
+      {
+        onActivity: () => this.timer.touch(),
+      },
+    );
+
+    if (extraContext && Object.keys(extraContext).length > 0) {
+      forkChronicle.addContext(extraContext);
+    }
+
+    return forkChronicle;
   }
 
-  startCorrelation(group: CorrelationEventGroup, metadata?: ContextRecord): CorrelationChronicle {
-    return this.delegate.startCorrelation(group, metadata);
-  }
-
-  complete(fields: Record<string, unknown> = {}): void {
+  complete(fields: ContextRecord = {}): void {
     this.completionCount += 1;
     this.completed = true;
     this.timer.clear();
@@ -274,7 +307,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       fields as InferFields<FieldDefinitions>,
       this.currentCorrelationId,
       this.forkId,
-      this.perfContext, // Pass instance-specific context
+      this.perfContext,
       overrides,
     );
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);

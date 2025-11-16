@@ -13,6 +13,17 @@
 - TypeScript: No errors ✅
 - Build: Passing ✅
 
+**Recent Cleanup (Nov 16, 2025):**
+
+- ✅ Fixed CPU monitoring module-level state bug
+- ✅ Removed impossible `undefined` from `ContextCollisionDetail.existingValue`
+- ✅ Removed unused `history` and `pendingCollisionDetails` from ContextStore
+- ✅ Simplified `stringifyValue()` function
+- ✅ Fixed API signatures to use `ContextRecord` instead of `Record<string, unknown>`
+- ✅ Removed unused `correlationIdGenerator` field from CorrelationChronicleImpl
+- ✅ **Removed nested correlation support** (breaking change - pre-v1.0)
+- ✅ Simplified CorrelationChronicleImpl - removed delegate pattern
+
 ---
 
 ## 🔧 Pre-v1.0 Polish Tasks
