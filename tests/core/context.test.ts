@@ -25,9 +25,7 @@ describe('context sanitizer', () => {
   });
 
   it('drops unsupported values', () => {
-    // @ts-expect-error Testing unsupported value
-    const result = sanitizeContextInput({ skipped: undefined, kept: true });
-
+    const result = sanitizeContextInput({ skipped: [], kept: true });
     expect(result.context).toEqual({ kept: true });
   });
 });
