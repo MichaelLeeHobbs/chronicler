@@ -49,6 +49,9 @@ export const RESERVED_FIELD_PATHS: ReadonlySet<AllReservedFields> = new Set<AllR
   ...RESERVED_PERF_FIELDS.map((field) => `_perf.${field}` as const),
 ]);
 
+// Export the reserved field arrays for CLI usage
+export { RESERVED_PERF_FIELDS, RESERVED_TOP_LEVEL_FIELDS, RESERVED_VALIDATION_FIELDS };
+
 export const isReservedTopLevelField = (key: string): key is ReservedTopLevelField =>
   TOP_LEVEL_SET.has(key);
 
