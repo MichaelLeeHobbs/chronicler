@@ -21,7 +21,14 @@ const RESERVED_VALIDATION_FIELDS = [
   'multipleCompletes',
 ] as const;
 
-const RESERVED_PERF_FIELDS = ['heapUsed', 'heapTotal', 'external', 'rss'] as const;
+const RESERVED_PERF_FIELDS = [
+  'heapUsed',
+  'heapTotal',
+  'external',
+  'rss',
+  'cpuUser',
+  'cpuSystem',
+] as const;
 
 export type ReservedTopLevelField = (typeof RESERVED_TOP_LEVEL_FIELDS)[number];
 export type ReservedValidationField = (typeof RESERVED_VALIDATION_FIELDS)[number];

@@ -12,6 +12,8 @@ export interface PerformanceSample {
   heapTotal: number;
   external: number;
   rss: number;
+  cpuUser?: number;
+  cpuSystem?: number;
 }
 
 export interface LogPayload {
