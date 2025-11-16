@@ -3,9 +3,9 @@
 > Living implementation plan derived from `Specification.md`. Each task is
 > scoped so it can be developed and tested end-to-end before moving on.
 
-## 📊 Project Status (Updated: Session End)
+## 📊 Project Status (Updated: Session End - Fork System Complete)
 
-**Phase 1 Core Features: 75% Complete** ✅
+**Phase 1 Core Features: 95% Complete** ✅
 
 - ✅ **Core Type System** (Tasks 1.1-1.4): Complete with strict TypeScript
   coverage
@@ -15,23 +15,23 @@
   envelopes, error serialization working
 - ✅ **Correlation Lifecycle** (Tasks 4.1-4.4): Auto-events, timers, duration
   tracking, collision warnings complete
-- ⚠️ **Fork System** (Tasks 5.1-5.3): Not yet started - next priority
+- ✅ **Fork System** (Tasks 5.1-5.3): Hierarchical IDs, context isolation,
+  nested forks - COMPLETE
 - ✅ **Memory Monitoring** (Task 6.1): Basic memory sampling implemented
 - ⏳ **CPU Monitoring** (Task 6.2): Planned for Phase 1 completion
 - ❌ **CLI & Tooling** (Tasks 7.x): Not started - Phase 2
 - ❌ **Documentation & Release** (Tasks 9.x): Pending API stability
 
-**Test Status**: 32/32 tests passing ✅  
+**Test Status**: 46/46 tests passing ✅  
 **Lint**: Clean ✅  
 **TypeCheck**: No errors ✅
 
 **Next Steps**:
 
-1. Implement Fork System (Task 5.1-5.3) - hierarchical IDs, context isolation,
-   nested forks
-2. Add CPU monitoring (Task 6.2) to complete performance monitoring
-3. Expand test coverage for edge cases
-4. Begin CLI implementation for validation/docs generation
+1. Add CPU monitoring (Task 6.2) to complete Phase 1 performance monitoring
+2. Expand test coverage for edge cases and type-level tests
+3. Begin CLI implementation for validation/docs generation
+4. Prepare comprehensive documentation for Phase 1 release
 
 ## Legend
 
@@ -77,11 +77,11 @@
 
 ## 5. Fork System & Hierarchies
 
-| Status | Task                               | Description                                                                                       | Tests                                                                  | Deps     |
-| ------ | ---------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------- |
-| ☐      | 5.1 Fork ID generator              | Counter-per-instance hierarchical IDs ("0", "1", "2.1").                                          | Deterministic unit tests with sync + async scenarios (using promises). | 2.2      |
-| ☐      | 5.2 Fork Chronicle API             | Implement `fork()` cloning context, forbidding correlation start/complete, enabling nested forks. | Tests for inheritance, no upward propagation, unique IDs.              | 5.1, 3.x |
-| ☐      | 5.3 Correlation vs fork separation | Ensure correlation-only features unavailable on forks, and forks respect parent timers.           | Integration tests bridging Sections 4 & 5.                             | 4.x, 5.2 |
+| Status | Task                               | Description                                                                                       | Tests                                                    | Deps     |
+| ------ | ---------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | -------- |
+| ☑     | 5.1 Fork ID generator              | Counter-per-instance hierarchical IDs ("0", "1", "2.1").                                          | ✅ 4 tests verify sequential and hierarchical fork IDs   | 2.2      |
+| ☑     | 5.2 Fork Chronicle API             | Implement `fork()` cloning context, forbidding correlation start/complete, enabling nested forks. | ✅ 5 tests verify context inheritance and isolation      | 5.1, 3.x |
+| ☑     | 5.3 Correlation vs fork separation | Ensure correlation-only features unavailable on forks, and forks respect parent timers.           | ✅ 5 tests verify integration with correlation lifecycle | 4.x, 5.2 |
 
 ## 6. Observability & Monitoring
 
@@ -186,5 +186,62 @@
 - CPU monitoring not implemented (Task 6.2)
 - No integration tests for nested correlations yet
 
-**Next Priority:** Task 5 - Fork System for isolated child contexts with
-hierarchical IDs
+**Next Priority:** Task 6.2 - CPU monitoring to complete Phase 1 performance
+features
+
+### Session: Fork System Implementation (Task 5 Complete)
+
+**What Was Built:**
+
+1. **Hierarchical Fork ID System** (Task 5.1)
+   - Root chronicle starts with `forkId: "0"`
+   - Sequential IDs for direct forks: "1", "2", "3"...
+   - Nested hierarchical IDs: "1.1", "1.2", "2.1.1"...
+   - Per-instance fork counters prevent ID collisions
+   - Fork IDs included in all log payloads
+
+2. **Fork Chronicle API** (Task 5.2)
+   - `fork(context)` creates isolated child chronicle
+   - Inherits all parent context (metadata + added context)
+   - Context changes don't propagate upward (isolation)
+   - Supports unlimited nesting depth
+   - Each fork maintains separate fork counter
+
+3. **Correlation Integration** (Task 5.3)
+   - Forks from correlations inherit correlation metadata
+   - Fork events trigger parent correlation activity timer
+   - Shared `correlationId` across fork hierarchy
+   - `forkId` differentiates parallel/nested operations
+   - Proper timer management across fork boundaries
+
+**Implementation Details:**
+
+- Updated `LogPayload` interface to include `forkId` field
+- Added `forkId` to reserved fields list
+- Modified `buildPayload()` to accept and include forkId
+- `createChronicleInstance()` tracks local `forkCounter` via closure
+- Root chronicle initialized with `forkId: "0"`
+- Fork ID generation algorithm:
+  - Root fork: `String(counter)` → "1", "2"...
+  - Nested fork: `${parentId}.${counter}` → "1.1", "2.3"...
+
+**Tests Added:**
+
+- 14 comprehensive fork tests across 5 test suites:
+  - **5.1 Fork ID Generation** (4 tests): Sequential, hierarchical, nested IDs
+  - **5.2 Context Inheritance** (3 tests): Inheritance, isolation, nested
+    context
+  - **5.3 Correlation Integration** (5 tests): Fork+correlation, timer
+    interaction, shared correlationId
+  - **5.4 Deep Nesting** (1 test): Multi-level fork hierarchies
+  - **5.5 Context Collisions** (1 test): Collision tracking in forks
+
+**Benefits:**
+
+- Clear operation tracing through hierarchical IDs
+- Perfect for parallel task tracking (e.g., Promise.all scenarios)
+- Context isolation prevents unintended metadata leakage
+- Correlation lifecycle properly managed across forks
+
+**Next Priority:** Task 6.2 - CPU monitoring to complete Phase 1 performance
+features

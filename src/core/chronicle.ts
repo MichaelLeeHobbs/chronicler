@@ -59,6 +59,7 @@ const buildPayload = (
   eventDef: EventDefinition,
   fields: InferFields<FieldDefinitions>,
   correlationIdProvider: () => string,
+  forkId: string,
   validationOverrides?: Partial<ValidationMetadata>,
 ): LogPayload => {
   const fieldValidation = validateFields(eventDef, fields);
@@ -72,6 +73,7 @@ const buildPayload = (
     eventKey: eventDef.key,
     fields: fieldValidation.normalizedFields,
     correlationId: correlationIdProvider(),
+    forkId,
     metadata: contextStore.snapshot(),
     timestamp: new Date().toISOString(),
   };
@@ -102,11 +104,21 @@ const createChronicleInstance = (
   contextStore: ContextStore,
   correlationIdProvider: () => string,
   correlationIdGenerator: () => string,
+  forkId: string,
   hooks: ChronicleHooks = {},
 ): Chronicler => {
+  let forkCounter = 0;
+
   return {
     event(eventDef, fields) {
-      const payload = buildPayload(config, contextStore, eventDef, fields, correlationIdProvider);
+      const payload = buildPayload(
+        config,
+        contextStore,
+        eventDef,
+        fields,
+        correlationIdProvider,
+        forkId,
+      );
       config.backend.log(eventDef.level, eventDef.message, payload);
       hooks.onActivity?.();
     },
@@ -115,12 +127,15 @@ const createChronicleInstance = (
       hooks.onContextValidation?.(validation);
     },
     fork(extraContext = {}) {
+      forkCounter++;
+      const childForkId = forkId === '0' ? String(forkCounter) : `${forkId}.${forkCounter}`;
       const forkStore = new ContextStore(contextStore.snapshot());
       const forkChronicle = createChronicleInstance(
         config,
         forkStore,
         correlationIdProvider,
         correlationIdGenerator,
+        childForkId,
         hooks,
       );
       if (Object.keys(extraContext).length > 0) {
@@ -138,6 +153,7 @@ const createChronicleInstance = (
         correlationStore,
         () => correlationId,
         correlationIdGenerator,
+        forkId,
       );
     },
   };
@@ -157,6 +173,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     private readonly contextStore: ContextStore,
     private readonly correlationIdProvider: () => string,
     private readonly correlationIdGenerator: () => string,
+    private readonly forkId: string,
   ) {
     this.timer = new CorrelationTimer(this.group.timeout, () => this.timeout());
     this.delegate = createChronicleInstance(
@@ -164,6 +181,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       contextStore,
       correlationIdProvider,
       correlationIdGenerator,
+      forkId,
       {
         onActivity: () => this.timer.touch(),
         onContextValidation: (validation) =>
@@ -243,6 +261,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       eventDef,
       fields as InferFields<FieldDefinitions>,
       this.correlationIdProvider,
+      this.forkId,
       overrides,
     );
     this.config.backend.log(eventDef.level, eventDef.message, payload);
@@ -323,5 +342,6 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
     baseContextStore,
     () => correlationIdGenerator(),
     correlationIdGenerator,
+    '0',
   );
 };

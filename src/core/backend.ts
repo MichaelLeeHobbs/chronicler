@@ -18,11 +18,11 @@ export interface LogPayload {
   eventKey: string;
   fields: Record<string, unknown>;
   correlationId: string;
+  forkId: string;
   metadata: Record<string, unknown>;
   timestamp: string;
   _validation?: ValidationMetadata;
   _perf?: PerformanceSample;
-
   [key: string]: unknown;
 }
 
