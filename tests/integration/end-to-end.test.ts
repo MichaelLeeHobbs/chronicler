@@ -231,11 +231,13 @@ describe('Integration Tests', () => {
       chronicle.addContext({ sessionId: 'abc' });
       chronicle.addContext({ userId: '456' }); // Collision!
 
-      chronicle.event(systemEvents.events.startup, { port: 3000 });
-
-      const payload = mock.getPayloads()[0];
-      expect(payload._validation?.contextCollisions).toContain('userId');
-      expect(payload.metadata.userId).toBe('123'); // Original preserved
+      // Check that chronicler.contextCollision event was emitted
+      const collisionEvent = mock.findByKey('chronicler.contextCollision');
+      expect(collisionEvent).toBeDefined();
+      expect(collisionEvent?.fields.key).toBe('userId');
+      expect(collisionEvent?.fields.existingValue).toBe('123');
+      expect(collisionEvent?.fields.attemptedValue).toBe('456');
+      expect(collisionEvent?.metadata.userId).toBe('123'); // Original preserved
     });
 
     it('emits metadata warning in correlations', () => {
@@ -283,16 +285,16 @@ describe('Integration Tests', () => {
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
-      const fork1 = chronicle.fork({ level: '1' });
-      const fork1_1 = fork1.fork({ level: '1.1' });
-      const fork1_1_1 = fork1_1.fork({ level: '1.1.1' });
+      const fork1 = chronicle.fork({ forkLevel: '1' });
+      const fork1_1 = fork1.fork({ forkLevel: '1.1' });
+      const fork1_1_1 = fork1_1.fork({ forkLevel: '1.1.1' });
 
       chronicle.event(systemEvents.events.startup, { port: 0 });
       fork1.event(systemEvents.events.startup, { port: 1 });
       fork1_1.event(systemEvents.events.startup, { port: 2 });
       fork1_1_1.event(systemEvents.events.startup, { port: 3 });
 
-      const payloads = mock.getPayloads();
+      const payloads = mock.getUserPayloads();
       expect(payloads[0].forkId).toBe('0');
       expect(payloads[1].forkId).toBe('1');
       expect(payloads[2].forkId).toBe('1.1');

@@ -43,6 +43,19 @@ export function validateEventTree(tree: ParsedEventTree): ValidationError[] {
 export function validateEvent(event: EventDefinition): ValidationError[] {
   const errors: ValidationError[] = [];
 
+  // Validate reserved event key prefix
+  if (event.key.startsWith('chronicler.')) {
+    errors.push({
+      type: 'reserved-prefix',
+      message: `Event key "${event.key}" uses reserved prefix "chronicler.". This prefix is reserved for internal Chronicler system events.`,
+      location: {
+        file: '<unknown>',
+        line: 0,
+        column: 0,
+      },
+    });
+  }
+
   // Validate log level
   const levelString = event.level as string;
   if (!VALID_LOG_LEVELS.includes(levelString as (typeof VALID_LOG_LEVELS)[number])) {

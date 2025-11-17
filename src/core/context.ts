@@ -63,32 +63,19 @@ export const sanitizeContextInput = (
 
 export class ContextStore {
   private readonly context: ContextRecord = {};
-  private pendingCollisions = new Set<string>();
 
   constructor(initial: ContextRecord = {}) {
-    const { context, validation } = sanitizeContextInput(initial);
+    const { context } = sanitizeContextInput(initial);
     this.context = { ...context };
-    this.track(validation);
   }
 
   add(raw: ContextRecord): ContextValidationResult {
     const { context, validation } = sanitizeContextInput(raw, this.context);
     Object.assign(this.context, context);
-    this.track(validation);
     return validation;
   }
 
   snapshot(): ContextRecord {
     return { ...this.context };
-  }
-
-  consumeCollisions(): string[] {
-    const collisions = Array.from(this.pendingCollisions);
-    this.pendingCollisions.clear();
-    return collisions;
-  }
-
-  private track(validation: ContextValidationResult): void {
-    validation.collisions.forEach((key) => this.pendingCollisions.add(key));
   }
 }

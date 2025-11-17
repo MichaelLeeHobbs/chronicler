@@ -61,6 +61,13 @@ export class MockLoggerBackend {
   }
 
   /**
+   * Get payloads excluding chronicler system events
+   */
+  getUserPayloads(): LogPayload[] {
+    return this.getPayloads().filter((p) => !p.eventKey.startsWith('chronicler.'));
+  }
+
+  /**
    * Find first log by event key
    */
   findByKey(key: string): LogPayload | undefined {

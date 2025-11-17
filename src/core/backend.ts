@@ -3,7 +3,6 @@
 export interface ValidationMetadata {
   missingFields?: string[];
   typeErrors?: string[];
-  contextCollisions?: string[];
   multipleCompletes?: boolean;
 }
 

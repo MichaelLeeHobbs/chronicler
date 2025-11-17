@@ -64,7 +64,6 @@ export const validateFields = <F extends FieldDefinitions>(
 
 export const buildValidationMetadata = (
   fieldValidation: FieldValidationResult,
-  contextCollisions: string[],
   overrides?: Partial<ValidationMetadata>,
 ): ValidationMetadata | undefined => {
   const metadata: ValidationMetadata = { ...(overrides ?? {}) };
@@ -75,10 +74,6 @@ export const buildValidationMetadata = (
 
   if (fieldValidation.typeErrors.length > 0) {
     metadata.typeErrors = [...fieldValidation.typeErrors];
-  }
-
-  if (contextCollisions.length > 0) {
-    metadata.contextCollisions = [...contextCollisions];
   }
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;

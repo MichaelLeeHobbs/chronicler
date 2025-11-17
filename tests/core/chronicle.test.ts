@@ -95,16 +95,19 @@ describe('createChronicle', () => {
     expect(payload?.fields.error as string).toContain('failure');
   });
 
-  it('records context collision warnings in validation metadata', () => {
+  it('emits system event for context collisions', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
     chronicle.addContext({ userId: '123' });
-    chronicle.addContext({ userId: '456' });
-    chronicle.event(sampleEvent, { port: 3000 });
+    chronicle.addContext({ userId: '456' }); // Collision
 
-    const payload = mock.getLastPayload();
-    expect(payload?._validation?.contextCollisions).toEqual(['userId']);
+    // Check that chronicler.contextCollision event was emitted
+    const collisionEvent = mock.findByKey('chronicler.contextCollision');
+    expect(collisionEvent).toBeDefined();
+    expect(collisionEvent?.fields.key).toBe('userId');
+    expect(collisionEvent?.fields.existingValue).toBe('123');
+    expect(collisionEvent?.fields.attemptedValue).toBe('456');
   });
 
   it('attaches perf metrics when monitoring enabled', () => {

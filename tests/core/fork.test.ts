@@ -52,15 +52,15 @@ describe('Fork System', () => {
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
-      const fork1 = chronicle.fork({ level: '1' });
-      const fork1_1 = fork1.fork({ level: '1.1' });
-      const fork1_2 = fork1.fork({ level: '1.2' });
+      const fork1 = chronicle.fork({ forkLevel: '1' });
+      const fork1_1 = fork1.fork({ forkLevel: '1.1' });
+      const fork1_2 = fork1.fork({ forkLevel: '1.2' });
 
       fork1.event(sampleEvent, { taskId: '1' });
       fork1_1.event(sampleEvent, { taskId: '1.1' });
       fork1_2.event(sampleEvent, { taskId: '1.2' });
 
-      const payloads = mock.getPayloads();
+      const payloads = mock.getUserPayloads();
       expect(payloads[0].forkId).toBe('1');
       expect(payloads[1].forkId).toBe('1.1');
       expect(payloads[2].forkId).toBe('1.2');
@@ -262,11 +262,11 @@ describe('Fork System', () => {
 
       // Create 4 levels of nesting
       for (let i = 0; i < 4; i++) {
-        current = current.fork({ level: i });
+        current = current.fork({ depth: i });
         current.event(sampleEvent, { taskId: `level-${i}` });
       }
 
-      const payloads = mock.getPayloads();
+      const payloads = mock.getUserPayloads();
       payloads.forEach((payload, idx) => {
         expect(payload.forkId).toBe(expectedIds[idx]);
       });
@@ -281,11 +281,13 @@ describe('Fork System', () => {
       const fork = chronicle.fork({ userId: '123' });
       fork.addContext({ userId: '456' }); // Collision
 
-      fork.event(sampleEvent, { taskId: 'test' });
-
-      const payload = mock.getLastPayload();
-      expect(payload?._validation?.contextCollisions).toContain('userId');
-      expect(payload?.metadata.userId).toBe('123'); // Original preserved
+      // Check that chronicler.contextCollision event was emitted
+      const collisionEvent = mock.findByKey('chronicler.contextCollision');
+      expect(collisionEvent).toBeDefined();
+      expect(collisionEvent?.fields.key).toBe('userId');
+      expect(collisionEvent?.fields.existingValue).toBe('123');
+      expect(collisionEvent?.fields.attemptedValue).toBe('456');
+      expect(collisionEvent?.metadata.userId).toBe('123'); // Original preserved
     });
   });
 });

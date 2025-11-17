@@ -27,6 +27,7 @@ import {
 import type { FieldDefinitions, InferFields } from './fields';
 import { type PerfContext, type PerfOptions, samplePerformance } from './perf';
 import { assertNoReservedKeys } from './reserved';
+import { chroniclerSystemEvents } from './system-events';
 import { buildValidationMetadata, validateFields } from './validation';
 
 export interface ChroniclerConfig {
@@ -81,11 +82,7 @@ const buildPayload = (
   validationOverrides?: Partial<ValidationMetadata>,
 ): LogPayload => {
   const fieldValidation = validateFields(eventDef, fields);
-  const validationMetadata = buildValidationMetadata(
-    fieldValidation,
-    contextStore.consumeCollisions(),
-    validationOverrides,
-  );
+  const validationMetadata = buildValidationMetadata(fieldValidation, validationOverrides);
   const perfSample = samplePerformance(config.monitoring ?? {}, perfContext);
   const payload: LogPayload = {
     eventKey: eventDef.key,
@@ -105,6 +102,31 @@ const buildPayload = (
   }
 
   return payload;
+};
+
+/**
+ * Helper to emit system events without going through the type-safe event() method.
+ * System events are internal and don't need the same type inference as user events.
+ */
+const emitSystemEvent = (
+  config: ChroniclerConfig,
+  contextStore: ContextStore,
+  eventDef: EventDefinition,
+  fields: Record<string, unknown>,
+  currentCorrelationId: () => string,
+  forkId: string,
+  perfContext?: PerfContext,
+): void => {
+  const payload = buildPayload(
+    config,
+    contextStore,
+    eventDef,
+    fields as InferFields<FieldDefinitions>, // Safe cast for system events
+    currentCorrelationId,
+    forkId,
+    perfContext,
+  );
+  callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
 };
 
 interface ChronicleHooks {
@@ -154,6 +176,37 @@ const createChronicleInstance = (
     },
     addContext(context) {
       const validation = contextStore.add(context);
+
+      // Emit system events for collisions
+      validation.collisionDetails.forEach((detail) => {
+        emitSystemEvent(
+          config,
+          contextStore,
+          chroniclerSystemEvents.events.contextCollision,
+          {
+            key: detail.key,
+            existingValue: stringifyValue(detail.existingValue),
+            attemptedValue: stringifyValue(detail.attemptedValue),
+          },
+          currentCorrelationId,
+          forkId,
+          perfContext,
+        );
+      });
+
+      // Emit system events for reserved field attempts
+      validation.reserved.forEach((key) => {
+        emitSystemEvent(
+          config,
+          contextStore,
+          chroniclerSystemEvents.events.reservedFieldAttempt,
+          { key },
+          currentCorrelationId,
+          forkId,
+          perfContext,
+        );
+      });
+
       hooks.onContextValidation?.(validation);
     },
     fork(extraContext = {}) {
@@ -228,6 +281,39 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
 
   addContext(context: ContextRecord): void {
     const validation = this.contextStore.add(context);
+
+    // Emit system events for collisions
+    validation.collisionDetails.forEach((detail) => {
+      emitSystemEvent(
+        this.config,
+        this.contextStore,
+        chroniclerSystemEvents.events.contextCollision,
+        {
+          key: detail.key,
+          existingValue: stringifyValue(detail.existingValue),
+          attemptedValue: stringifyValue(detail.attemptedValue),
+        },
+        this.currentCorrelationId,
+        this.forkId,
+        this.perfContext,
+      );
+    });
+
+    // Emit system events for reserved field attempts
+    validation.reserved.forEach((key) => {
+      emitSystemEvent(
+        this.config,
+        this.contextStore,
+        chroniclerSystemEvents.events.reservedFieldAttempt,
+        { key },
+        this.currentCorrelationId,
+        this.forkId,
+        this.perfContext,
+      );
+    });
+
+    // Keep the old metadataWarning emission for backward compatibility
+    // (This is for correlation-specific warnings)
     if (validation.collisionDetails && validation.collisionDetails.length > 0) {
       this.emitMetadataWarnings(validation.collisionDetails);
     }
@@ -360,8 +446,6 @@ const getAutoEvents = (events: NormalizedCorrelationGroup['events']): Correlatio
     metadataWarning: auto.metadataWarning,
   };
 };
-
-// no-op helper removal
 
 export const createChronicle = (config: ChroniclerConfig): Chronicler => {
   if (!config.backend) {

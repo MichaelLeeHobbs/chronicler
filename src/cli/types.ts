@@ -29,7 +29,13 @@ export interface ParsedEventGroup {
  * Validation error with location information
  */
 export interface ValidationError {
-  type: 'key-path' | 'reserved-field' | 'invalid-level' | 'invalid-timeout' | 'parse-error';
+  type:
+    | 'key-path'
+    | 'reserved-field'
+    | 'reserved-prefix'
+    | 'invalid-level'
+    | 'invalid-timeout'
+    | 'parse-error';
   message: string;
   location: ErrorLocation;
 }

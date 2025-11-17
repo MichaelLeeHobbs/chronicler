@@ -26,8 +26,8 @@ export type InferFieldType<Field extends FieldDefinition> = Field['type'] extend
         ? unknown
         : never;
 
-type Simplify<T> = { [Key in keyof T]: T[Key] } extends infer O
-  ? { [Key in keyof O]: O[Key] }
+type Simplify<T> = { [Key in keyof T]: T[Key] } extends infer Obj
+  ? { [Key in keyof Obj]: Obj[Key] }
   : never;
 
 type EmptyRecord = Record<never, never>;

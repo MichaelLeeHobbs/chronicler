@@ -24,3 +24,4 @@ export {
   type FieldType,
   type InferFields,
 } from './core/fields';
+export { chroniclerSystemEvents } from './core/system-events';

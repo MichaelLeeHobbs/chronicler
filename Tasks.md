@@ -23,6 +23,12 @@
 - ✅ Removed unused `correlationIdGenerator` field from CorrelationChronicleImpl
 - ✅ **Removed nested correlation support** (breaking change - pre-v1.0)
 - ✅ Simplified CorrelationChronicleImpl - removed delegate pattern
+- ✅ **Implemented chronicler system events** (breaking change - pre-v1.0)
+  - Collisions now emit `chronicler.contextCollision` immediately
+  - Reserved field attempts emit `chronicler.reservedFieldAttempt`
+  - Removed `contextCollisions` from `_validation` metadata
+  - Removed `consumeCollisions()` from ContextStore
+  - Reserved `chronicler.*` prefix for system events only
 
 ---
 
