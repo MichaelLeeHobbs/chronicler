@@ -6,6 +6,7 @@
  * is reserved for system events only.
  */
 
+import { SYSTEM_EVENT_PREFIX } from './constants';
 import { defineEvent, defineEventGroup } from './events';
 
 /**
@@ -14,7 +15,7 @@ import { defineEvent, defineEventGroup } from './events';
  * Event key prefix `chronicler.*` is reserved and cannot be used by user-defined events.
  */
 export const chroniclerSystemEvents = defineEventGroup({
-  key: 'chronicler',
+  key: SYSTEM_EVENT_PREFIX.slice(0, -1), // Remove trailing dot for group key
   type: 'system',
   doc: 'Internal Chronicler system events for diagnostics and warnings',
   events: {
@@ -23,7 +24,7 @@ export const chroniclerSystemEvents = defineEventGroup({
      * The original value is preserved, and the attempted value is rejected.
      */
     contextCollision: defineEvent({
-      key: 'chronicler.contextCollision',
+      key: `${SYSTEM_EVENT_PREFIX}contextCollision`,
       level: 'warn',
       message: 'Context key collision detected',
       doc: 'Emitted when addContext() attempts to override an existing context key',
@@ -56,7 +57,7 @@ export const chroniclerSystemEvents = defineEventGroup({
      * Reserved fields are silently dropped.
      */
     reservedFieldAttempt: defineEvent({
-      key: 'chronicler.reservedFieldAttempt',
+      key: `${SYSTEM_EVENT_PREFIX}reservedFieldAttempt`,
       level: 'warn',
       message: 'Attempted to use reserved field name',
       doc: 'Emitted when addContext() attempts to use a reserved field name',

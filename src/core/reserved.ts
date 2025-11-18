@@ -31,27 +31,32 @@ export type ReservedTopLevelField = (typeof RESERVED_TOP_LEVEL_FIELDS)[number];
 export type ReservedValidationField = (typeof RESERVED_VALIDATION_FIELDS)[number];
 export type ReservedPerfField = (typeof RESERVED_PERF_FIELDS)[number];
 
+/**
+ * Union type of all possible reserved field paths
+ * Used for type narrowing in validation functions
+ */
 export type AllReservedFields =
   | ReservedTopLevelField
   | `_validation.${ReservedValidationField}`
   | `_perf.${ReservedPerfField}`;
 
+// Sets for O(1) lookup during validation
 const TOP_LEVEL_SET = new Set<string>(RESERVED_TOP_LEVEL_FIELDS);
 const VALIDATION_SET = new Set<string>(RESERVED_VALIDATION_FIELDS);
 const PERF_SET = new Set<string>(RESERVED_PERF_FIELDS);
 
-export const RESERVED_FIELD_PATHS: ReadonlySet<AllReservedFields> = new Set<AllReservedFields>([
-  ...RESERVED_TOP_LEVEL_FIELDS,
-  ...RESERVED_VALIDATION_FIELDS.map((field) => `_validation.${field}` as const),
-  ...RESERVED_PERF_FIELDS.map((field) => `_perf.${field}` as const),
-]);
-
 // Export the reserved field arrays for CLI usage
 export { RESERVED_PERF_FIELDS, RESERVED_TOP_LEVEL_FIELDS, RESERVED_VALIDATION_FIELDS };
 
+/**
+ * Check if a key is a reserved top-level field
+ */
 export const isReservedTopLevelField = (key: string): key is ReservedTopLevelField =>
   TOP_LEVEL_SET.has(key);
 
+/**
+ * Check if a key is any type of reserved field (top-level or nested)
+ */
 export const isReservedFieldPath = (key: string): key is AllReservedFields => {
   if (isReservedTopLevelField(key)) {
     return true;
@@ -70,6 +75,11 @@ export const isReservedFieldPath = (key: string): key is AllReservedFields => {
   return false;
 };
 
+/**
+ * Find all reserved keys in an iterable of strings
+ * @param keys - Keys to check
+ * @returns Array of reserved keys found
+ */
 export const findReservedKeys = (keys: Iterable<string>): string[] => {
   const invalid: string[] = [];
 
@@ -82,5 +92,10 @@ export const findReservedKeys = (keys: Iterable<string>): string[] => {
   return invalid;
 };
 
+/**
+ * Check a record for reserved keys and return array of violations
+ * @param record - Object to check
+ * @returns Array of reserved keys found in the record
+ */
 export const assertNoReservedKeys = (record: Record<string, unknown>): string[] =>
   findReservedKeys(Object.keys(record));

@@ -26,6 +26,30 @@ const isSimpleValue = (value: unknown): value is SimpleValue => {
   );
 };
 
+/**
+ * Sanitize and validate context input
+ *
+ * **Validation Strategy:**
+ * - Returns validation results rather than throwing errors
+ * - Logs should succeed even with invalid metadata
+ * - Validation errors are reported via system events and _validation metadata
+ *
+ * **Collision Handling:**
+ * - When a key exists with a different value, the ORIGINAL value is preserved
+ * - The attempted new value is rejected
+ * - A collision detail is recorded for system event emission
+ *
+ * **Reserved Fields:**
+ * - Reserved field attempts are silently dropped
+ * - A warning is recorded for system event emission
+ *
+ * @param context - New context to add
+ * @param existingContext - Current context (for collision detection)
+ * @returns Sanitized context and validation results
+ *
+ * @see {@link ContextValidationResult} for validation result structure
+ * @see {@link chroniclerSystemEvents} for system events emitted on violations
+ */
 export const sanitizeContextInput = (
   context: ContextRecord,
   existingContext: ContextRecord = {},

@@ -6,8 +6,13 @@ export {
   ContextStore,
   type ContextValidationResult,
   sanitizeContextInput,
-} from './core/context';
-export { InvalidConfigError, ReservedFieldError, UnsupportedLogLevelError } from './core/errors';
+} from './core/ContextStore';
+export {
+  BackendMethodError,
+  InvalidConfigError,
+  ReservedFieldError,
+  UnsupportedLogLevelError,
+} from './core/errors';
 export {
   type CorrelationEventGroup,
   defineCorrelationGroup,

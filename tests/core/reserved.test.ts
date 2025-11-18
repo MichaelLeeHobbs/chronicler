@@ -4,7 +4,6 @@ import {
   assertNoReservedKeys,
   isReservedFieldPath,
   isReservedTopLevelField,
-  RESERVED_FIELD_PATHS,
 } from '../../src/core/reserved';
 
 describe('reserved fields', () => {
@@ -24,12 +23,5 @@ describe('reserved fields', () => {
     const invalid = assertNoReservedKeys({ eventKey: 'x', custom: 1, _perf: 'bad' });
 
     expect(invalid).toEqual(['eventKey', '_perf']);
-  });
-
-  it('captures the reference set for documentation', () => {
-    expect(RESERVED_FIELD_PATHS.has('eventKey')).toBe(true);
-    expect(RESERVED_FIELD_PATHS.has('_validation.multipleCompletes')).toBe(true);
-    // @ts-expect-error testing non-existent key
-    expect(RESERVED_FIELD_PATHS.has('custom')).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-// import type { LogLevel } from './events';
+import { BackendMethodError } from './errors';
 
 export interface ValidationMetadata {
   missingFields?: string[];
@@ -89,8 +89,7 @@ export const callBackendMethod = (
     backend[level](message, payload);
   } else {
     // This should never happen if validateBackendMethods is used correctly
-    // TODO: This does sort of break our contract about not throwing errors from the logger
-    //   However, they somehow broke the contract first by providing an valid backend that latter became invalid
-    throw new Error(`Backend does not support log level: ${level}`);
+    // However, they somehow broke the contract by providing a valid backend that later became invalid
+    throw new BackendMethodError(level);
   }
 };

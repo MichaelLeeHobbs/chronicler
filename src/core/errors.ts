@@ -18,3 +18,10 @@ export class InvalidConfigError extends Error {
     this.name = 'InvalidConfigError';
   }
 }
+
+export class BackendMethodError extends Error {
+  constructor(level: string) {
+    super(`Backend does not support log level: ${level}`);
+    this.name = 'BackendMethodError';
+  }
+}

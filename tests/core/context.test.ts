@@ -1,6 +1,5 @@
+import { sanitizeContextInput } from '@chronicler/core/ContextStore';
 import { describe, expect, it } from 'vitest';
-
-import { sanitizeContextInput } from '../../src/core/context';
 
 describe('context sanitizer', () => {
   it('strips reserved keys', () => {

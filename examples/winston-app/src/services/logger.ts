@@ -4,6 +4,7 @@
  */
 
 import winston, { type LeveledLogMethod } from 'winston';
+import { stringify } from 'flatted';
 
 import { config } from '../config/index.js';
 import { MockCloudWatchTransport } from './mock-cloudwatch.js';
@@ -50,13 +51,14 @@ type CustomLogger = winston.Logger & {
 winston.addColors(customLevels.colors);
 
 /**
- * Development format: colorized console output
+ * Development format: colorized console output with circular reference safety
  */
 const devFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.colorize({ all: true }),
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    const metaStr = meta && Object.keys(meta).length > 0 ? JSON.stringify(meta, null, 2) : '';
+    // Use flatted to safely handle circular references
+    const metaStr = meta && Object.keys(meta).length > 0 ? stringify(meta, undefined, 2) : '';
     return `${timestamp} [${level}]: ${message}${metaStr ? '\n' + metaStr : ''}`;
   }),
 );

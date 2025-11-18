@@ -1,4 +1,5 @@
 import { LogLevel } from './backend';
+import { DEFAULT_CORRELATION_TIMEOUT_MS } from './constants';
 import type { FieldDefinitions, InferFields } from './fields';
 
 export type { LogLevel };
@@ -67,7 +68,12 @@ export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEve
   group: Group,
 ): Group => group;
 
-const DEFAULT_CORRELATION_TIMEOUT = 300_000;
+export type EventFields<Event extends EventDefinition> =
+  Event extends EventDefinition<infer Field>
+    ? Field extends FieldDefinitions
+      ? InferFields<Field>
+      : Record<string, never>
+    : never;
 
 const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
   start: {
@@ -98,6 +104,63 @@ const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
   },
 });
 
+/**
+ * Define a correlation event group with automatic lifecycle events
+ *
+ * **What is a correlation group?**
+ * A correlation represents a logical unit of work with a defined lifecycle
+ * (start, complete, timeout). Common examples: HTTP requests, batch jobs, workflows.
+ *
+ * **Automatic events added:**
+ * - `{key}.start` - Emitted when startCorrelation() is called
+ * - `{key}.complete` - Emitted when complete() is called (includes duration)
+ * - `{key}.timeout` - Emitted if no activity within timeout period
+ * - `{key}.metadataWarning` - Emitted on context collisions (deprecated, see system events)
+ *
+ * **Timeout behavior:**
+ * - Defaults to 5 minutes (300,000ms) if not specified
+ * - Timer resets on ANY activity (log events, fork creation)
+ * - Set to 0 to disable timeout
+ *
+ * **Type safety:**
+ * TypeScript will infer all event keys and field types. The return type
+ * includes both your events and the auto-generated lifecycle events.
+ *
+ * @param group - Correlation group definition
+ * @returns Normalized group with auto-events and default timeout
+ *
+ * @example
+ * ```typescript
+ * const requestGroup = defineCorrelationGroup({
+ *   key: 'api.request',
+ *   doc: 'HTTP request lifecycle',
+ *   timeout: 30_000, // 30 seconds
+ *   events: {
+ *     validated: defineEvent({
+ *       key: 'api.request.validated',
+ *       level: 'debug',
+ *       message: 'Request validated',
+ *       doc: 'Validation passed',
+ *     }),
+ *     processed: defineEvent({
+ *       key: 'api.request.processed',
+ *       level: 'info',
+ *       message: 'Request processed',
+ *       doc: 'Processing complete',
+ *       fields: { statusCode: { type: 'number', required: true } },
+ *     }),
+ *   },
+ * });
+ *
+ * // Auto-events available:
+ * // - requestGroup.events.start
+ * // - requestGroup.events.complete
+ * // - requestGroup.events.timeout
+ * // - requestGroup.events.metadataWarning
+ * // - requestGroup.events.validated (your event)
+ * // - requestGroup.events.processed (your event)
+ * ```
+ */
 export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
   group: Group,
 ): Omit<Group, 'events' | 'timeout'> & {
@@ -108,17 +171,10 @@ export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
 
   return {
     ...group,
-    timeout: group.timeout ?? DEFAULT_CORRELATION_TIMEOUT,
+    timeout: group.timeout ?? DEFAULT_CORRELATION_TIMEOUT_MS,
     events: {
       ...(group.events ?? {}),
       ...autoEvents,
     } as WithAutoEvents<Group['events']>,
   };
 };
-
-export type EventFields<Event extends EventDefinition> =
-  Event extends EventDefinition<infer Field>
-    ? Field extends FieldDefinitions
-      ? InferFields<Field>
-      : Record<string, never>
-    : never;

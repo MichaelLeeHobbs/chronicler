@@ -8,13 +8,15 @@ import {
   validateBackendMethods,
   type ValidationMetadata,
 } from './backend';
+import { FORK_ID_SEPARATOR, ROOT_FORK_ID } from './constants';
 import {
   type ContextCollisionDetail,
   type ContextRecord,
   ContextStore,
   type ContextValidationResult,
   ContextValue,
-} from './context';
+} from './ContextStore';
+import { CorrelationTimer } from './CorrelationTimer';
 import { InvalidConfigError, ReservedFieldError, UnsupportedLogLevelError } from './errors';
 import {
   type CorrelationAutoEvents,
@@ -71,6 +73,32 @@ export interface CorrelationChronicle {
   timeout(): void;
 }
 
+/**
+ * Build a complete log payload from event definition and runtime data
+ *
+ * This function orchestrates multiple validation and sampling operations:
+ * 1. Field validation - checks required fields and types
+ * 2. Validation metadata - aggregates validation errors
+ * 3. Performance sampling - captures memory/CPU metrics if enabled
+ * 4. Payload assembly - combines all data into final structure
+ *
+ * **Why not split this function?**
+ * While this handles multiple concerns, they're all steps in a linear pipeline
+ * that must happen in this order. Splitting would add unnecessary indirection
+ * without improving testability (each step has its own unit tests).
+ *
+ * @param config - Chronicler configuration (backend, metadata, monitoring options)
+ * @param contextStore - Context storage for metadata snapshot
+ * @param eventDef - Event definition with field requirements
+ * @param fields - Actual field values being logged
+ * @param currentCorrelationId - Function to get current correlation ID
+ * @param forkId - Hierarchical fork identifier (e.g., '0', '1', '1.1')
+ * @param perfContext - Performance tracking context (for CPU delta calculations)
+ * @param validationOverrides - Additional validation metadata (e.g., from correlations)
+ * @returns Complete log payload ready for backend
+ *
+ * @internal This is an internal implementation detail
+ */
 const buildPayload = (
   config: ChroniclerConfig,
   contextStore: ContextStore,
@@ -142,12 +170,16 @@ type NormalizedCorrelationGroup = Omit<CorrelationEventGroup, 'events' | 'timeou
 /**
  * Create a Chronicle instance
  *
+ * @param config
+ * @param contextStore
  * @param currentCorrelationId - Function that returns the current correlation ID for this chronicle.
  *   For root chronicles: generates a NEW ID each time (no correlation, events are independent).
  *   For correlation chronicles: returns the SAME ID (all events share the correlation ID).
  * @param correlationIdGenerator - Function that creates NEW correlation IDs.
  *   Used when startCorrelation() is called on root chronicles.
  *   Also used by forks to create child correlations.
+ * @param forkId
+ * @param hooks
  */
 const createChronicleInstance = (
   config: ChroniclerConfig,
@@ -211,7 +243,10 @@ const createChronicleInstance = (
     },
     fork(extraContext = {}) {
       forkCounter++;
-      const childForkId = forkId === '0' ? String(forkCounter) : `${forkId}.${forkCounter}`;
+      const childForkId =
+        forkId === ROOT_FORK_ID
+          ? String(forkCounter)
+          : `${forkId}${FORK_ID_SEPARATOR}${forkCounter}`;
       const forkStore = new ContextStore(contextStore.snapshot());
       const forkChronicle = createChronicleInstance(
         config,
@@ -261,7 +296,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   ) {
     this.timer = new CorrelationTimer(this.group.timeout, () => this.timeout());
     this.autoEvents = getAutoEvents(this.group.events);
-    this.timer.touch();
+    this.timer.start();
     this.emitAutoEvent(this.autoEvents.start, {});
   }
 
@@ -319,11 +354,13 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     }
   }
 
-  fork(extraContext?: ContextRecord): Chronicler {
+  fork(extraContext: ContextRecord = {}): Chronicler {
     this.forkCounter++;
     const childForkId =
-      this.forkId === '0' ? String(this.forkCounter) : `${this.forkId}.${this.forkCounter}`;
-    const forkStore = new ContextStore(this.contextStore.snapshot());
+      this.forkId === ROOT_FORK_ID
+        ? String(this.forkCounter)
+        : `${this.forkId}${FORK_ID_SEPARATOR}${this.forkCounter}`;
+    const forkStore = new ContextStore({ ...this.contextStore.snapshot(), ...extraContext });
 
     const forkChronicle = createChronicleInstance(
       this.config,
@@ -403,30 +440,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   }
 }
 
-class CorrelationTimer {
-  private timeoutId?: NodeJS.Timeout;
-
-  constructor(
-    private readonly timeoutMs: number,
-    private readonly onTimeout: () => void,
-  ) {}
-
-  touch(): void {
-    this.clear();
-    if (this.timeoutMs <= 0) {
-      return;
-    }
-    this.timeoutId = setTimeout(this.onTimeout, this.timeoutMs);
-  }
-
-  clear(): void {
-    if (this.timeoutId) {
-      clearTimeout(this.timeoutId);
-      this.timeoutId = undefined;
-    }
-  }
-}
-
 /**
  * Convert ContextValue to string for logging in metadataWarning events.
  * Handles primitives (string, number, boolean, null) and arrays.
@@ -472,6 +485,6 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
     baseContextStore,
     () => correlationIdGenerator(),
     correlationIdGenerator,
-    '0',
+    ROOT_FORK_ID,
   );
 };
