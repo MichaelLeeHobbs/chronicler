@@ -1,90 +1,812 @@
-# Chronicler - Tasks
+# Chronicler - Development Tasks
 
-> **Status**: Phase 1 Complete ✅ | Pre-v1.0 Polish In Progress
-
----
-
-## 📊 Project Status
-
-**Core Implementation**: ✅ Complete  
-**Tests**: 93 passing (15 test files)  
-**Build**: ✅ Clean (no TypeScript errors)  
-**Lint**: ✅ Clean (no warnings)  
-**Lines of Code**: ~3,000 across 20 source files
+> **Status**: v1.0 Ready | Architectural Review Complete
 
 ---
 
-## ✅ Recently Completed (Nov 18, 2025)
+## 📊 Current Status
 
-### Critical Fixes
+| Metric | Value            |
+| ------ | ---------------- |
+| Tests  | ✅ 93/93 passing |
+| Build  | ✅ Clean         |
+| Lint   | ✅ Clean         |
+| Files  | 21 source files  |
+| Lines  | ~3,100 LOC       |
 
-- ✅ **C-1**: Fixed backend type safety - removed `| unknown` escape hatch
-- ✅ **C-2**: Fixed CPU monitoring module-level state bug
-- ✅ **C-3**: Verified timer memory leak prevention (clearTimeout before re-setting)
-- ✅ **C-4**: Added circular reference handling to Winston example (using `flatted`)
-
-### Code Quality Improvements
-
-- ✅ **Q-1**: Added `BackendMethodError` for consistent error handling
-- ✅ **Q-2**: Created `constants.ts` with all magic numbers/strings
-- ✅ **Q-3**: Removed unused `RESERVED_FIELD_PATHS` constant
-- ✅ **Q-4**: Documented ContextStore constructor behavior
-- ✅ **Q-5**: Documented validation strategy in sanitizeContextInput
-- ✅ **Q-6**: Extracted `CorrelationTimer` to its own file
-
-### Documentation
-
-- ✅ **DOC-1**: Added comprehensive JSDoc to:
-  - `buildPayload()` - explains orchestration pattern
-  - `samplePerformance()` - documents CPU delta tracking
-  - `defineCorrelationGroup()` - usage examples and behavior
-  - `sanitizeContextInput()` - validation strategy
+**Last Updated**: November 18, 2025
 
 ---
 
-## 🔄 Remaining Quick Wins (Optional, ~2 hours)
+## 🚀 v1.0 Release Checklist
 
-These are low-risk improvements that can be done incrementally:
-
-### DRY Improvements
-
-- [ ] **D-1**: Extract duplicate system event emission pattern (~30 min)
-  - Chronicle.ts lines 148-195 have nearly identical collision/reserved patterns
-  - Create `emitBatchSystemEvents(eventDef, items, mapper)` helper
-- [ ] **D-2**: Already complete ✅ (validateBackendMethods now iterates)
-
-- [ ] **D-3**: Refactor field type checking with validator map (~30 min)
-  - validation.ts lines 30-42 could use: `const validators = { string: (v) => typeof v === 'string', ... }`
-
-### Documentation
-
-- [ ] **DOC-2**: Add file-level JSDoc explaining design decisions (~30 min)
-  - Why `currentCorrelationId` is a function vs property
-  - When to use fork() vs startCorrelation()
-  - Difference between PerfContext and PerfOptions
+- [ ] Final README review with usage examples
+- [ ] Choose license (MIT recommended)
+- [ ] Set up Changesets for versioning
+- [ ] Configure npm publishing workflow
+- [ ] Set up GitHub Actions CI/CD
+- [ ] Create CHANGELOG.md
+- [ ] Tag v1.0.0
+- [ ] Publish to npm
 
 ---
 
-## 📋 Future Enhancements (v1.1+)
+## 🏗️ Architecture & Type System Refactoring Plan
 
-These can be deferred to post-v1.0:
+> **Context**: Pre-v1.0 architectural review with no backward compatibility constraints.
+> This is our opportunity to fix fundamental design decisions before release.
 
-### Architecture Refactoring
+### Executive Summary
 
-- [ ] Consider standardizing class vs factory pattern (A-1)
-- [ ] Split `buildPayload` into smaller functions if it grows (A-3)
-- [ ] Extract completion/timer management from CorrelationChronicleImpl (A-4)
+**Current State**: Functional and well-tested, but has architectural inconsistencies and type safety gaps.
 
-### Type System
+**Proposed Changes**: 7 major refactorings that would significantly improve maintainability, type safety, and clarity.
 
-- [ ] Type system event fields properly (T-2)
-- [ ] Tighten ContextValue type if needed (T-3)
+**Effort**: ~20-30 hours total (can be done incrementally)
 
-### CLI Improvements
+**Risk**: Low (comprehensive test suite catches regressions)
 
-- [ ] Multi-file event parsing
-- [ ] Watch mode for docs generation
-- [ ] Custom output formats (JSON, HTML)
+---
+
+### R-1: Unify Class vs Factory Pattern 🔴 HIGH IMPACT
+
+**Current Problem:**
+
+```typescript
+// Factory pattern for Chronicle
+const createChronicleInstance = (...) => ({ event, addContext, fork, startCorrelation })
+
+// Class pattern for Correlation
+class CorrelationChronicleImpl implements CorrelationChronicle { ... }
+```
+
+**Why This Is Confusing:**
+
+- Inconsistent patterns make codebase harder to learn
+- Factory returns plain object (no `this`, no private state encapsulation)
+- Class has proper encapsulation but different usage pattern
+- Both implement similar interfaces but structured differently
+
+**Proposed Solution: Classes Throughout**
+
+```typescript
+// Chronicle becomes a class
+export class ChronicleImpl implements Chronicler {
+  private forkCounter = 0;
+  private readonly perfContext: PerfContext = {};
+
+  constructor(
+    private readonly config: ChroniclerConfig,
+    private readonly contextStore: ContextStore,
+    private readonly currentCorrelationId: () => string,
+    private readonly correlationIdGenerator: () => string,
+    private readonly forkId: string,
+  ) {}
+
+  event<F extends FieldDefinitions>(eventDef: EventDefinition<F>, fields: InferFields<F>): void {
+    const payload = this.buildPayload(eventDef, fields);
+    callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
+  }
+
+  private buildPayload(...): LogPayload {
+    // Now an instance method, access to this.config, this.contextStore, etc.
+  }
+
+  // ... other methods
+}
+
+// Public factory stays simple
+export const createChronicle = (config: ChroniclerConfig): Chronicler => {
+  // Validation
+  const contextStore = new ContextStore(config.metadata);
+  const correlationIdGenerator = config.correlationIdGenerator ?? defaultGenerator;
+
+  return new ChronicleImpl(config, contextStore, () => correlationIdGenerator(), correlationIdGenerator, ROOT_FORK_ID);
+};
+```
+
+**Benefits:**
+
+- ✅ Consistent pattern throughout codebase
+- ✅ Proper encapsulation with private methods
+- ✅ Easier to test (can test class methods individually)
+- ✅ Better IDE support (code completion, refactoring)
+- ✅ Clearer ownership of state (no closure magic)
+- ✅ Can use inheritance/composition more easily
+
+**Migration Path:**
+
+1. Convert `createChronicleInstance` to `ChronicleImpl` class
+2. Keep `createChronicle` as factory function (public API)
+3. Move `buildPayload`, `emitSystemEvent` to class methods
+4. Update tests to instantiate class directly (better testability)
+
+**Estimated Effort:** 4-6 hours
+
+---
+
+### R-2: Separate Chronicle Concerns into Services 🔴 HIGH IMPACT
+
+**Current Problem:**
+Chronicle class does too much:
+
+- Event emission
+- Context management
+- Fork creation
+- Correlation lifecycle
+- System event emission
+- Payload building
+- Backend communication
+
+**Proposed Solution: Service Objects**
+
+```typescript
+// Core Chronicle orchestrates, services do work
+class ChronicleImpl {
+  constructor(
+    private readonly config: ChroniclerConfig,
+    private readonly contextManager: ContextManager,
+    private readonly eventEmitter: EventEmitter,
+    private readonly forkManager: ForkManager,
+    private readonly forkId: string,
+  ) {}
+
+  event(...) {
+    // Delegate to services
+    const payload = this.eventEmitter.buildPayload(...);
+    this.eventEmitter.emit(payload);
+  }
+
+  addContext(context: ContextRecord): void {
+    const validation = this.contextManager.add(context);
+    this.eventEmitter.emitSystemEvents(validation);
+  }
+
+  fork(context?: ContextRecord): Chronicler {
+    return this.forkManager.createFork(this, context);
+  }
+}
+
+// Context management service
+class ContextManager {
+  constructor(private store: ContextStore) {}
+
+  add(context: ContextRecord): ContextValidationResult {
+    return this.store.add(context);
+  }
+
+  snapshot(): ContextRecord {
+    return this.store.snapshot();
+  }
+}
+
+// Event emission service
+class EventEmitter {
+  constructor(
+    private readonly config: ChroniclerConfig,
+    private readonly contextManager: ContextManager,
+    private readonly perfContext: PerfContext,
+  ) {}
+
+  buildPayload(eventDef: EventDefinition, fields: any, correlationId: string, forkId: string): LogPayload {
+    // All payload building logic here
+  }
+
+  emit(payload: LogPayload): void {
+    callBackendMethod(this.config.backend, payload.level, eventDef.message, payload);
+  }
+
+  emitSystemEvents(validation: ContextValidationResult, correlationId: string, forkId: string): void {
+    // All system event emission logic
+  }
+}
+
+// Fork management service
+class ForkManager {
+  private counter = 0;
+
+  createFork(parent: ChronicleImpl, extraContext?: ContextRecord): Chronicler {
+    this.counter++;
+    const childForkId = parent.forkId === ROOT_FORK_ID
+      ? String(this.counter)
+      : `${parent.forkId}${FORK_ID_SEPARATOR}${this.counter}`;
+
+    // Create child with same services but new context
+    const childContextManager = new ContextManager(
+      new ContextStore(parent.contextManager.snapshot())
+    );
+
+    return new ChronicleImpl(
+      parent.config,
+      childContextManager,
+      parent.eventEmitter, // Can share or create new
+      new ForkManager(), // Each instance has own counter
+      childForkId,
+    );
+  }
+}
+```
+
+**Benefits:**
+
+- ✅ Single Responsibility Principle
+- ✅ Each service is independently testable
+- ✅ Clear boundaries between concerns
+- ✅ Easier to extend (add new services)
+- ✅ Easier to mock for testing
+- ✅ Less coupling between features
+
+**Trade-offs:**
+
+- ⚠️ More classes to maintain
+- ⚠️ More files (but each smaller and focused)
+- ⚠️ Slightly more boilerplate
+
+**Migration Path:**
+
+1. Create `EventEmitter` service, move payload building
+2. Create `ContextManager` service, move context logic
+3. Create `ForkManager` service, move fork logic
+4. Refactor `ChronicleImpl` to orchestrate services
+5. Update tests to test services individually
+
+**Estimated Effort:** 6-8 hours
+
+---
+
+### R-3: Consolidate Correlation Lifecycle Management 🟡 MEDIUM IMPACT
+
+**Current Problem:**
+`CorrelationChronicleImpl` mixes:
+
+- Timer management
+- Completion tracking
+- Auto-event emission
+- Fork management (inherits from Chronicle pattern)
+- Duplicate event emission logic
+
+**Proposed Solution: Extract CorrelationLifecycle Service**
+
+```typescript
+// Manages correlation-specific lifecycle
+class CorrelationLifecycle {
+  private completed = false;
+  private completionCount = 0;
+  private readonly startedAt = Date.now();
+
+  constructor(
+    private readonly timer: CorrelationTimer,
+    private readonly autoEvents: CorrelationAutoEvents,
+    private readonly eventEmitter: EventEmitter,
+  ) {
+    this.timer.start();
+    this.emitStart();
+  }
+
+  private emitStart(): void {
+    this.eventEmitter.emit(this.autoEvents.start, {});
+  }
+
+  complete(fields?: ContextRecord): void {
+    if (!this.completed) {
+      this.completed = true;
+      this.timer.clear();
+
+      const duration = Date.now() - this.startedAt;
+      this.eventEmitter.emit(this.autoEvents.complete, {
+        duration,
+        ...fields,
+      });
+    }
+
+    this.completionCount++;
+    if (this.completionCount > 1) {
+      // Emit warning via system events
+    }
+  }
+
+  timeout(): void {
+    if (!this.completed) {
+      this.completed = true;
+      this.eventEmitter.emit(this.autoEvents.timeout, {});
+    }
+  }
+
+  onActivity(): void {
+    this.timer.touch();
+  }
+}
+
+// Simplified CorrelationChronicle
+class CorrelationChronicleImpl {
+  constructor(
+    private readonly chronicle: ChronicleImpl, // Composition, not inheritance
+    private readonly lifecycle: CorrelationLifecycle,
+  ) {}
+
+  event(...) {
+    this.chronicle.event(...);
+    this.lifecycle.onActivity(); // Hook into activity
+  }
+
+  complete(fields?: ContextRecord): void {
+    this.lifecycle.complete(fields);
+  }
+
+  // Delegate everything else to inner chronicle
+  addContext(context: ContextRecord): void {
+    this.chronicle.addContext(context);
+  }
+
+  fork(context?: ContextRecord): Chronicler {
+    const fork = this.chronicle.fork(context);
+    // Hook fork activity to reset timer
+    return wrapWithActivityTracking(fork, () => this.lifecycle.onActivity());
+  }
+}
+```
+
+**Benefits:**
+
+- ✅ Clear separation: lifecycle vs event logging
+- ✅ Easier to test lifecycle logic independently
+- ✅ Composition over inheritance
+- ✅ Simpler CorrelationChronicle implementation
+- ✅ Lifecycle logic reusable for other patterns
+
+**Migration Path:**
+
+1. Extract `CorrelationLifecycle` class
+2. Refactor `CorrelationChronicleImpl` to use composition
+3. Add activity tracking wrapper for forks
+4. Update tests
+
+**Estimated Effort:** 3-4 hours
+
+---
+
+### R-4: Type-Safe System Event Fields 🟡 MEDIUM IMPACT
+
+**Current Problem:**
+
+```typescript
+// System events bypass type safety
+emitSystemEvent(
+  config,
+  contextStore,
+  chroniclerSystemEvents.events.contextCollision,
+  {
+    key: detail.key, // No type checking!
+    existingValue: stringifyValue(detail.existingValue),
+    attemptedValue: stringifyValue(detail.attemptedValue),
+  }, // This is Record<string, unknown>
+  ...
+);
+```
+
+**Why This Is Bad:**
+
+- System events don't benefit from field type validation
+- Typos in field names won't be caught
+- No autocomplete for field names
+- Breaking changes to system events are silent
+
+**Proposed Solution: Properly Typed System Events**
+
+```typescript
+// Define proper field types for system events
+const contextCollisionFields = {
+  key: { type: 'string' as const, required: true as const, doc: 'Context key that collided' },
+  existingValue: { type: 'string' as const, required: true as const, doc: 'Current value' },
+  attemptedValue: { type: 'string' as const, required: true as const, doc: 'Attempted value' },
+  relatedEventKey: { type: 'string' as const, required: false as const, doc: 'Triggering event' },
+};
+
+export const chroniclerSystemEvents = defineEventGroup({
+  key: SYSTEM_EVENT_PREFIX.slice(0, -1),
+  type: 'system',
+  doc: 'Internal Chronicler system events',
+  events: {
+    contextCollision: defineEvent({
+      key: `${SYSTEM_EVENT_PREFIX}contextCollision`,
+      level: 'warn',
+      message: 'Context key collision detected',
+      doc: 'Emitted when addContext() attempts to override an existing context key',
+      fields: contextCollisionFields, // Properly typed!
+    }),
+    // ... other events
+  },
+});
+
+// Now emission is type-safe
+chronicle.event(chroniclerSystemEvents.events.contextCollision, {
+  key: detail.key,
+  existingValue: stringifyValue(detail.existingValue),
+  attemptedValue: stringifyValue(detail.attemptedValue),
+  // TypeScript error if we miss required fields or add wrong types!
+});
+```
+
+**Benefits:**
+
+- ✅ Type safety for system events
+- ✅ Autocomplete in IDE
+- ✅ Compile-time field validation
+- ✅ Consistent with user events
+- ✅ Self-documenting
+
+**Migration Path:**
+
+1. Define field definitions for each system event
+2. Update system-events.ts with field definitions
+3. Replace `emitSystemEvent` with typed `chronicle.event()` calls
+4. Remove `emitSystemEvent` helper (no longer needed)
+
+**Estimated Effort:** 2-3 hours
+
+---
+
+### R-5: Strengthen ContextValue Type Safety 🟢 LOW IMPACT
+
+**Current Problem:**
+
+```typescript
+type SimpleValue = string | number | boolean | null;
+export type ContextValue = SimpleValue | SimpleValue[];
+//                                       ^^^^^^^^^^^ Allows any array of simple values
+```
+
+**Issues:**
+
+- Arrays are allowed but unclear why
+- `SimpleValue[]` allows empty arrays
+- No validation that arrays contain consistent types
+- Usage pattern unclear from type alone
+
+**Proposed Solutions:**
+
+**Option A: Remove Array Support (Simplest)**
+
+```typescript
+// If we're not actually using arrays, remove support
+export type ContextValue = string | number | boolean | null;
+
+// If array is needed, user can stringify
+context.add({ ids: ids.join(',') });
+```
+
+**Option B: Constrain Arrays (If needed)**
+
+```typescript
+// Only allow non-empty arrays of consistent types
+export type ContextValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly [string, ...string[]] // Non-empty string array
+  | readonly [number, ...number[]] // Non-empty number array
+  | readonly [boolean, ...boolean[]]; // Non-empty boolean array
+
+// Runtime validation to match
+function isContextValue(value: unknown): value is ContextValue {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return true;
+  }
+  if (Array.isArray(value) && value.length > 0) {
+    const firstType = typeof value[0];
+    return value.every((v) => typeof v === firstType);
+  }
+  return false;
+}
+```
+
+**Option C: Document Current Behavior**
+
+````typescript
+/**
+ * Context value types
+ *
+ * Arrays are allowed for convenience (e.g., list of IDs, tags)
+ * but will be stringified as comma-separated values in logs
+ *
+ * @example
+ * ```
+ * context.add({ tags: ['urgent', 'customer', 'billing'] });
+ * // Logged as: tags: "urgent,customer,billing"
+ * ```
+ */
+export type ContextValue = SimpleValue | SimpleValue[];
+````
+
+**Recommendation:** Start with Option A (remove arrays) or Option C (document). Arrays add complexity without clear use case.
+
+**Migration Path:**
+
+1. Survey codebase for array usage in context
+2. If none found, remove array support
+3. If found, document behavior clearly
+4. Add runtime validation to match type
+
+**Estimated Effort:** 1 hour
+
+---
+
+### R-6: Explicit Event Emission Pipeline 🟢 LOW IMPACT
+
+**Current Problem:**
+Event emission scattered across multiple functions with unclear data flow:
+
+```
+User calls chronicle.event()
+  → createChronicleInstance.event()
+  → buildPayload()
+  → validateFields()
+  → buildValidationMetadata()
+  → samplePerformance()
+  → callBackendMethod()
+```
+
+**Proposed Solution: Pipeline Pattern**
+
+```typescript
+// Clear pipeline with explicit stages
+class EventPipeline {
+  constructor(
+    private readonly config: ChroniclerConfig,
+    private readonly contextManager: ContextManager,
+  ) {}
+
+  process(
+    eventDef: EventDefinition,
+    fields: any,
+    metadata: EventMetadata,
+  ): void {
+    // Stage 1: Validation
+    const validationResult = this.validate(eventDef, fields);
+
+    // Stage 2: Enrichment
+    const enrichedPayload = this.enrich(validationResult, metadata);
+
+    // Stage 3: Monitoring
+    const monitoredPayload = this.addMonitoring(enrichedPayload);
+
+    // Stage 4: Emission
+    this.emit(eventDef, monitoredPayload);
+  }
+
+  private validate(eventDef: EventDefinition, fields: any): ValidationResult {
+    return {
+      normalizedFields: validateFields(eventDef, fields),
+      validationMetadata: buildValidationMetadata(...),
+    };
+  }
+
+  private enrich(validation: ValidationResult, metadata: EventMetadata): Payload {
+    return {
+      eventKey: metadata.eventKey,
+      fields: validation.normalizedFields,
+      correlationId: metadata.correlationId,
+      forkId: metadata.forkId,
+      metadata: this.contextManager.snapshot(),
+      timestamp: new Date().toISOString(),
+      _validation: validation.validationMetadata,
+    };
+  }
+
+  private addMonitoring(payload: Payload): Payload {
+    const perf = samplePerformance(this.config.monitoring, this.perfContext);
+    return perf ? { ...payload, _perf: perf } : payload;
+  }
+
+  private emit(eventDef: EventDefinition, payload: Payload): void {
+    callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
+  }
+}
+```
+
+**Benefits:**
+
+- ✅ Clear stage boundaries
+- ✅ Easy to add middleware/hooks between stages
+- ✅ Each stage independently testable
+- ✅ Easy to add features (e.g., filtering, transformation)
+- ✅ Performance profiling per stage
+
+**Migration Path:**
+
+1. Create `EventPipeline` class
+2. Extract stages from `buildPayload`
+3. Update Chronicle to use pipeline
+4. Add stage tests
+
+**Estimated Effort:** 2-3 hours
+
+---
+
+### R-7: Stronger Type Guards and Runtime Validation 🟢 LOW IMPACT
+
+**Current Problem:**
+Weak runtime validation in several places:
+
+```typescript
+// backend.ts - trusts that LOG_LEVELS are correct
+export type LogLevel = keyof typeof LOG_LEVELS;
+
+// validation.ts - weak type checking
+if (typeof value === 'string') {
+  /* trust it's string */
+}
+
+// No validation that backend actually implements LogBackend contract beyond methods existing
+```
+
+**Proposed Solution: Defensive Programming with Type Guards**
+
+```typescript
+// Stronger log level validation
+export function isValidLogLevel(level: string): level is LogLevel {
+  return level in LOG_LEVELS;
+}
+
+// Use in backend validation
+export const validateBackendMethods = (
+  backend: LogBackend,
+  levels: readonly LogLevel[],
+): string[] => {
+  const missing: LogLevel[] = [];
+  for (const level of levels) {
+    if (!isValidLogLevel(level)) {
+      throw new Error(`Invalid log level: ${level}`);
+    }
+    if (typeof backend[level] !== 'function') {
+      missing.push(level);
+    }
+  }
+  return missing;
+};
+
+// Stronger field type validation with guards
+type FieldTypeValidator = (value: unknown) => boolean;
+
+const fieldTypeValidators: Record<FieldType, FieldTypeValidator> = {
+  string: (v): v is string => typeof v === 'string' && v.length > 0,
+  number: (v): v is number => typeof v === 'number' && !Number.isNaN(v),
+  boolean: (v): v is boolean => typeof v === 'boolean',
+  error: (v): v is Error => v instanceof Error || (v && typeof v === 'object' && 'message' in v),
+};
+
+// Use in validation
+export const validateFieldType = (value: unknown, expectedType: FieldType): boolean => {
+  const validator = fieldTypeValidators[expectedType];
+  return validator(value);
+};
+
+// Runtime config validation
+export function validateChroniclerConfig(config: unknown): asserts config is ChroniclerConfig {
+  if (!config || typeof config !== 'object') {
+    throw new InvalidConfigError('Config must be an object');
+  }
+
+  if (!('backend' in config)) {
+    throw new InvalidConfigError('Backend is required');
+  }
+
+  if (!('metadata' in config)) {
+    throw new InvalidConfigError('Metadata is required');
+  }
+
+  // Validate metadata types
+  const metadata = (config as any).metadata;
+  for (const [key, value] of Object.entries(metadata)) {
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean' &&
+      value !== null
+    ) {
+      throw new InvalidConfigError(
+        `Invalid metadata value for key "${key}": must be string, number, boolean, or null`,
+      );
+    }
+  }
+}
+```
+
+**Benefits:**
+
+- ✅ Fail fast with clear errors
+- ✅ Better error messages
+- ✅ Catches configuration errors at startup
+- ✅ Type guards enable better TypeScript inference
+- ✅ Defense against runtime type coercion
+
+**Migration Path:**
+
+1. Add type guard functions
+2. Add config validation in `createChronicle`
+3. Update field validation to use validators map
+4. Add tests for invalid inputs
+
+**Estimated Effort:** 2 hours
+
+---
+
+### Implementation Strategy
+
+**Phase 1: Foundation (8-10 hours)**
+
+- R-1: Convert to classes throughout
+- R-2: Extract service objects
+- Must be done first as other refactors depend on this
+
+**Phase 2: Type Safety (4-6 hours)**
+
+- R-4: Type-safe system events
+- R-5: Strengthen ContextValue
+- R-7: Type guards and validation
+- Can be done in parallel
+
+**Phase 3: Optimization (6-8 hours)**
+
+- R-3: Extract correlation lifecycle
+- R-6: Event pipeline pattern
+- Builds on Phase 1 foundation
+
+**Total Estimated Effort:** 18-24 hours
+
+**Testing Strategy:**
+
+- Run full test suite after each refactor
+- Add new tests for extracted services
+- Test edge cases with type guards
+- Performance regression testing
+
+---
+
+### Alternative: Minimal Viable Refactoring
+
+If 20+ hours is too much before v1.0, here's a **4-hour minimum**:
+
+1. **R-4 only** (2 hours): Type-safe system events
+   - Highest value for maintainability
+   - No structural changes
+   - Pure type safety win
+
+2. **R-5 only** (1 hour): Document or remove array support in ContextValue
+   - Clarifies type system
+   - Minimal code changes
+
+3. **R-7 only** (1 hour): Add config validation
+   - Better error messages
+   - Fails fast at startup
+
+This gives you type safety improvements without architectural changes.
+
+---
+
+### Decision Framework
+
+**Do the full refactoring if:**
+
+- ✅ You plan to add major features post-v1.0
+- ✅ You expect to maintain this for years
+- ✅ You want to onboard other developers easily
+- ✅ You value code clarity over speed to market
+
+**Ship v1.0 first if:**
+
+- ✅ You need to validate the concept with users
+- ✅ You're a solo developer for now
+- ✅ The current architecture is "good enough"
+- ✅ You can do breaking changes in v2.0
+
+**My Recommendation:** Ship v1.0 with minimal refactoring (R-4, R-5, R-7 only), then do full refactor for v1.1 or v2.0 based on user feedback.
 
 ---
 

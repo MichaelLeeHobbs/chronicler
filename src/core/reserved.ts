@@ -45,8 +45,12 @@ const TOP_LEVEL_SET = new Set<string>(RESERVED_TOP_LEVEL_FIELDS);
 const VALIDATION_SET = new Set<string>(RESERVED_VALIDATION_FIELDS);
 const PERF_SET = new Set<string>(RESERVED_PERF_FIELDS);
 
-// Export the reserved field arrays for CLI usage
-export { RESERVED_PERF_FIELDS, RESERVED_TOP_LEVEL_FIELDS, RESERVED_VALIDATION_FIELDS };
+/**
+ * Export RESERVED_TOP_LEVEL_FIELDS for CLI validation
+ * RESERVED_VALIDATION_FIELDS and RESERVED_PERF_FIELDS are kept internal
+ * as they're only used for nested path validation (_validation.*, _perf.*)
+ */
+export { RESERVED_TOP_LEVEL_FIELDS };
 
 /**
  * Check if a key is a reserved top-level field

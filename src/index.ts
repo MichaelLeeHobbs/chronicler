@@ -5,7 +5,6 @@ export {
   type ContextRecord,
   ContextStore,
   type ContextValidationResult,
-  sanitizeContextInput,
 } from './core/ContextStore';
 export {
   BackendMethodError,

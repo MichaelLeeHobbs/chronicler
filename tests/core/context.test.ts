@@ -1,5 +1,6 @@
-import { sanitizeContextInput } from '@chronicler/core/ContextStore';
 import { describe, expect, it } from 'vitest';
+
+import { sanitizeContextInput } from '../../src/core/ContextStore';
 
 describe('context sanitizer', () => {
   it('strips reserved keys', () => {
@@ -8,12 +9,6 @@ describe('context sanitizer', () => {
     expect(result.context).toEqual({ custom: 'ok' });
     expect(result.validation.reserved).toEqual(['eventKey']);
   });
-
-  // it('flattens nested structures', () => {
-  //   const result = sanitizeContextInput({ nested: { foo: 'bar', inner: { baz: 2 } } });
-  //
-  //   expect(result.context).toEqual({ nested: ['bar', 2] });
-  // });
 
   it('tracks collisions', () => {
     const first = sanitizeContextInput({ foo: 'a', bar: 'b' });

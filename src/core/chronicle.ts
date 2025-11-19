@@ -1,20 +1,21 @@
-import * as os from 'node:os';
-
 import {
   callBackendMethod,
-  DEFAULT_REQUIRED_LEVELS,
   type LogBackend,
   type LogPayload,
   validateBackendMethods,
   type ValidationMetadata,
 } from './backend';
-import { FORK_ID_SEPARATOR, ROOT_FORK_ID } from './constants';
+import {
+  DEFAULT_HOSTNAME,
+  DEFAULT_REQUIRED_LEVELS,
+  FORK_ID_SEPARATOR,
+  ROOT_FORK_ID,
+} from './constants';
 import {
   type ContextCollisionDetail,
   type ContextRecord,
   ContextStore,
   type ContextValidationResult,
-  ContextValue,
 } from './ContextStore';
 import { CorrelationTimer } from './CorrelationTimer';
 import { InvalidConfigError, ReservedFieldError, UnsupportedLogLevelError } from './errors';
@@ -24,12 +25,12 @@ import {
   defineCorrelationGroup,
   type EventDefinition,
   type EventRecord,
-  type LogLevel,
 } from './events';
 import type { FieldDefinitions, InferFields } from './fields';
 import { type PerfContext, type PerfOptions, samplePerformance } from './perf';
 import { assertNoReservedKeys } from './reserved';
 import { chroniclerSystemEvents } from './system-events';
+import { stringifyValue } from './utils';
 import { buildValidationMetadata, validateFields } from './validation';
 
 export interface ChroniclerConfig {
@@ -38,9 +39,6 @@ export interface ChroniclerConfig {
   correlationIdGenerator?: () => string;
   monitoring?: PerfOptions;
 }
-
-const REQUIRED_LEVELS: LogLevel[] = [...DEFAULT_REQUIRED_LEVELS];
-const DEFAULT_HOSTNAME = process.env.HOSTNAME ?? os.hostname();
 
 export interface Chronicler {
   event<F extends FieldDefinitions>(event: EventDefinition<F>, fields: InferFields<F>): void;
@@ -440,16 +438,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   }
 }
 
-/**
- * Convert ContextValue to string for logging in metadataWarning events.
- * Handles primitives (string, number, boolean, null) and arrays.
- */
-const stringifyValue = (value: ContextValue): string => {
-  if (value === null) return 'null';
-  if (Array.isArray(value)) return value.join(',');
-  return String(value);
-};
-
 const getAutoEvents = (events: NormalizedCorrelationGroup['events']): CorrelationAutoEvents => {
   const auto = events as CorrelationAutoEvents;
   return {
@@ -465,7 +453,7 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
     throw new InvalidConfigError('A backend must be provided');
   }
 
-  const missing = validateBackendMethods(config.backend, REQUIRED_LEVELS);
+  const missing = validateBackendMethods(config.backend, DEFAULT_REQUIRED_LEVELS);
   if (missing.length > 0) {
     throw new UnsupportedLogLevelError(missing.join(', '));
   }

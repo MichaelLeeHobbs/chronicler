@@ -1,4 +1,5 @@
 import { isReservedTopLevelField } from './reserved';
+import { isSimpleValue } from './utils';
 
 type SimpleValue = string | number | boolean | null;
 export type ContextValue = SimpleValue | SimpleValue[];
@@ -16,15 +17,6 @@ export interface ContextValidationResult {
   reserved: string[];
   collisionDetails: ContextCollisionDetail[];
 }
-
-const isSimpleValue = (value: unknown): value is SimpleValue => {
-  return (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  );
-};
 
 /**
  * Sanitize and validate context input
