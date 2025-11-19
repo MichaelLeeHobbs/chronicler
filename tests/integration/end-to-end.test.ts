@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createChronicle } from '../../src/core/chronicle';
 import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../src/core/events';
+import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 describe('Integration Tests', () => {
@@ -21,18 +22,18 @@ describe('Integration Tests', () => {
         message: 'Application started',
         doc: 'Logged when application starts',
         fields: {
-          port: { type: 'number', required: true, doc: 'Server port' },
-          mode: { type: 'string', required: false, doc: 'Runtime mode' },
+          port: t.number().doc('Server port'),
+          mode: t.string().optional().doc('Runtime mode'),
         },
-      }),
+      } as const),
       shutdown: defineEvent({
         key: 'system.shutdown',
         level: 'info',
         message: 'Application shutdown',
         doc: 'Logged when application shuts down',
-      }),
+      } as const),
     },
-  });
+  } as const);
 
   const requestCorrelation = defineCorrelationGroup({
     key: 'api.request',
@@ -46,20 +47,20 @@ describe('Integration Tests', () => {
         message: 'Request validated',
         doc: 'Request passed validation',
         fields: {
-          method: { type: 'string', required: true, doc: 'HTTP method' },
-          path: { type: 'string', required: true, doc: 'Request path' },
+          method: t.string().doc('HTTP method'),
+          path: t.string().doc('Request path'),
         },
-      }),
+      } as const),
       processed: defineEvent({
         key: 'api.request.processed',
         level: 'info',
         message: 'Request processed',
         doc: 'Request successfully processed',
         fields: {
-          statusCode: { type: 'number', required: true, doc: 'HTTP status code' },
-          duration: { type: 'number', required: true, doc: 'Processing time in ms' },
+          statusCode: t.number().doc('HTTP status code'),
+          duration: t.number().doc('Processing time in ms'),
         },
-      }),
+      } as const),
     },
   });
 
@@ -399,10 +400,10 @@ describe('Integration Tests', () => {
         message: 'Error occurred',
         doc: 'Error event',
         fields: {
-          error: { type: 'error', required: true, doc: 'The error' },
-          code: { type: 'string', required: true, doc: 'Error code' },
+          error: t.error().doc('The error'),
+          code: t.string().doc('Error code'),
         },
-      });
+      } as const);
 
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({ backend: mock.backend, metadata: {} });

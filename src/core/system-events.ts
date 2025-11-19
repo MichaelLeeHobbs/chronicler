@@ -8,6 +8,7 @@
 
 import { SYSTEM_EVENT_PREFIX } from './constants';
 import { defineEvent, defineEventGroup } from './events';
+import { t } from './fields';
 
 /**
  * System event group for internal Chronicler events
@@ -29,28 +30,15 @@ export const chroniclerSystemEvents = defineEventGroup({
       message: 'Context key collision detected',
       doc: 'Emitted when addContext() attempts to override an existing context key',
       fields: {
-        key: {
-          type: 'string',
-          required: true,
-          doc: 'Context key that collided',
-        },
-        existingValue: {
-          type: 'string',
-          required: true,
-          doc: 'Current value that was preserved',
-        },
-        attemptedValue: {
-          type: 'string',
-          required: true,
-          doc: 'Attempted value that was rejected',
-        },
-        relatedEventKey: {
-          type: 'string',
-          required: false,
-          doc: 'Event key that triggered the collision (if from an event)',
-        },
+        key: t.string().doc('Context key that collided'),
+        existingValue: t.string().doc('Current value that was preserved'),
+        attemptedValue: t.string().doc('Attempted value that was rejected'),
+        relatedEventKey: t
+          .string()
+          .optional()
+          .doc('Event key that triggered the collision (if from an event)'),
       },
-    }),
+    } as const),
 
     /**
      * Emitted when a reserved field name is used in context.
@@ -62,12 +50,8 @@ export const chroniclerSystemEvents = defineEventGroup({
       message: 'Attempted to use reserved field name',
       doc: 'Emitted when addContext() attempts to use a reserved field name',
       fields: {
-        key: {
-          type: 'string',
-          required: true,
-          doc: 'Reserved field name that was attempted',
-        },
+        key: t.string().doc('Reserved field name that was attempted'),
       },
-    }),
+    } as const),
   },
-});
+} as const);

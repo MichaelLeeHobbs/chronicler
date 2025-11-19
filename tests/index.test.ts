@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createChronicle, defineEvent } from '../src';
+import { createChronicle, defineEvent, t } from '../src';
 import { MockLoggerBackend } from './helpers/mock-logger';
 
 describe('chronicler public API', () => {
@@ -17,9 +17,9 @@ describe('chronicler public API', () => {
       message: 'started',
       doc: 'startup event',
       fields: {
-        port: { type: 'number', required: true, doc: 'port' },
+        port: t.number().doc('port'),
       },
-    });
+    } as const);
 
     chronicle.event(event, { port: 3000 });
 

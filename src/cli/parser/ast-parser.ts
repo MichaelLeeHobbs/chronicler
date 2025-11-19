@@ -7,7 +7,6 @@ import path from 'node:path';
 import * as ts from 'typescript';
 
 import type { EventDefinition } from '../../core/events';
-import type { FieldDefinitions } from '../../core/fields';
 import type { ParsedEventTree, ValidationError } from '../types';
 
 /**
@@ -107,7 +106,8 @@ function extractFromCallExpression(node: ts.CallExpression): EventDefinition | n
     level: props.level as 'info' | 'error' | 'warn' | 'debug',
     message: props.message,
     doc: props.doc,
-    fields: props.fields ? (props.fields as FieldDefinitions) : undefined,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+    fields: props.fields ? (props.fields as any) : undefined,
   };
 }
 

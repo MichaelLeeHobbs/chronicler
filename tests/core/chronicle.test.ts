@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Chronicler } from '../../src/core/chronicle';
 import { createChronicle } from '../../src/core/chronicle';
 import { defineEvent } from '../../src/core/events';
+import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 const sampleEvent = defineEvent({
@@ -11,9 +12,9 @@ const sampleEvent = defineEvent({
   message: 'started',
   doc: 'doc',
   fields: {
-    port: { type: 'number', required: true, doc: 'port' },
+    port: t.number().doc('port'),
   },
-});
+} as const);
 
 const errorEvent = defineEvent({
   key: 'system.failure',
@@ -21,9 +22,9 @@ const errorEvent = defineEvent({
   message: 'boom',
   doc: 'error event',
   fields: {
-    error: { type: 'error', required: true, doc: 'err' },
+    error: t.error().doc('err'),
   },
-});
+} as const);
 
 describe('createChronicle', () => {
   it('throws if backend missing levels', () => {

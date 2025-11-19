@@ -1,8 +1,8 @@
 import { stderr } from 'stderr-lib';
 
 import type { ValidationMetadata } from './backend';
-import type { EventDefinition } from './events';
-import type { FieldDefinitions, InferFields } from './fields';
+import type { EventDefinition, EventFields } from './events';
+import type { FieldBuilder } from './fields';
 
 export interface FieldValidationResult {
   missingFields: string[];
@@ -26,34 +26,40 @@ const isSimpleTypeMatch = (value: unknown, type: string): boolean => {
   return false;
 };
 
-export const validateFields = <F extends FieldDefinitions>(
-  event: EventDefinition<F>,
-  payload: InferFields<F>,
+export const validateFields = <
+  E extends EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>,
+>(
+  event: E,
+  payload: EventFields<E>,
 ): FieldValidationResult => {
   const providedFields = (payload ?? {}) as Record<string, unknown>;
   const normalizedFields: Record<string, unknown> = {};
   const missingFields: string[] = [];
   const typeErrors: string[] = [];
 
-  const definitions = event.fields ?? ({} as FieldDefinitions);
+  const fieldBuilders = event.fields ?? ({} as Record<string, FieldBuilder<string, boolean>>);
 
-  for (const [name, definition] of Object.entries(definitions)) {
+  for (const [name, builder] of Object.entries(fieldBuilders)) {
     const value = providedFields[name];
 
+    // Extract metadata from builder (runtime info)
+    const fieldType = builder._type;
+    const isRequired = builder._required;
+
     if (value === undefined || value === null) {
-      if (definition.required) {
+      if (isRequired) {
         missingFields.push(name);
       }
       continue;
     }
 
-    if (!isSimpleTypeMatch(value, definition.type)) {
+    if (!isSimpleTypeMatch(value, fieldType)) {
       typeErrors.push(name);
       continue;
     }
 
     normalizedFields[name] =
-      definition.type === 'error'
+      fieldType === 'error'
         ? // eslint-disable-next-line @typescript-eslint/no-base-to-string
           stderr(value, { patchToString: true }).toString()
         : value;

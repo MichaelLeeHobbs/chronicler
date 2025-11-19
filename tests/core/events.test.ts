@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../src/core/events';
+import { t } from '../../src/core/fields';
 
 describe('event helpers', () => {
   it('preserves event typing', () => {
@@ -10,12 +11,13 @@ describe('event helpers', () => {
       message: 'started',
       doc: 'doc',
       fields: {
-        port: { type: 'number', required: true, doc: 'port' },
-        mode: { type: 'string', required: false, doc: 'mode' },
+        port: t.number().doc('port'),
+        mode: t.string().optional().doc('mode'),
       },
-    });
+    } as const);
 
-    expect(event.fields?.port.required).toBe(true);
+    expect(event.fields?.port._required).toBe(true);
+    expect(event.fields?.mode._required).toBe(false);
   });
 
   it('decorates correlation groups with auto events', () => {
@@ -30,12 +32,12 @@ describe('event helpers', () => {
           level: 'info',
           message: 'received',
           doc: 'request received',
-        }),
+        } as const),
       },
     });
 
     expect(group.events.start.key).toBe('api.request.start');
-    expect(group.events.metadataWarning.fields?.attemptedKey.required).toBe(true);
+    expect(group.events.metadataWarning.fields?.attemptedKey._required).toBe(true);
   });
 
   it('supports nested groups', () => {

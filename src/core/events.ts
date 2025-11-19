@@ -1,18 +1,40 @@
 import { LogLevel } from './backend';
 import { DEFAULT_CORRELATION_TIMEOUT_MS } from './constants';
-import type { FieldDefinitions, InferFields } from './fields';
+import type { FieldBuilder, InferFields } from './fields';
 
 export type { LogLevel };
 
-export interface EventDefinition<Fields extends FieldDefinitions = FieldDefinitions> {
-  key: string;
-  level: LogLevel;
-  message: string;
-  doc: string;
-  fields?: Fields;
+/**
+ * Event definition with compile-time type safety
+ */
+export interface EventDefinition<
+  Key extends string = string,
+  Fields extends Record<string, FieldBuilder<string, boolean>> = Record<
+    string,
+    FieldBuilder<string, boolean>
+  >,
+> {
+  readonly key: Key;
+  readonly level: LogLevel;
+  readonly message: string;
+  readonly doc: string;
+  readonly fields?: Fields;
 }
 
-export type EventRecord = Record<string, EventDefinition>;
+/**
+ * Helper to extract field types from an event definition
+ */
+export type EventFields<E> =
+  E extends EventDefinition<string, infer F>
+    ? F extends Record<string, FieldBuilder<string, boolean>>
+      ? InferFields<F>
+      : Record<string, never>
+    : never;
+
+export type EventRecord = Record<
+  string,
+  EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>
+>;
 
 export interface SystemEventGroup {
   key: string;
@@ -31,46 +53,92 @@ export interface CorrelationEventGroup {
   groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
 }
 
-type AutoEventFields = Record<string, FieldDefinitions>;
+type AutoEventFields = Record<string, Record<string, FieldBuilder<string, boolean>>>;
 
 const correlationAutoFields: AutoEventFields = {
   start: {},
   complete: {
     duration: {
-      type: 'number',
-      required: false,
-      doc: 'Duration of the correlation in milliseconds',
-    },
+      _type: 'number',
+      _required: false,
+      _doc: 'Duration of the correlation in milliseconds',
+    } as FieldBuilder<'number', false>,
   },
   timeout: {},
   metadataWarning: {
-    attemptedKey: { type: 'string', required: true, doc: 'Key attempted to override' },
-    existingValue: { type: 'string', required: true, doc: 'Existing value preserved' },
-    attemptedValue: { type: 'string', required: true, doc: 'Value that was rejected' },
+    attemptedKey: {
+      _type: 'string',
+      _required: true,
+      _doc: 'Key attempted to override',
+    } as FieldBuilder<'string', true>,
+    existingValue: {
+      _type: 'string',
+      _required: true,
+      _doc: 'Existing value preserved',
+    } as FieldBuilder<'string', true>,
+    attemptedValue: {
+      _type: 'string',
+      _required: true,
+      _doc: 'Value that was rejected',
+    } as FieldBuilder<'string', true>,
   },
 };
 
 export type CorrelationAutoEvents = {
-  [Key in keyof typeof correlationAutoFields]: EventDefinition<(typeof correlationAutoFields)[Key]>;
+  [Key in keyof typeof correlationAutoFields]: EventDefinition<
+    string,
+    (typeof correlationAutoFields)[Key]
+  >;
 };
 
-type EmptyEventRecord = Record<never, EventDefinition>;
+type EmptyEventRecord = Record<
+  never,
+  EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>
+>;
 type WithAutoEvents<Event extends EventRecord | undefined> = (Event extends EventRecord
   ? Event
   : EmptyEventRecord) &
   CorrelationAutoEvents;
 
-export const defineEvent = <Field extends FieldDefinitions>(
-  event: EventDefinition<Field>,
-): EventDefinition<Field> => event;
+/**
+ * Define an event with compile-time type safety
+ * Use `as const` for full type inference
+ *
+ * @example
+ * ```typescript
+ * const userCreated = defineEvent({
+ *   key: 'user.created',
+ *   level: 'info',
+ *   message: 'User created',
+ *   doc: 'Emitted when a new user is created',
+ *   fields: {
+ *     userId: t.string().doc('User ID'),
+ *     email: t.string(),
+ *     age: t.number().optional(),
+ *   }
+ * } as const);
+ * ```
+ */
+export const defineEvent = <
+  const Key extends string,
+  const Fields extends Record<string, FieldBuilder<string, boolean>>,
+>(
+  event: EventDefinition<Key, Fields>,
+): EventDefinition<Key, Fields> => event;
 
 export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEventGroup>(
   group: Group,
 ): Group => group;
 
-export type EventFields<Event extends EventDefinition> =
-  Event extends EventDefinition<infer Field>
-    ? Field extends FieldDefinitions
+/**
+ * Helper to extract fields from an event at the type level
+ * @deprecated Use EventFields<E> instead
+ */
+export type EventFieldsLegacy<
+  Event extends EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>,
+> =
+  Event extends EventDefinition<string, infer Field>
+    ? Field extends Record<string, FieldBuilder<string, boolean>>
       ? InferFields<Field>
       : Record<string, never>
     : never;

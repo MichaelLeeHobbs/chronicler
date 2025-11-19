@@ -23,9 +23,15 @@ export {
   type SystemEventGroup,
 } from './core/events';
 export {
+  type FieldBuilder,
+  // Legacy exports (deprecated)
   type FieldDefinition,
   type FieldDefinitions,
   type FieldType,
   type InferFields,
+  type InferFieldType,
+  type OptionalFieldBuilder,
+  type RequiredFieldBuilder,
+  t,
 } from './core/fields';
 export { chroniclerSystemEvents } from './core/system-events';

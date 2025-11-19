@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineEvent } from '../../src/core/events';
+import { t } from '../../src/core/fields';
 import { validateFields } from '../../src/core/validation';
 
 describe('validateFields', () => {
@@ -10,11 +11,11 @@ describe('validateFields', () => {
     message: 'msg',
     doc: 'doc',
     fields: {
-      requiredString: { type: 'string', required: true, doc: 'req' },
-      optionalNumber: { type: 'number', required: false, doc: 'opt' },
-      errorField: { type: 'error', required: false, doc: 'err' },
+      requiredString: t.string().doc('req'),
+      optionalNumber: t.number().optional().doc('opt'),
+      errorField: t.error().optional().doc('err'),
     },
-  });
+  } as const);
 
   it('captures missing required fields', () => {
     const result = validateFields(event, { optionalNumber: 5 } as unknown as {

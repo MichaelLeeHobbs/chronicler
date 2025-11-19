@@ -24,9 +24,9 @@ import {
   type CorrelationEventGroup,
   defineCorrelationGroup,
   type EventDefinition,
+  type EventFields,
   type EventRecord,
 } from './events';
-import type { FieldDefinitions, InferFields } from './fields';
 import { type PerfContext, type PerfOptions, samplePerformance } from './perf';
 import { assertNoReservedKeys } from './reserved';
 import { chroniclerSystemEvents } from './system-events';
@@ -41,7 +41,7 @@ export interface ChroniclerConfig {
 }
 
 export interface Chronicler {
-  event<F extends FieldDefinitions>(event: EventDefinition<F>, fields: InferFields<F>): void;
+  event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
 
   addContext(context: ContextRecord): void;
 
@@ -60,7 +60,7 @@ export interface Chronicler {
  * - Cannot start nested correlations (use fork() for parallel work within a correlation)
  */
 export interface CorrelationChronicle {
-  event<F extends FieldDefinitions>(event: EventDefinition<F>, fields: InferFields<F>): void;
+  event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
 
   addContext(context: ContextRecord): void;
 
@@ -101,7 +101,7 @@ const buildPayload = (
   config: ChroniclerConfig,
   contextStore: ContextStore,
   eventDef: EventDefinition,
-  fields: InferFields<FieldDefinitions>,
+  fields: Record<string, unknown>,
   currentCorrelationId: () => string,
   forkId: string,
   perfContext?: PerfContext,
@@ -147,7 +147,7 @@ const emitSystemEvent = (
     config,
     contextStore,
     eventDef,
-    fields as InferFields<FieldDefinitions>, // Safe cast for system events
+    fields, // Safe cast for system events
     currentCorrelationId,
     forkId,
     perfContext,
@@ -196,7 +196,7 @@ const createChronicleInstance = (
         config,
         contextStore,
         eventDef,
-        fields,
+        fields as Record<string, unknown>,
         currentCorrelationId,
         forkId,
         perfContext, // Pass instance-specific context
@@ -298,12 +298,12 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     this.emitAutoEvent(this.autoEvents.start, {});
   }
 
-  event<F extends FieldDefinitions>(eventDef: EventDefinition<F>, fields: InferFields<F>): void {
+  event<E extends EventDefinition>(eventDef: E, fields: EventFields<E>): void {
     const payload = buildPayload(
       this.config,
       this.contextStore,
       eventDef,
-      fields,
+      fields as Record<string, unknown>,
       this.currentCorrelationId,
       this.forkId,
       this.perfContext,
@@ -425,7 +425,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.config,
       this.contextStore,
       eventDef,
-      fields as InferFields<FieldDefinitions>,
+      fields,
       this.currentCorrelationId,
       this.forkId,
       this.perfContext,

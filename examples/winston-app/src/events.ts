@@ -1,4 +1,4 @@
-import { defineCorrelationGroup, defineEvent, defineEventGroup } from 'chronicler';
+import { defineCorrelationGroup, defineEvent, defineEventGroup, t } from 'chronicler';
 
 /**
  * System lifecycle events
@@ -14,31 +14,31 @@ export const system = defineEventGroup({
       message: 'Application started',
       doc: 'Emitted when the application starts successfully',
       fields: {
-        port: { type: 'number', required: true, doc: 'Server port number' },
-        env: { type: 'string', required: true, doc: 'Environment (development/production)' },
+        port: t.number().doc('Server port number'),
+        env: t.string().doc('Environment (development/production)'),
       },
-    }),
+    } as const),
     shutdown: defineEvent({
       key: 'system.shutdown',
       level: 'info',
       message: 'Application shutting down',
       doc: 'Emitted during graceful shutdown',
       fields: {
-        reason: { type: 'string', required: false, doc: 'Reason for shutdown' },
+        reason: t.string().optional().doc('Reason for shutdown'),
       },
-    }),
+    } as const),
     error: defineEvent({
       key: 'system.error',
       level: 'error',
       message: 'System error occurred',
       doc: 'Emitted when an unexpected system error occurs',
       fields: {
-        error: { type: 'error', required: true, doc: 'Error object' },
-        context: { type: 'string', required: false, doc: 'Error context' },
+        error: t.error().doc('Error object'),
+        context: t.string().optional().doc('Error context'),
       },
-    }),
+    } as const),
   },
-});
+} as const);
 
 /**
  * HTTP request correlation group
@@ -55,32 +55,32 @@ export const httpRequest = defineCorrelationGroup({
       message: 'HTTP request started',
       doc: 'Emitted when request processing begins',
       fields: {
-        method: { type: 'string', required: true, doc: 'HTTP method' },
-        path: { type: 'string', required: true, doc: 'Request path' },
-        ip: { type: 'string', required: false, doc: 'Client IP address' },
-        userAgent: { type: 'string', required: false, doc: 'User agent string' },
+        method: t.string().doc('HTTP method'),
+        path: t.string().doc('Request path'),
+        ip: t.string().optional().doc('Client IP address'),
+        userAgent: t.string().optional().doc('User agent string'),
       },
-    }),
+    } as const),
     completed: defineEvent({
       key: 'http.request.completed',
       level: 'info',
       message: 'HTTP request completed',
       doc: 'Emitted when request finishes successfully',
       fields: {
-        statusCode: { type: 'number', required: true, doc: 'HTTP status code' },
-        duration: { type: 'number', required: true, doc: 'Request duration in ms' },
+        statusCode: t.number().doc('HTTP status code'),
+        duration: t.number().doc('Request duration in ms'),
       },
-    }),
+    } as const),
     error: defineEvent({
       key: 'http.request.error',
       level: 'error',
       message: 'HTTP request error',
       doc: 'Emitted when request encounters an error',
       fields: {
-        error: { type: 'error', required: true, doc: 'Error object' },
-        statusCode: { type: 'number', required: false, doc: 'HTTP status code' },
+        error: t.error().doc('Error object'),
+        statusCode: t.number().optional().doc('HTTP status code'),
       },
-    }),
+    } as const),
   },
 });
 
@@ -98,25 +98,25 @@ export const admin = defineEventGroup({
       message: 'Administrative action performed',
       doc: 'Emitted for auditable administrative actions',
       fields: {
-        action: { type: 'string', required: true, doc: 'Action performed' },
-        userId: { type: 'string', required: true, doc: 'User who performed action' },
-        resource: { type: 'string', required: false, doc: 'Affected resource' },
-        success: { type: 'boolean', required: true, doc: 'Whether action succeeded' },
+        action: t.string().doc('Action performed'),
+        userId: t.string().doc('User who performed action'),
+        resource: t.string().optional().doc('Affected resource'),
+        success: t.boolean().doc('Whether action succeeded'),
       },
-    }),
+    } as const),
     login: defineEvent({
       key: 'admin.login',
       level: 'audit',
       message: 'User login attempt',
       doc: 'Emitted for authentication attempts',
       fields: {
-        userId: { type: 'string', required: true, doc: 'User ID' },
-        success: { type: 'boolean', required: true, doc: 'Login success' },
-        ip: { type: 'string', required: false, doc: 'Client IP' },
+        userId: t.string().doc('User ID'),
+        success: t.boolean().doc('Login success'),
+        ip: t.string().optional().doc('Client IP'),
       },
-    }),
+    } as const),
   },
-});
+} as const);
 
 /**
  * Business logic events
@@ -132,20 +132,20 @@ export const business = defineEventGroup({
       message: 'User created',
       doc: 'Emitted when a new user is created',
       fields: {
-        userId: { type: 'string', required: true, doc: 'New user ID' },
-        email: { type: 'string', required: false, doc: 'User email' },
+        userId: t.string().doc('New user ID'),
+        email: t.string().optional().doc('User email'),
       },
-    }),
+    } as const),
     dataProcessed: defineEvent({
       key: 'business.dataProcessed',
       level: 'info',
       message: 'Data processing completed',
       doc: 'Emitted when background data processing completes',
       fields: {
-        recordCount: { type: 'number', required: true, doc: 'Number of records processed' },
-        duration: { type: 'number', required: true, doc: 'Processing time in ms' },
-        success: { type: 'boolean', required: true, doc: 'Processing success' },
+        recordCount: t.number().doc('Number of records processed'),
+        duration: t.number().doc('Processing time in ms'),
+        success: t.boolean().doc('Processing success'),
       },
-    }),
+    } as const),
   },
-});
+} as const);

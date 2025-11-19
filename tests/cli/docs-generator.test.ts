@@ -27,8 +27,8 @@ describe('Documentation Generator', () => {
         message: 'Application started',
         doc: 'Logged when the application starts',
         fields: {
-          port: { type: 'number', required: true, doc: 'Server port' },
-          mode: { type: 'string', required: false, doc: 'Runtime mode' },
+          port: { _type: 'number', _required: true, _doc: 'Server port' },
+          mode: { _type: 'string', _required: false, _doc: 'Runtime mode' },
         },
       },
       {
@@ -50,7 +50,7 @@ describe('Documentation Generator', () => {
             message: 'Application started',
             doc: 'Logged when the application starts',
             fields: {
-              port: { type: 'number', required: true, doc: 'Server port' },
+              port: { _type: 'number', _required: true, _doc: 'Server port' },
             },
           },
         },

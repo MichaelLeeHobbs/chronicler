@@ -152,8 +152,8 @@ function generateEventMarkdown(event: EventDefinition, level = 3): string[] {
     lines.push('');
 
     Object.entries(event.fields).forEach(([name, field]) => {
-      const required = field.required ? 'required' : 'optional';
-      lines.push(`- **\`${name}\`** (\`${field.type}\`, ${required}): ${field.doc}`);
+      const required = field._required ? 'required' : 'optional';
+      lines.push(`- **\`${name}\`** (\`${field._type}\`, ${required}): ${field._doc ?? ''}`);
     });
 
     lines.push('');
@@ -219,9 +219,9 @@ function serializeEvent(event: EventDefinition): Record<string, unknown> {
     fields: event.fields
       ? Object.entries(event.fields).map(([name, field]) => ({
           name,
-          type: field.type,
-          required: field.required,
-          doc: field.doc,
+          type: field._type,
+          required: field._required,
+          doc: field._doc ?? '',
         }))
       : [],
   };
