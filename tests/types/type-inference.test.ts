@@ -11,6 +11,7 @@ import {
   defineEventGroup,
   LogLevel,
 } from '../../src/core/events';
+import { t } from '../../src/core/fields';
 
 describe('Type Inference Tests', () => {
   describe('Field Type Inference', () => {
@@ -21,16 +22,16 @@ describe('Type Inference Tests', () => {
         message: 'Test',
         doc: 'Test event',
         fields: {
-          name: { type: 'string', required: true, doc: 'Name' },
-          count: { type: 'number', required: false, doc: 'Count' },
+          name: t.string().doc('Name'),
+          count: t.number().optional().doc('Count'),
         },
-      });
+      } as const);
 
       expect(event.fields).toBeDefined();
-      expect(event.fields?.name.type).toBe('string');
-      expect(event.fields?.name.required).toBe(true);
-      expect(event.fields?.count.type).toBe('number');
-      expect(event.fields?.count.required).toBe(false);
+      expect(event.fields?.name._type).toBe('string');
+      expect(event.fields?.name._required).toBe(true);
+      expect(event.fields?.count._type).toBe('number');
+      expect(event.fields?.count._required).toBe(false);
     });
 
     it('handles events without fields', () => {

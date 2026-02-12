@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createChronicle } from '../../src/core/chronicle';
 import { defineEvent } from '../../src/core/events';
+import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 const sampleEvent = defineEvent({
@@ -10,9 +11,9 @@ const sampleEvent = defineEvent({
   message: 'performance test',
   doc: 'Event for testing performance monitoring',
   fields: {
-    action: { type: 'string', required: true, doc: 'Action performed' },
+    action: t.string().doc('Action performed'),
   },
-});
+} as const);
 
 describe('Performance Monitoring', () => {
   describe('6.1 Memory Monitoring', () => {

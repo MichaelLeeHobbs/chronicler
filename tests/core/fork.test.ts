@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createChronicle } from '../../src/core/chronicle';
 import { defineCorrelationGroup, defineEvent } from '../../src/core/events';
+import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 const sampleEvent = defineEvent({
@@ -10,9 +11,9 @@ const sampleEvent = defineEvent({
   message: 'task executed',
   doc: 'A task event',
   fields: {
-    taskId: { type: 'string', required: true, doc: 'Task ID' },
+    taskId: t.string().doc('Task ID'),
   },
-});
+} as const);
 
 const correlationGroup = defineCorrelationGroup({
   key: 'workflow',
@@ -284,9 +285,8 @@ describe('Fork System', () => {
       // Check that chronicler.contextCollision event was emitted
       const collisionEvent = mock.findByKey('chronicler.contextCollision');
       expect(collisionEvent).toBeDefined();
-      expect(collisionEvent?.fields.key).toBe('userId');
-      expect(collisionEvent?.fields.existingValue).toBe('123');
-      expect(collisionEvent?.fields.attemptedValue).toBe('456');
+      expect(collisionEvent?.fields.keys).toBe('userId');
+      expect(collisionEvent?.fields.count).toBe(1);
       expect(collisionEvent?.metadata.userId).toBe('123'); // Original preserved
     });
   });

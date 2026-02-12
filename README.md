@@ -1,4 +1,4 @@
-# chronicler
+# @ubercode/chronicler
 
 > A TypeScript-first, strongly-typed logging toolkit that enforces consistent, documented events with correlations and forks.
 
@@ -17,7 +17,7 @@
 ## Install
 
 ```powershell
-pnpm add chronicler
+pnpm add @ubercode/chronicler
 ```
 
 Node 20+ required.
@@ -30,22 +30,10 @@ import {
   defineEvent,
   defineEventGroup,
   defineCorrelationGroup,
-  type LogBackend,
-  type LogPayload,
-} from 'chronicler';
+  t,
+} from '@ubercode/chronicler';
 
-// Minimal backend (Console)
-class ConsoleBackend implements LogBackend {
-  supportsLevel(): boolean {
-    return true;
-  }
-  log(level: string, message: string, payload: LogPayload) {
-    // Ship to your sink here; for demo we print JSON
-    console.log(JSON.stringify({ level, message, ...payload }));
-  }
-}
-
-// 1) Define events (typed)
+// 1) Define events (typed, using field builders)
 const system = defineEventGroup({
   key: 'system',
   type: 'system',
@@ -56,8 +44,8 @@ const system = defineEventGroup({
       level: 'info',
       message: 'Application started',
       doc: 'Emitted when the app boots',
-      fields: { port: { type: 'number', required: true, doc: 'Port' } },
-    }),
+      fields: { port: t.number().doc('Listening port') },
+    } as const),
   },
 });
 
@@ -65,8 +53,7 @@ const request = defineCorrelationGroup({
   key: 'api.request',
   type: 'correlation',
   doc: 'HTTP request handling',
-  // default timeout is 300s if omitted
-  timeout: 30_000,
+  timeout: 30_000, // default is 300s if omitted
   events: {
     validated: defineEvent({
       key: 'api.request.validated',
@@ -74,24 +61,37 @@ const request = defineCorrelationGroup({
       message: 'Request validated',
       doc: 'Validation passed',
       fields: {
-        method: { type: 'string', required: true, doc: 'HTTP method' },
-        path: { type: 'string', required: true, doc: 'Path' },
+        method: t.string().doc('HTTP method'),
+        path: t.string().doc('Request path'),
       },
-    }),
+    } as const),
   },
 });
 
-// 2) Create a chronicle with a backend
+// 2) Create a backend — any object with methods for each log level
+const consoleBackend = {
+  fatal: (msg: string, data: unknown) => console.error(msg, data),
+  critical: (msg: string, data: unknown) => console.error(msg, data),
+  alert: (msg: string, data: unknown) => console.error(msg, data),
+  error: (msg: string, data: unknown) => console.error(msg, data),
+  warn: (msg: string, data: unknown) => console.warn(msg, data),
+  audit: (msg: string, data: unknown) => console.info(msg, data),
+  info: (msg: string, data: unknown) => console.info(msg, data),
+  debug: (msg: string, data: unknown) => console.debug(msg, data),
+  trace: (msg: string, data: unknown) => console.debug(msg, data),
+};
+
+// 3) Create a chronicle
 const chronicle = createChronicle({
-  backend: new ConsoleBackend(),
+  backend: consoleBackend,
   metadata: { service: 'api', env: 'dev' },
   monitoring: { memory: true, cpu: true },
 });
 
-// 3) Emit typed events
+// 4) Emit typed events
 chronicle.event(system.events.startup, { port: 3000 });
 
-// 4) Correlate work
+// 5) Correlate work
 const corr = chronicle.startCorrelation(request, { requestId: 'r-123' });
 corr.event(request.events.validated, { method: 'GET', path: '/' });
 
@@ -151,7 +151,7 @@ To integrate with Winston, create a simple backend object that maps Chronicler l
 
 ```ts
 import winston from 'winston';
-import { createChronicle } from 'chronicler';
+import { createChronicle } from '@ubercode/chronicler';
 
 const logger = winston.createLogger({
   level: 'info',
@@ -180,16 +180,12 @@ const chronicle = createChronicle({
 
 See `examples/winston-app` for a runnable setup.
 
-## CLI (local workspace)
-
-Until publishing (Task 11), run the CLI via tsx:
+## CLI
 
 ```powershell
 pnpm exec tsx src/cli/index.ts validate
 pnpm exec tsx src/cli/index.ts docs --format markdown --output docs/events.md
 ```
-
-When published, the `chronicler` CLI will be available.
 
 ## Scripts
 

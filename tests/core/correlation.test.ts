@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createChronicle } from '../../src/core/chronicle';
 import { defineCorrelationGroup, defineEvent } from '../../src/core/events';
+import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 const events = defineCorrelationGroup({
@@ -16,9 +17,9 @@ const events = defineCorrelationGroup({
       message: 'payload',
       doc: 'payload',
       fields: {
-        body: { type: 'string', required: true, doc: 'body' },
+        body: t.string().doc('body'),
       },
-    }),
+    } as const),
   },
 });
 

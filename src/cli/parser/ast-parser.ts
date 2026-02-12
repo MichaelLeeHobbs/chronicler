@@ -40,7 +40,15 @@ export function parseEventsFile(filePath: string): ParsedEventTree {
           events.push(extracted);
         }
       } catch (error) {
-        const { line, character } = sourceFile!.getLineAndCharacterOfPosition(node.getStart());
+        let line = 0;
+        let character = 0;
+        try {
+          const pos = sourceFile!.getLineAndCharacterOfPosition(node.getStart());
+          line = pos.line;
+          character = pos.character;
+        } catch {
+          // Node may not have valid position info
+        }
         errors.push({
           type: 'parse-error',
           message: error instanceof Error ? error.message : 'Unknown parse error',
@@ -79,8 +87,11 @@ function extractFromCallExpression(node: ts.CallExpression): EventDefinition | n
     return null;
   }
 
-  // Get the first argument (should be object literal)
-  const arg = node.arguments[0];
+  // Get the first argument (should be object literal, possibly wrapped in `as const`)
+  let arg = node.arguments[0];
+  if (arg && ts.isAsExpression(arg)) {
+    arg = arg.expression;
+  }
   if (!arg || !ts.isObjectLiteralExpression(arg)) {
     throw new Error('defineEvent requires an object literal argument');
   }

@@ -14,7 +14,7 @@ import { formatErrors, validateEventTree } from './parser/validator';
 const program = new Command();
 
 program
-  .name('chronicler')
+  .name('@ubercode/chronicler')
   .description('Chronicler CLI for event validation and documentation generation')
   .version('0.1.0');
 
@@ -38,18 +38,15 @@ program
   .description('Generate documentation from event definitions')
   .option('-f, --format <format>', 'Output format (markdown or json)', 'markdown')
   .option('-o, --output <path>', 'Output file path')
-  .option('-w, --watch', 'Watch for changes and regenerate')
   .option('--config <path>', 'Path to config file (default: chronicler.config.ts)')
-  .action(
-    async (options: { format?: string; output?: string; watch?: boolean; config?: string }) => {
-      try {
-        await runDocs(options);
-      } catch (error) {
-        console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
-        process.exit(1);
-      }
-    },
-  );
+  .action(async (options: { format?: string; output?: string; config?: string }) => {
+    try {
+      await runDocs(options);
+    } catch (error) {
+      console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
 
 /**
  * Run validation command
@@ -131,12 +128,7 @@ async function runValidate(options: { verbose?: boolean; json?: boolean; config?
 /**
  * Run docs generation command
  */
-async function runDocs(options: {
-  format?: string;
-  output?: string;
-  watch?: boolean;
-  config?: string;
-}) {
+async function runDocs(options: { format?: string; output?: string; config?: string }) {
   const startTime = Date.now();
 
   console.log('🔍 Loading configuration...');
@@ -181,11 +173,6 @@ async function runDocs(options: {
   console.log(`   Format: ${format}`);
   console.log(`   Events documented: ${tree.events.length}`);
   console.log(`⏱️  Completed in ${elapsed}ms`);
-
-  if (options.watch) {
-    console.log('\n👀 Watch mode not yet implemented');
-    console.log('   Run the command again to regenerate documentation');
-  }
 
   process.exit(0);
 }

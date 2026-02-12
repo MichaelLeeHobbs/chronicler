@@ -23,8 +23,8 @@ describe('AST Parser', () => {
       expect(startupEvent?.message).toBe('Application started');
       expect(startupEvent?.fields).toBeDefined();
       expect(startupEvent?.fields?.port).toBeDefined();
-      expect(startupEvent?.fields?.port.type).toBe('number');
-      expect(startupEvent?.fields?.port.required).toBe(true);
+      expect(startupEvent?.fields?.port._type).toBe('number');
+      expect(startupEvent?.fields?.port._required).toBe(true);
     });
 
     it('extracts all event properties correctly', () => {
@@ -80,7 +80,7 @@ describe('AST Parser', () => {
             message: 'test',
             doc: 'test',
             fields: {
-              eventKey: { type: 'string' as const, required: true, doc: 'bad' },
+              eventKey: { _type: 'string', _required: true, _doc: 'bad' },
             },
           },
         ],

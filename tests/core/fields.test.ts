@@ -1,22 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import type { FieldDefinition } from '../../src/core/fields';
-import { InferFields, InferFieldType } from '../../src/core/fields';
+import type { InferFields, InferFieldType } from '../../src/core/fields';
+import { t } from '../../src/core/fields';
 
 describe('Field inference primitives', () => {
   it('infers scalar field types', () => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const stringField: FieldDefinition<'string'> = {
-      type: 'string',
-      required: true,
-      doc: 'string field',
-    };
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const numberField: FieldDefinition<'number'> = {
-      type: 'number',
-      required: true,
-      doc: 'number field',
-    };
+    const stringField = t.string();
+    const numberField = t.number();
 
     type StringType = InferFieldType<typeof stringField>;
     type NumberType = InferFieldType<typeof numberField>;
@@ -24,18 +14,29 @@ describe('Field inference primitives', () => {
     const stringValue: StringType = 'hello';
     const numberValue: NumberType = 42;
 
-    expect(typeof stringValue).toBe('string');
-    expect(typeof numberValue).toBe('number');
+    expect(stringField._type).toBe('string');
+    expect(stringField._required).toBe(true);
+    expect(numberField._type).toBe('number');
+    expect(numberField._required).toBe(true);
+    expect(stringValue).toBe('hello');
+    expect(numberValue).toBe(42);
   });
 
   it('infers optional vs required fields', () => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const fields = {
-      id: { type: 'string', required: true, doc: 'identifier' },
-      count: { type: 'number', required: false, doc: 'count' },
-      active: { type: 'boolean', required: true, doc: 'active flag' },
-      error: { type: 'error', required: false, doc: 'error payload' },
-    } as const;
+      id: t.string().doc('identifier'),
+      count: t.number().optional().doc('count'),
+      active: t.boolean().doc('active flag'),
+      error: t.error().optional().doc('error payload'),
+    };
+
+    // Verify builder metadata at runtime
+    expect(fields.id._type).toBe('string');
+    expect(fields.id._required).toBe(true);
+    expect(fields.count._type).toBe('number');
+    expect(fields.count._required).toBe(false);
+    expect(fields.active._type).toBe('boolean');
+    expect(fields.error._type).toBe('error');
 
     type Result = InferFields<typeof fields>;
 

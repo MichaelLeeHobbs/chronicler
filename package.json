@@ -1,5 +1,5 @@
 {
-  "name": "chronicler",
+  "name": "@ubercode/chronicler",
   "version": "0.1.0",
   "description": "A TypeScript-first toolkit for building chronicle and audit utilities.",
   "keywords": [
@@ -9,15 +9,15 @@
     "node"
   ],
   "license": "MIT",
-  "author": "",
+  "author": "MichaelLeeHobbs",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-org/chronicler.git"
+    "url": "git+https://github.com/MichaelLeeHobbs/chronicler.git"
   },
   "bugs": {
-    "url": "https://github.com/your-org/chronicler/issues"
+    "url": "https://github.com/MichaelLeeHobbs/chronicler/issues"
   },
-  "homepage": "https://github.com/your-org/chronicler#readme",
+  "homepage": "https://github.com/MichaelLeeHobbs/chronicler#readme",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
