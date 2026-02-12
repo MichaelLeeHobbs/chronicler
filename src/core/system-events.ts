@@ -21,36 +21,34 @@ export const chroniclerSystemEvents = defineEventGroup({
   doc: 'Internal Chronicler system events for diagnostics and warnings',
   events: {
     /**
-     * Emitted when addContext() attempts to set a key that already exists.
-     * The original value is preserved, and the attempted value is rejected.
+     * Emitted when addContext() attempts to set keys that already exist.
+     * The original values are preserved, and the attempted values are rejected.
+     * Multiple collisions from a single addContext() call are combined into one event.
      */
     contextCollision: defineEvent({
       key: `${SYSTEM_EVENT_PREFIX}contextCollision`,
       level: 'warn',
-      message: 'Context key collision detected',
-      doc: 'Emitted when addContext() attempts to override an existing context key',
+      message: 'Context key collisions detected',
+      doc: 'Emitted when addContext() attempts to override existing context keys',
       fields: {
-        key: t.string().doc('Context key that collided'),
-        existingValue: t.string().doc('Current value that was preserved'),
-        attemptedValue: t.string().doc('Attempted value that was rejected'),
-        relatedEventKey: t
-          .string()
-          .optional()
-          .doc('Event key that triggered the collision (if from an event)'),
+        keys: t.string().doc('Comma-separated list of keys that collided'),
+        count: t.number().doc('Number of collisions'),
       },
     } as const),
 
     /**
-     * Emitted when a reserved field name is used in context.
+     * Emitted when reserved field names are used in context.
      * Reserved fields are silently dropped.
+     * Multiple reserved field attempts from a single addContext() call are combined into one event.
      */
     reservedFieldAttempt: defineEvent({
       key: `${SYSTEM_EVENT_PREFIX}reservedFieldAttempt`,
       level: 'warn',
-      message: 'Attempted to use reserved field name',
-      doc: 'Emitted when addContext() attempts to use a reserved field name',
+      message: 'Attempted to use reserved field names',
+      doc: 'Emitted when addContext() attempts to use reserved field names',
       fields: {
-        key: t.string().doc('Reserved field name that was attempted'),
+        keys: t.string().doc('Comma-separated list of reserved field names that were attempted'),
+        count: t.number().doc('Number of reserved field attempts'),
       },
     } as const),
   },

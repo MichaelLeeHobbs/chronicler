@@ -235,9 +235,8 @@ describe('Integration Tests', () => {
       // Check that chronicler.contextCollision event was emitted
       const collisionEvent = mock.findByKey('chronicler.contextCollision');
       expect(collisionEvent).toBeDefined();
-      expect(collisionEvent?.fields.key).toBe('userId');
-      expect(collisionEvent?.fields.existingValue).toBe('123');
-      expect(collisionEvent?.fields.attemptedValue).toBe('456');
+      expect(collisionEvent?.fields.keys).toBe('userId');
+      expect(collisionEvent?.fields.count).toBe(1);
       expect(collisionEvent?.metadata.userId).toBe('123'); // Original preserved
     });
 

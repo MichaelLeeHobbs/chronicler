@@ -130,31 +130,6 @@ const buildPayload = (
   return payload;
 };
 
-/**
- * Helper to emit system events without going through the type-safe event() method.
- * System events are internal and don't need the same type inference as user events.
- */
-const emitSystemEvent = (
-  config: ChroniclerConfig,
-  contextStore: ContextStore,
-  eventDef: EventDefinition,
-  fields: Record<string, unknown>,
-  currentCorrelationId: () => string,
-  forkId: string,
-  perfContext?: PerfContext,
-): void => {
-  const payload = buildPayload(
-    config,
-    contextStore,
-    eventDef,
-    fields, // Safe cast for system events
-    currentCorrelationId,
-    forkId,
-    perfContext,
-  );
-  callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
-};
-
 interface ChronicleHooks {
   onActivity?: () => void;
   onContextValidation?: (validation: ContextValidationResult) => void;
@@ -207,35 +182,23 @@ const createChronicleInstance = (
     addContext(context) {
       const validation = contextStore.add(context);
 
-      // Emit system events for collisions
-      validation.collisionDetails.forEach((detail) => {
-        emitSystemEvent(
-          config,
-          contextStore,
-          chroniclerSystemEvents.events.contextCollision,
-          {
-            key: detail.key,
-            existingValue: stringifyValue(detail.existingValue),
-            attemptedValue: stringifyValue(detail.attemptedValue),
-          },
-          currentCorrelationId,
-          forkId,
-          perfContext,
-        );
-      });
+      // Emit single system event for all collisions (if any)
+      if (validation.collisionDetails.length > 0) {
+        const keys = validation.collisionDetails.map((d) => d.key).join(', ');
+        this.event(chroniclerSystemEvents.events.contextCollision, {
+          keys,
+          count: validation.collisionDetails.length,
+        });
+      }
 
-      // Emit system events for reserved field attempts
-      validation.reserved.forEach((key) => {
-        emitSystemEvent(
-          config,
-          contextStore,
-          chroniclerSystemEvents.events.reservedFieldAttempt,
-          { key },
-          currentCorrelationId,
-          forkId,
-          perfContext,
-        );
-      });
+      // Emit single system event for all reserved field attempts (if any)
+      if (validation.reserved.length > 0) {
+        const keys = validation.reserved.join(', ');
+        this.event(chroniclerSystemEvents.events.reservedFieldAttempt, {
+          keys,
+          count: validation.reserved.length,
+        });
+      }
 
       hooks.onContextValidation?.(validation);
     },
@@ -315,35 +278,23 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   addContext(context: ContextRecord): void {
     const validation = this.contextStore.add(context);
 
-    // Emit system events for collisions
-    validation.collisionDetails.forEach((detail) => {
-      emitSystemEvent(
-        this.config,
-        this.contextStore,
-        chroniclerSystemEvents.events.contextCollision,
-        {
-          key: detail.key,
-          existingValue: stringifyValue(detail.existingValue),
-          attemptedValue: stringifyValue(detail.attemptedValue),
-        },
-        this.currentCorrelationId,
-        this.forkId,
-        this.perfContext,
-      );
-    });
+    // Emit single system event for all collisions (if any)
+    if (validation.collisionDetails.length > 0) {
+      const keys = validation.collisionDetails.map((d) => d.key).join(', ');
+      this.event(chroniclerSystemEvents.events.contextCollision, {
+        keys,
+        count: validation.collisionDetails.length,
+      });
+    }
 
-    // Emit system events for reserved field attempts
-    validation.reserved.forEach((key) => {
-      emitSystemEvent(
-        this.config,
-        this.contextStore,
-        chroniclerSystemEvents.events.reservedFieldAttempt,
-        { key },
-        this.currentCorrelationId,
-        this.forkId,
-        this.perfContext,
-      );
-    });
+    // Emit single system event for all reserved field attempts (if any)
+    if (validation.reserved.length > 0) {
+      const keys = validation.reserved.join(', ');
+      this.event(chroniclerSystemEvents.events.reservedFieldAttempt, {
+        keys,
+        count: validation.reserved.length,
+      });
+    }
 
     // Keep the old metadataWarning emission for backward compatibility
     // (This is for correlation-specific warnings)
