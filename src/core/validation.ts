@@ -12,7 +12,7 @@ export interface FieldValidationResult {
 
 const isSimpleTypeMatch = (value: unknown, type: string): boolean => {
   if (type === 'error') {
-    return typeof value === 'object' || typeof value === 'string';
+    return value instanceof Error || typeof value === 'string';
   }
   if (type === 'string') {
     return typeof value === 'string';

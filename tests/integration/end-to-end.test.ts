@@ -264,7 +264,7 @@ describe('Integration Tests', () => {
       // @ts-expect-error - intentionally missing required field for testing
       chronicle.event(systemEvents.events.startup, {});
 
-      const payload = mock.getPayloads()[0];
+      const payload = mock.getPayloads()[0]!;
       expect(payload._validation?.missingFields).toContain('port');
     });
 
@@ -275,7 +275,7 @@ describe('Integration Tests', () => {
       // @ts-expect-error - intentionally wrong type for testing
       chronicle.event(systemEvents.events.startup, { port: 'not-a-number' });
 
-      const payload = mock.getPayloads()[0];
+      const payload = mock.getPayloads()[0]!;
       expect(payload._validation?.typeErrors).toContain('port');
     });
   });
@@ -295,10 +295,10 @@ describe('Integration Tests', () => {
       fork1_1_1.event(systemEvents.events.startup, { port: 3 });
 
       const payloads = mock.getUserPayloads();
-      expect(payloads[0].forkId).toBe('0');
-      expect(payloads[1].forkId).toBe('1');
-      expect(payloads[2].forkId).toBe('1.1');
-      expect(payloads[3].forkId).toBe('1.1.1');
+      expect(payloads[0]!.forkId).toBe('0');
+      expect(payloads[1]!.forkId).toBe('1');
+      expect(payloads[2]!.forkId).toBe('1.1');
+      expect(payloads[3]!.forkId).toBe('1.1.1');
     });
 
     it('isolates context between fork branches', () => {
@@ -383,11 +383,11 @@ describe('Integration Tests', () => {
       expect(completes.length).toBe(2);
 
       // First complete should have duration
-      expect(completes[0].fields.duration).toBeGreaterThanOrEqual(0);
-      expect(completes[0]._validation?.multipleCompletes).toBeUndefined();
+      expect(completes[0]!.fields.duration).toBeGreaterThanOrEqual(0);
+      expect(completes[0]!._validation?.multipleCompletes).toBeUndefined();
 
       // Second complete should have warning
-      expect(completes[1]._validation?.multipleCompletes).toBe(true);
+      expect(completes[1]!._validation?.multipleCompletes).toBe(true);
     });
   });
 
@@ -415,7 +415,7 @@ describe('Integration Tests', () => {
         code: 'ERR_TEST',
       });
 
-      const payload = mock.getPayloads()[0];
+      const payload = mock.getPayloads()[0]!;
       expect(payload.fields.error).toBeDefined();
       // Error should be serialized as string by stderr-lib
       expect(typeof payload.fields.error).toBe('string');

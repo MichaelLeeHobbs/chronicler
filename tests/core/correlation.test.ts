@@ -77,7 +77,7 @@ describe('correlation chronicle', () => {
 
     const completeCalls = mock.findAllByKey('api.request.complete');
     expect(completeCalls).toHaveLength(2);
-    const second = completeCalls[1];
+    const second = completeCalls[1]!;
     expect(second._validation?.multipleCompletes).toBe(true);
   });
 });

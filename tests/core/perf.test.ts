@@ -175,12 +175,12 @@ describe('Performance Monitoring', () => {
       const payloads = mock.getPayloads();
 
       // Start event should have perf
-      expect(payloads[0]._perf).toBeDefined();
-      expect(payloads[0]._perf!.heapUsed).toBeGreaterThan(0);
+      expect(payloads[0]!._perf).toBeDefined();
+      expect(payloads[0]!._perf!.heapUsed).toBeGreaterThan(0);
 
       // Correlation event should have perf
-      expect(payloads[1]._perf).toBeDefined();
-      expect(payloads[1]._perf!.heapUsed).toBeGreaterThan(0);
+      expect(payloads[1]!._perf).toBeDefined();
+      expect(payloads[1]!._perf!.heapUsed).toBeGreaterThan(0);
     });
   });
 

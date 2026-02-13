@@ -5,7 +5,7 @@
  * If no activity happens within the timeout period, the onTimeout callback is invoked.
  */
 export class CorrelationTimer {
-  private timeoutId?: NodeJS.Timeout;
+  private timeoutId: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly timeout: number,

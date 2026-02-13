@@ -4,6 +4,8 @@
  * Chronicler CLI
  */
 
+import path from 'node:path';
+
 import { Command } from 'commander';
 
 import { loadConfig, validateEventsFile } from './config-loader';
@@ -58,7 +60,9 @@ async function runValidate(options: { verbose?: boolean; json?: boolean; config?
     console.log('🔍 Loading configuration...');
   }
 
-  const config = await loadConfig(options.config ? process.cwd() : undefined);
+  const config = await loadConfig(
+    options.config ? path.dirname(path.resolve(options.config)) : undefined,
+  );
 
   if (options.verbose && !options.json) {
     console.log(`   Events file: ${config.eventsFile}`);
@@ -132,7 +136,9 @@ async function runDocs(options: { format?: string; output?: string; config?: str
   const startTime = Date.now();
 
   console.log('🔍 Loading configuration...');
-  const config = await loadConfig(options.config ? process.cwd() : undefined);
+  const config = await loadConfig(
+    options.config ? path.dirname(path.resolve(options.config)) : undefined,
+  );
 
   // Override config with CLI options
   if (options.format) {

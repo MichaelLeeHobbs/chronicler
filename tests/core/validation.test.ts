@@ -53,16 +53,15 @@ describe('validateFields', () => {
     expect(result.normalizedFields.errorField).toContain('textual failure');
   });
 
-  it('serializes complex error-like objects without throwing', () => {
-    const circular: { message: string; self?: unknown } = { message: 'loop' };
-    circular.self = circular;
+  it('rejects non-Error objects as type errors for error fields', () => {
+    const plainObject = { message: 'not an error' };
 
     const result = validateFields(event, {
       requiredString: 'ok',
-      errorField: circular,
+      errorField: plainObject,
     });
 
-    expect(typeof result.normalizedFields.errorField).toBe('string');
-    expect((result.normalizedFields.errorField as string).length).toBeGreaterThan(0);
+    expect(result.typeErrors).toEqual(['errorField']);
+    expect(result.normalizedFields.errorField).toBeUndefined();
   });
 });

@@ -155,8 +155,8 @@ describe('Documentation Generator', () => {
       expect(json.eventCount).toBe(2);
       expect(json.groupCount).toBe(1);
       expect(json.groups).toHaveLength(1);
-      expect(json.groups[0].key).toBe('system');
-      expect(json.groups[0].type).toBe('system');
+      expect(json.groups[0]!.key).toBe('system');
+      expect(json.groups[0]!.type).toBe('system');
     });
 
     it('includes all event properties in JSON', () => {
@@ -182,15 +182,15 @@ describe('Documentation Generator', () => {
         }[];
       };
 
-      const event = json.groups[0].events[0];
+      const event = json.groups[0]!.events[0]!;
       expect(event.key).toBe('system.startup');
       expect(event.level).toBe('info');
       expect(event.message).toBe('Application started');
       expect(event.doc).toBe('Logged when the application starts');
       expect(event.fields).toHaveLength(1);
-      expect(event.fields[0].name).toBe('port');
-      expect(event.fields[0].type).toBe('number');
-      expect(event.fields[0].required).toBe(true);
+      expect(event.fields[0]!.name).toBe('port');
+      expect(event.fields[0]!.type).toBe('number');
+      expect(event.fields[0]!.required).toBe(true);
     });
   });
 

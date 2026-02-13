@@ -130,6 +130,27 @@ const buildPayload = (
   return payload;
 };
 
+const emitContextValidationEvents = (
+  validation: ContextValidationResult,
+  emitEvent: (eventDef: EventDefinition, fields: Record<string, unknown>) => void,
+): void => {
+  if (validation.collisionDetails.length > 0) {
+    const keys = validation.collisionDetails.map((d) => d.key).join(', ');
+    emitEvent(chroniclerSystemEvents.events.contextCollision, {
+      keys,
+      count: validation.collisionDetails.length,
+    });
+  }
+
+  if (validation.reserved.length > 0) {
+    const keys = validation.reserved.join(', ');
+    emitEvent(chroniclerSystemEvents.events.reservedFieldAttempt, {
+      keys,
+      count: validation.reserved.length,
+    });
+  }
+};
+
 interface ChronicleHooks {
   onActivity?: () => void;
   onContextValidation?: (validation: ContextValidationResult) => void;
@@ -181,25 +202,7 @@ const createChronicleInstance = (
     },
     addContext(context) {
       const validation = contextStore.add(context);
-
-      // Emit single system event for all collisions (if any)
-      if (validation.collisionDetails.length > 0) {
-        const keys = validation.collisionDetails.map((d) => d.key).join(', ');
-        this.event(chroniclerSystemEvents.events.contextCollision, {
-          keys,
-          count: validation.collisionDetails.length,
-        });
-      }
-
-      // Emit single system event for all reserved field attempts (if any)
-      if (validation.reserved.length > 0) {
-        const keys = validation.reserved.join(', ');
-        this.event(chroniclerSystemEvents.events.reservedFieldAttempt, {
-          keys,
-          count: validation.reserved.length,
-        });
-      }
-
+      emitContextValidationEvents(validation, (eventDef, fields) => this.event(eventDef, fields));
       hooks.onContextValidation?.(validation);
     },
     fork(extraContext = {}) {
@@ -277,28 +280,9 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
 
   addContext(context: ContextRecord): void {
     const validation = this.contextStore.add(context);
+    emitContextValidationEvents(validation, (eventDef, fields) => this.event(eventDef, fields));
 
-    // Emit single system event for all collisions (if any)
     if (validation.collisionDetails.length > 0) {
-      const keys = validation.collisionDetails.map((d) => d.key).join(', ');
-      this.event(chroniclerSystemEvents.events.contextCollision, {
-        keys,
-        count: validation.collisionDetails.length,
-      });
-    }
-
-    // Emit single system event for all reserved field attempts (if any)
-    if (validation.reserved.length > 0) {
-      const keys = validation.reserved.join(', ');
-      this.event(chroniclerSystemEvents.events.reservedFieldAttempt, {
-        keys,
-        count: validation.reserved.length,
-      });
-    }
-
-    // Keep the old metadataWarning emission for backward compatibility
-    // (This is for correlation-specific warnings)
-    if (validation.collisionDetails && validation.collisionDetails.length > 0) {
       this.emitMetadataWarnings(validation.collisionDetails);
     }
   }
@@ -399,6 +383,18 @@ const getAutoEvents = (events: NormalizedCorrelationGroup['events']): Correlatio
   };
 };
 
+/**
+ * Create a root Chronicler instance.
+ *
+ * This is the main entry point for the library. The returned `Chronicler`
+ * can log events, add context, start correlations, and create forks.
+ *
+ * @param config - Chronicler configuration with backend, metadata, and optional monitoring/correlation settings
+ * @returns A configured `Chronicler` instance
+ * @throws {InvalidConfigError} If `config.backend` is missing
+ * @throws {UnsupportedLogLevelError} If the backend is missing required log-level methods
+ * @throws {ReservedFieldError} If `config.metadata` contains reserved field names
+ */
 export const createChronicle = (config: ChroniclerConfig): Chronicler => {
   if (!config.backend) {
     throw new InvalidConfigError('A backend must be provided');

@@ -77,6 +77,14 @@ export const sanitizeContextInput = (
   return { context: sanitized, validation: { collisions, reserved, collisionDetails } };
 };
 
+/**
+ * Immutable-snapshot context store for structured log metadata.
+ *
+ * Context is accumulated over time via {@link add}. Collisions (duplicate keys
+ * with different values) preserve the original value and are reported via the
+ * returned {@link ContextValidationResult}. Reserved field names are silently
+ * dropped.
+ */
 export class ContextStore {
   private readonly context: ContextRecord = {};
 
@@ -85,12 +93,23 @@ export class ContextStore {
     this.context = { ...context };
   }
 
+  /**
+   * Merge new context into the store.
+   *
+   * @param raw - Key-value pairs to add
+   * @returns Validation result with any collisions or reserved field attempts
+   */
   add(raw: ContextRecord): ContextValidationResult {
     const { context, validation } = sanitizeContextInput(raw, this.context);
     Object.assign(this.context, context);
     return validation;
   }
 
+  /**
+   * Return a shallow copy of the current context.
+   *
+   * @returns A new object containing all accumulated context key-value pairs
+   */
   snapshot(): ContextRecord {
     return { ...this.context };
   }

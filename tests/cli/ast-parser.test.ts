@@ -23,8 +23,8 @@ describe('AST Parser', () => {
       expect(startupEvent?.message).toBe('Application started');
       expect(startupEvent?.fields).toBeDefined();
       expect(startupEvent?.fields?.port).toBeDefined();
-      expect(startupEvent?.fields?.port._type).toBe('number');
-      expect(startupEvent?.fields?.port._required).toBe(true);
+      expect(startupEvent!.fields!.port!._type).toBe('number');
+      expect(startupEvent!.fields!.port!._required).toBe(true);
     });
 
     it('extracts all event properties correctly', () => {
@@ -68,7 +68,7 @@ describe('AST Parser', () => {
 
       const errors = validateEventTree(tree);
       expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].type).toBe('invalid-level');
+      expect(errors[0]!.type).toBe('invalid-level');
     });
 
     it('detects reserved field usage', () => {
@@ -90,8 +90,8 @@ describe('AST Parser', () => {
 
       const errors = validateEventTree(tree);
       expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].type).toBe('reserved-field');
-      expect(errors[0].message).toContain('eventKey');
+      expect(errors[0]!.type).toBe('reserved-field');
+      expect(errors[0]!.message).toContain('eventKey');
     });
   });
 });

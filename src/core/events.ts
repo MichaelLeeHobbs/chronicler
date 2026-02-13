@@ -53,9 +53,7 @@ export interface CorrelationEventGroup {
   groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
 }
 
-type AutoEventFields = Record<string, Record<string, FieldBuilder<string, boolean>>>;
-
-const correlationAutoFields: AutoEventFields = {
+const correlationAutoFields = {
   start: {},
   complete: {
     duration: {
@@ -126,6 +124,15 @@ export const defineEvent = <
   event: EventDefinition<Key, Fields>,
 ): EventDefinition<Key, Fields> => event;
 
+/**
+ * Define a system or correlation event group for organizational purposes.
+ *
+ * Groups provide a namespace hierarchy for events. For correlation groups,
+ * prefer {@link defineCorrelationGroup} which adds automatic lifecycle events.
+ *
+ * @param group - Event group definition (system or correlation)
+ * @returns The same group definition, typed for compile-time inference
+ */
 export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEventGroup>(
   group: Group,
 ): Group => group;

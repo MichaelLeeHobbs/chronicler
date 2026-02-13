@@ -8,7 +8,7 @@
 export interface FieldBuilder<T extends string, R extends boolean> {
   readonly _type: T;
   readonly _required: R;
-  readonly _doc?: string;
+  readonly _doc: string | undefined;
 }
 
 /**
@@ -59,6 +59,7 @@ function createFieldBuilder<T extends string>(type: T): RequiredFieldBuilder<T> 
   const builder: RequiredFieldBuilder<T> = {
     _type: type,
     _required: true as const,
+    _doc: undefined,
     optional: () => {
       const optional: OptionalFieldBuilder<T> = {
         _type: type,
@@ -66,14 +67,14 @@ function createFieldBuilder<T extends string>(type: T): RequiredFieldBuilder<T> 
         _doc: builder._doc,
         optional: () => optional,
         doc: (description: string) => {
-          (optional as { _doc?: string })._doc = description;
+          (optional as { _doc: string | undefined })._doc = description;
           return optional;
         },
       };
       return optional;
     },
     doc: (description: string) => {
-      (builder as { _doc?: string })._doc = description;
+      (builder as { _doc: string | undefined })._doc = description;
       return builder;
     },
   };
@@ -133,7 +134,10 @@ export interface FieldMetadata {
 }
 
 /**
- * Extract runtime metadata from field builder
+ * Extract runtime metadata from a field builder for validation and documentation.
+ *
+ * @param field - A field builder created via the `t` helpers
+ * @returns An object with the field's `type`, `required` flag, and `doc` string
  */
 export function extractFieldMetadata(field: FieldBuilder<string, boolean>): FieldMetadata {
   return {

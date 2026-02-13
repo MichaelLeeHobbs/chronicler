@@ -45,8 +45,8 @@ describe('Fork System', () => {
       fork2.event(sampleEvent, { taskId: 'B' });
 
       const payloads = mock.getPayloads();
-      expect(payloads[0].forkId).toBe('1');
-      expect(payloads[1].forkId).toBe('2');
+      expect(payloads[0]!.forkId).toBe('1');
+      expect(payloads[1]!.forkId).toBe('2');
     });
 
     it('creates hierarchical IDs for nested forks', () => {
@@ -62,9 +62,9 @@ describe('Fork System', () => {
       fork1_2.event(sampleEvent, { taskId: '1.2' });
 
       const payloads = mock.getUserPayloads();
-      expect(payloads[0].forkId).toBe('1');
-      expect(payloads[1].forkId).toBe('1.1');
-      expect(payloads[2].forkId).toBe('1.2');
+      expect(payloads[0]!.forkId).toBe('1');
+      expect(payloads[1]!.forkId).toBe('1.1');
+      expect(payloads[2]!.forkId).toBe('1.2');
     });
 
     it('maintains separate fork counters per instance', () => {
@@ -81,8 +81,8 @@ describe('Fork System', () => {
       fork2_1.event(sampleEvent, { taskId: '2.1' });
 
       const payloads = mock.getPayloads();
-      expect(payloads[0].forkId).toBe('1.1');
-      expect(payloads[1].forkId).toBe('2.1');
+      expect(payloads[0]!.forkId).toBe('1.1');
+      expect(payloads[1]!.forkId).toBe('2.1');
     });
   });
 
@@ -118,7 +118,7 @@ describe('Fork System', () => {
 
       // Log from fork
       fork.event(sampleEvent, { taskId: 'fork' });
-      const forkPayload = mock.getPayloads()[0];
+      const forkPayload = mock.getPayloads()[0]!;
 
       // Log from parent
       chronicle.event(sampleEvent, { taskId: 'parent' });
@@ -165,9 +165,9 @@ describe('Fork System', () => {
 
       const payloads = mock.getPayloads();
       // start event
-      expect(payloads[0].forkId).toBe('1');
+      expect(payloads[0]!.forkId).toBe('1');
       // correlation event
-      expect(payloads[1].forkId).toBe('1');
+      expect(payloads[1]!.forkId).toBe('1');
     });
 
     it('allows forks from within correlations', () => {
@@ -181,8 +181,8 @@ describe('Fork System', () => {
 
       // Start event has forkId "0", fork event has "1"
       const payloads = mock.getPayloads();
-      expect(payloads[0].forkId).toBe('0'); // start
-      expect(payloads[1].forkId).toBe('1'); // fork
+      expect(payloads[0]!.forkId).toBe('0'); // start
+      expect(payloads[1]!.forkId).toBe('1'); // fork
     });
 
     it('fork events trigger parent correlation activity timer', async () => {
@@ -242,11 +242,11 @@ describe('Fork System', () => {
       fork.event(sampleEvent, { taskId: 'child' });
 
       const payloads = mock.getPayloads();
-      const correlationId = payloads[0].correlationId; // start event
+      const correlationId = payloads[0]!.correlationId; // start event
 
       // All events should share the same correlationId
-      expect(payloads[1].correlationId).toBe(correlationId);
-      expect(payloads[2].correlationId).toBe(correlationId);
+      expect(payloads[1]!.correlationId).toBe(correlationId);
+      expect(payloads[2]!.correlationId).toBe(correlationId);
     });
   });
 

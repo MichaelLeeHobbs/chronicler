@@ -7,6 +7,7 @@ import path from 'node:path';
 import * as ts from 'typescript';
 
 import type { EventDefinition } from '../../core/events';
+import type { FieldBuilder } from '../../core/fields';
 import type { ParsedEventTree, ValidationError } from '../types';
 
 /**
@@ -112,14 +113,21 @@ function extractFromCallExpression(node: ts.CallExpression): EventDefinition | n
     throw new Error('defineEvent requires "doc" property');
   }
 
-  return {
+  const event: EventDefinition = {
     key: props.key,
     level: props.level as 'info' | 'error' | 'warn' | 'debug',
     message: props.message,
     doc: props.doc,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
-    fields: props.fields ? (props.fields as any) : undefined,
   };
+
+  if (props.fields) {
+    return {
+      ...event,
+      fields: props.fields as Record<string, FieldBuilder<string, boolean>>,
+    };
+  }
+
+  return event;
 }
 
 /**
