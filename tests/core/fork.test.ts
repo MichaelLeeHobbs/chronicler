@@ -248,6 +248,26 @@ describe('Fork System', () => {
       expect(payloads[1]!.correlationId).toBe(correlationId);
       expect(payloads[2]!.correlationId).toBe(correlationId);
     });
+
+    it('fork from correlation with extra context does not emit contextCollision', () => {
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+      const correlation = chronicle.startCorrelation(correlationGroup, { workflowId: 'wf1' });
+      const fork = correlation.fork({ parallelTask: 'task1' });
+
+      fork.event(sampleEvent, { taskId: 'test' });
+
+      // Should NOT have any collision events — extraContext keys are new
+      const collisionEvents = mock.findAllByKey('chronicler.contextCollision');
+      expect(collisionEvents).toHaveLength(0);
+
+      // Fork should have both correlation context and extra context
+      expect(mock.getLastPayload()?.metadata).toMatchObject({
+        workflowId: 'wf1',
+        parallelTask: 'task1',
+      });
+    });
   });
 
   describe('5.4 Fork Deep Nesting', () => {

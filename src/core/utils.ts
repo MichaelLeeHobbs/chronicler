@@ -23,13 +23,11 @@ export const isSimpleValue = (value: unknown): value is string | number | boolea
 
 /**
  * Convert ContextValue to string for logging
- * Handles primitives (string, number, boolean, null) and arrays
  *
  * @param value - Value to stringify
  * @returns String representation
  */
 export const stringifyValue = (value: ContextValue): string => {
   if (value === null) return 'null';
-  if (Array.isArray(value)) return value.join(',');
   return String(value);
 };

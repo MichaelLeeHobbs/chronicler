@@ -1,8 +1,7 @@
 import { isReservedTopLevelField } from './reserved';
 import { isSimpleValue } from './utils';
 
-type SimpleValue = string | number | boolean | null;
-export type ContextValue = SimpleValue | SimpleValue[];
+export type ContextValue = string | number | boolean | null;
 
 export type ContextRecord = Record<string, ContextValue>;
 
@@ -60,8 +59,7 @@ export const sanitizeContextInput = (
       continue;
     }
 
-    // TODO: We should likely warn/log about complex types being skipped or support them properly
-    // Invalid type - skip this key - runtime type checking only for simple values
+    // Invalid type (object, array, undefined, etc.) - skip this key
     if (!isSimpleValue(rawValue)) continue;
 
     if (key in existingContext || key in sanitized) {

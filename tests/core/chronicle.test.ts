@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Chronicler } from '../../src/core/chronicle';
 import { createChronicle } from '../../src/core/chronicle';
@@ -27,6 +27,16 @@ const errorEvent = defineEvent({
 } as const);
 
 describe('createChronicle', () => {
+  it('works without a backend (uses default console backend)', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(vi.fn());
+    const chronicle = createChronicle({ metadata: {} });
+
+    chronicle.event(sampleEvent, { port: 3000 });
+
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    infoSpy.mockRestore();
+  });
+
   it('throws if backend missing levels', () => {
     const mock = new MockLoggerBackend();
 

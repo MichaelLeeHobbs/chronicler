@@ -1,5 +1,6 @@
 import {
   callBackendMethod,
+  createConsoleBackend,
   type LogBackend,
   type LogPayload,
   validateBackendMethods,
@@ -18,7 +19,7 @@ import {
   type ContextValidationResult,
 } from './ContextStore';
 import { CorrelationTimer } from './CorrelationTimer';
-import { InvalidConfigError, ReservedFieldError, UnsupportedLogLevelError } from './errors';
+import { ReservedFieldError, UnsupportedLogLevelError } from './errors';
 import {
   type CorrelationAutoEvents,
   type CorrelationEventGroup,
@@ -34,11 +35,13 @@ import { stringifyValue } from './utils';
 import { buildValidationMetadata, validateFields } from './validation';
 
 export interface ChroniclerConfig {
-  backend: LogBackend;
+  backend?: LogBackend;
   metadata: Record<string, string | number | boolean | null>;
   correlationIdGenerator?: () => string;
   monitoring?: PerfOptions;
 }
+
+type ResolvedChroniclerConfig = Omit<ChroniclerConfig, 'backend'> & { backend: LogBackend };
 
 export interface Chronicler {
   event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
@@ -98,7 +101,7 @@ export interface CorrelationChronicle {
  * @internal This is an internal implementation detail
  */
 const buildPayload = (
-  config: ChroniclerConfig,
+  config: ResolvedChroniclerConfig,
   contextStore: ContextStore,
   eventDef: EventDefinition,
   fields: Record<string, unknown>,
@@ -176,7 +179,7 @@ type NormalizedCorrelationGroup = Omit<CorrelationEventGroup, 'events' | 'timeou
  * @param hooks
  */
 const createChronicleInstance = (
-  config: ChroniclerConfig,
+  config: ResolvedChroniclerConfig,
   contextStore: ContextStore,
   currentCorrelationId: () => string,
   correlationIdGenerator: () => string,
@@ -251,7 +254,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   private forkCounter = 0;
 
   constructor(
-    private readonly config: ChroniclerConfig,
+    private readonly config: ResolvedChroniclerConfig,
     private readonly group: NormalizedCorrelationGroup,
     private readonly contextStore: ContextStore,
     private readonly currentCorrelationId: () => string,
@@ -293,7 +296,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.forkId === ROOT_FORK_ID
         ? String(this.forkCounter)
         : `${this.forkId}${FORK_ID_SEPARATOR}${this.forkCounter}`;
-    const forkStore = new ContextStore({ ...this.contextStore.snapshot(), ...extraContext });
+    const forkStore = new ContextStore(this.contextStore.snapshot());
 
     const forkChronicle = createChronicleInstance(
       this.config,
@@ -389,18 +392,15 @@ const getAutoEvents = (events: NormalizedCorrelationGroup['events']): Correlatio
  * This is the main entry point for the library. The returned `Chronicler`
  * can log events, add context, start correlations, and create forks.
  *
- * @param config - Chronicler configuration with backend, metadata, and optional monitoring/correlation settings
+ * @param config - Chronicler configuration with optional backend, metadata, and optional monitoring/correlation settings
  * @returns A configured `Chronicler` instance
- * @throws {InvalidConfigError} If `config.backend` is missing
  * @throws {UnsupportedLogLevelError} If the backend is missing required log-level methods
  * @throws {ReservedFieldError} If `config.metadata` contains reserved field names
  */
 export const createChronicle = (config: ChroniclerConfig): Chronicler => {
-  if (!config.backend) {
-    throw new InvalidConfigError('A backend must be provided');
-  }
+  const resolvedBackend = config.backend ?? createConsoleBackend();
 
-  const missing = validateBackendMethods(config.backend, DEFAULT_REQUIRED_LEVELS);
+  const missing = validateBackendMethods(resolvedBackend, DEFAULT_REQUIRED_LEVELS);
   if (missing.length > 0) {
     throw new UnsupportedLogLevelError(missing.join(', '));
   }
@@ -415,8 +415,10 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
     config.correlationIdGenerator ??
     (() => `${config.metadata.hostname ?? DEFAULT_HOSTNAME}_${Date.now()}`);
 
+  const resolvedConfig: ResolvedChroniclerConfig = { ...config, backend: resolvedBackend };
+
   return createChronicleInstance(
-    config,
+    resolvedConfig,
     baseContextStore,
     () => correlationIdGenerator(),
     correlationIdGenerator,

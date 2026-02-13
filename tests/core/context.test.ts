@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { sanitizeContextInput } from '../../src/core/ContextStore';
+import { type ContextValue, sanitizeContextInput } from '../../src/core/ContextStore';
 
 describe('context sanitizer', () => {
   it('strips reserved keys', () => {
@@ -18,8 +18,19 @@ describe('context sanitizer', () => {
     expect(next.validation.collisions).toEqual(['foo', 'bar']);
   });
 
-  it('drops unsupported values', () => {
-    const result = sanitizeContextInput({ skipped: [], kept: true });
+  it('drops unsupported values (arrays)', () => {
+    const result = sanitizeContextInput({
+      skipped: [] as unknown as ContextValue,
+      kept: true,
+    });
     expect(result.context).toEqual({ kept: true });
+  });
+
+  it('drops unsupported values (objects)', () => {
+    const result = sanitizeContextInput({
+      skipped: { nested: 'object' } as unknown as ContextValue,
+      kept: 'yes',
+    });
+    expect(result.context).toEqual({ kept: 'yes' });
   });
 });

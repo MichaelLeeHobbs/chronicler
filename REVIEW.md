@@ -17,15 +17,15 @@
 
 ## CRITICAL
 
-- [ ] **C-1: Minimum "Hello World" is ~22 lines; backend boilerplate is 11 lines** (DX)
+- [x] **C-1: Minimum "Hello World" is ~22 lines; backend boilerplate is 11 lines** (DX)
       The 9-method backend requirement is the #1 adoption barrier. Pino: 2 lines. Chronicler: 22.
       **Fix:** Provide `createConsoleBackend()` and `createBackend(partial)` with fallback chains. Make `backend` optional (default to console). Provide `createWinstonBackend(logger)`.
 
-- [ ] **C-2: `ContextValue` type includes arrays but runtime silently drops them** (Standards)
+- [x] **C-2: `ContextValue` type includes arrays but runtime silently drops them** (Standards)
       `ContextValue = SimpleValue | SimpleValue[]` allows arrays at the type level, but `isSimpleValue()` rejects them at runtime. `addContext({ tags: ['a', 'b'] })` compiles but silently loses the key. There's a TODO comment acknowledging this.
       **Fix:** Either support arrays in `isSimpleValue` or remove `SimpleValue[]` from `ContextValue`.
 
-- [ ] **C-3: Fork from correlation double-applies extra context** (Standards)
+- [x] **C-3: Fork from correlation double-applies extra context** (Standards)
       `CorrelationChronicleImpl.fork()` spreads `extraContext` into the constructor AND calls `addContext(extraContext)`, causing every key to be detected as a collision and emitting spurious `contextCollision` system events.
       **Fix:** Remove the `...extraContext` spread from the constructor, or remove the `addContext()` call.
 
