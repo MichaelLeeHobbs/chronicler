@@ -64,6 +64,21 @@ export const DEFAULT_HOSTNAME = process.env.HOSTNAME ?? os.hostname() ?? 'unknow
 export const SYSTEM_EVENT_PREFIX = 'chronicler.';
 
 /**
+ * Default maximum number of context keys per ContextStore
+ */
+export const DEFAULT_MAX_CONTEXT_KEYS = 100;
+
+/**
+ * Default maximum fork nesting depth
+ */
+export const DEFAULT_MAX_FORK_DEPTH = 10;
+
+/**
+ * Default maximum number of active (uncompleted) correlations
+ */
+export const DEFAULT_MAX_ACTIVE_CORRELATIONS = 1000;
+
+/**
  * Conversion factor from microseconds to milliseconds
  * Used for CPU usage calculations
  */

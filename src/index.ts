@@ -5,7 +5,12 @@ export {
   type LogBackend,
   type LogPayload,
 } from './core/backend';
-export { type Chronicler, type CorrelationChronicle, createChronicle } from './core/chronicle';
+export {
+  type Chronicler,
+  type ChroniclerLimits,
+  type CorrelationChronicle,
+  createChronicle,
+} from './core/chronicle';
 export {
   type ContextRecord,
   ContextStore,
@@ -13,6 +18,8 @@ export {
 } from './core/ContextStore';
 export {
   BackendMethodError,
+  CorrelationLimitExceededError,
+  ForkDepthExceededError,
   InvalidConfigError,
   ReservedFieldError,
   UnsupportedLogLevelError,

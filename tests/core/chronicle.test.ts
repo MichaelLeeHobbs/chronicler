@@ -153,6 +153,23 @@ const createChronicleInstance = (
   });
 };
 
+describe('context limits via config', () => {
+  it('emits contextLimitReached when context keys exceed maxContextKeys', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      limits: { maxContextKeys: 2 },
+    });
+
+    chronicle.addContext({ a: '1', b: '2', c: '3' });
+
+    const limitEvent = mock.findByKey('chronicler.contextLimitReached');
+    expect(limitEvent).toBeDefined();
+    expect(limitEvent?.fields.count).toBe(1);
+  });
+});
+
 describe('createChronicleExtended', () => {
   it('verifies startCorrelation availability', () => {
     const mock = new MockLoggerBackend();

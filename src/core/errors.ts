@@ -47,3 +47,28 @@ export class BackendMethodError extends Error {
     this.name = 'BackendMethodError';
   }
 }
+
+/**
+ * Thrown when fork nesting depth exceeds the configured limit.
+ *
+ * @param depth - The attempted fork depth
+ * @param maxDepth - The configured maximum depth
+ */
+export class ForkDepthExceededError extends Error {
+  constructor(depth: number, maxDepth: number) {
+    super(`Fork depth ${depth} exceeds maximum allowed depth of ${maxDepth}`);
+    this.name = 'ForkDepthExceededError';
+  }
+}
+
+/**
+ * Thrown when the number of active correlations exceeds the configured limit.
+ *
+ * @param maxCorrelations - The configured maximum active correlations
+ */
+export class CorrelationLimitExceededError extends Error {
+  constructor(maxCorrelations: number) {
+    super(`Active correlation limit of ${maxCorrelations} exceeded`);
+    this.name = 'CorrelationLimitExceededError';
+  }
+}

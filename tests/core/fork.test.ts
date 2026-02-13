@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createChronicle } from '../../src/core/chronicle';
+import { ForkDepthExceededError } from '../../src/core/errors';
 import { defineCorrelationGroup, defineEvent } from '../../src/core/events';
 import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
@@ -291,6 +292,51 @@ describe('Fork System', () => {
       payloads.forEach((payload, idx) => {
         expect(payload.forkId).toBe(expectedIds[idx]);
       });
+    });
+  });
+
+  describe('Fork depth limits', () => {
+    it('throws ForkDepthExceededError at configured limit', () => {
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({
+        backend: mock.backend,
+        metadata: {},
+        limits: { maxForkDepth: 2 },
+      });
+
+      const fork1 = chronicle.fork();
+      const fork1_1 = fork1.fork(); // depth 2
+
+      expect(() => fork1_1.fork()).toThrow(ForkDepthExceededError);
+    });
+
+    it('allows forks within default depth limit', () => {
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+      let current = chronicle;
+      // Default limit is 10, create 10 levels
+      for (let i = 0; i < 10; i++) {
+        current = current.fork();
+      }
+
+      // Should work fine
+      current.event(sampleEvent, { taskId: 'deep' });
+      expect(mock.getLastPayload()?.forkId).toBeDefined();
+    });
+
+    it('throws from correlation fork too', () => {
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({
+        backend: mock.backend,
+        metadata: {},
+        limits: { maxForkDepth: 1 },
+      });
+
+      const correlation = chronicle.startCorrelation(correlationGroup);
+      const fork = correlation.fork(); // depth 1
+
+      expect(() => fork.fork()).toThrow(ForkDepthExceededError);
     });
   });
 

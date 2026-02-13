@@ -1,6 +1,22 @@
 import { isReservedTopLevelField } from './reserved';
 import { isSimpleValue } from './utils';
 
+const DANGEROUS_KEYS = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+  'toString',
+  'valueOf',
+  'hasOwnProperty',
+  'isPrototypeOf',
+  'propertyIsEnumerable',
+  'toLocaleString',
+  '__defineGetter__',
+  '__defineSetter__',
+  '__lookupGetter__',
+  '__lookupSetter__',
+]);
+
 export type ContextValue = string | number | boolean | null;
 
 export type ContextRecord = Record<string, ContextValue>;
@@ -15,6 +31,7 @@ export interface ContextValidationResult {
   collisions: string[];
   reserved: string[];
   collisionDetails: ContextCollisionDetail[];
+  dropped: string[];
 }
 
 /**
@@ -44,6 +61,7 @@ export interface ContextValidationResult {
 export const sanitizeContextInput = (
   context: ContextRecord,
   existingContext: ContextRecord = {},
+  maxNewKeys = Infinity,
 ): {
   context: ContextRecord;
   validation: ContextValidationResult;
@@ -52,6 +70,8 @@ export const sanitizeContextInput = (
   const collisions: string[] = [];
   const reserved: string[] = [];
   const collisionDetails: ContextCollisionDetail[] = [];
+  const dropped: string[] = [];
+  let acceptedCount = 0;
 
   for (const [key, rawValue] of Object.entries(context)) {
     if (isReservedTopLevelField(key)) {
@@ -59,20 +79,33 @@ export const sanitizeContextInput = (
       continue;
     }
 
+    if (DANGEROUS_KEYS.has(key)) {
+      reserved.push(key);
+      continue;
+    }
+
     // Invalid type (object, array, undefined, etc.) - skip this key
     if (!isSimpleValue(rawValue)) continue;
 
-    if (key in existingContext || key in sanitized) {
+    if (Object.hasOwn(existingContext, key) || Object.hasOwn(sanitized, key)) {
       collisions.push(key);
-      const existingValue = (key in sanitized ? sanitized[key] : existingContext[key])!;
+      const existingValue = (
+        Object.hasOwn(sanitized, key) ? sanitized[key] : existingContext[key]
+      )!;
       collisionDetails.push({ key, existingValue, attemptedValue: rawValue });
       continue;
     }
 
+    if (acceptedCount >= maxNewKeys) {
+      dropped.push(key);
+      continue;
+    }
+
     sanitized[key] = rawValue;
+    acceptedCount++;
   }
 
-  return { context: sanitized, validation: { collisions, reserved, collisionDetails } };
+  return { context: sanitized, validation: { collisions, reserved, collisionDetails, dropped } };
 };
 
 /**
@@ -85,9 +118,11 @@ export const sanitizeContextInput = (
  */
 export class ContextStore {
   private readonly context: ContextRecord = {};
+  private readonly maxKeys: number;
 
-  constructor(initial: ContextRecord = {}) {
-    const { context } = sanitizeContextInput(initial);
+  constructor(initial: ContextRecord = {}, maxKeys = Infinity) {
+    this.maxKeys = maxKeys;
+    const { context } = sanitizeContextInput(initial, {}, maxKeys);
     this.context = { ...context };
   }
 
@@ -98,7 +133,8 @@ export class ContextStore {
    * @returns Validation result with any collisions or reserved field attempts
    */
   add(raw: ContextRecord): ContextValidationResult {
-    const { context, validation } = sanitizeContextInput(raw, this.context);
+    const remaining = Math.max(0, this.maxKeys - Object.keys(this.context).length);
+    const { context, validation } = sanitizeContextInput(raw, this.context, remaining);
     Object.assign(this.context, context);
     return validation;
   }

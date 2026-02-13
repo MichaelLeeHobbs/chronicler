@@ -8,6 +8,9 @@ import {
 } from './backend';
 import {
   DEFAULT_HOSTNAME,
+  DEFAULT_MAX_ACTIVE_CORRELATIONS,
+  DEFAULT_MAX_CONTEXT_KEYS,
+  DEFAULT_MAX_FORK_DEPTH,
   DEFAULT_REQUIRED_LEVELS,
   FORK_ID_SEPARATOR,
   ROOT_FORK_ID,
@@ -19,7 +22,12 @@ import {
   type ContextValidationResult,
 } from './ContextStore';
 import { CorrelationTimer } from './CorrelationTimer';
-import { ReservedFieldError, UnsupportedLogLevelError } from './errors';
+import {
+  CorrelationLimitExceededError,
+  ForkDepthExceededError,
+  ReservedFieldError,
+  UnsupportedLogLevelError,
+} from './errors';
 import {
   type CorrelationAutoEvents,
   type CorrelationEventGroup,
@@ -34,14 +42,34 @@ import { chroniclerSystemEvents } from './system-events';
 import { stringifyValue } from './utils';
 import { buildValidationMetadata, validateFields } from './validation';
 
+export interface ChroniclerLimits {
+  maxContextKeys?: number;
+  maxForkDepth?: number;
+  maxActiveCorrelations?: number;
+}
+
 export interface ChroniclerConfig {
   backend?: LogBackend;
   metadata: Record<string, string | number | boolean | null>;
   correlationIdGenerator?: () => string;
   monitoring?: PerfOptions;
+  limits?: ChroniclerLimits;
 }
 
-type ResolvedChroniclerConfig = Omit<ChroniclerConfig, 'backend'> & { backend: LogBackend };
+interface ResolvedLimits {
+  maxContextKeys: number;
+  maxForkDepth: number;
+  maxActiveCorrelations: number;
+}
+
+type ResolvedChroniclerConfig = Omit<ChroniclerConfig, 'backend' | 'limits'> & {
+  backend: LogBackend;
+  limits: ResolvedLimits;
+};
+
+interface ActiveCorrelationCounter {
+  count: number;
+}
 
 export interface Chronicler {
   event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
@@ -152,7 +180,18 @@ const emitContextValidationEvents = (
       count: validation.reserved.length,
     });
   }
+
+  if (validation.dropped.length > 0) {
+    const keys = validation.dropped.join(', ');
+    emitEvent(chroniclerSystemEvents.events.contextLimitReached, {
+      keys,
+      count: validation.dropped.length,
+    });
+  }
 };
+
+const forkDepthFromId = (forkId: string): number =>
+  forkId === ROOT_FORK_ID ? 0 : forkId.split(FORK_ID_SEPARATOR).length;
 
 interface ChronicleHooks {
   onActivity?: () => void;
@@ -185,6 +224,7 @@ const createChronicleInstance = (
   correlationIdGenerator: () => string,
   forkId: string,
   hooks: ChronicleHooks = {},
+  activeCorrelations: ActiveCorrelationCounter = { count: 0 },
 ): Chronicler => {
   let forkCounter = 0;
   const perfContext: PerfContext = {}; // Instance-specific performance context
@@ -214,7 +254,11 @@ const createChronicleInstance = (
         forkId === ROOT_FORK_ID
           ? String(forkCounter)
           : `${forkId}${FORK_ID_SEPARATOR}${forkCounter}`;
-      const forkStore = new ContextStore(contextStore.snapshot());
+      const depth = forkDepthFromId(childForkId);
+      if (depth > config.limits.maxForkDepth) {
+        throw new ForkDepthExceededError(depth, config.limits.maxForkDepth);
+      }
+      const forkStore = new ContextStore(contextStore.snapshot(), config.limits.maxContextKeys);
       const forkChronicle = createChronicleInstance(
         config,
         forkStore,
@@ -222,6 +266,7 @@ const createChronicleInstance = (
         correlationIdGenerator,
         childForkId,
         hooks,
+        activeCorrelations,
       );
       if (Object.keys(extraContext).length > 0) {
         forkChronicle.addContext(extraContext);
@@ -229,8 +274,15 @@ const createChronicleInstance = (
       return forkChronicle;
     },
     startCorrelation(group, metadata = {}) {
+      if (activeCorrelations.count >= config.limits.maxActiveCorrelations) {
+        throw new CorrelationLimitExceededError(config.limits.maxActiveCorrelations);
+      }
+      activeCorrelations.count++;
       const definedGroup = defineCorrelationGroup(group) as NormalizedCorrelationGroup;
-      const correlationStore = new ContextStore({ ...contextStore.snapshot(), ...metadata });
+      const correlationStore = new ContextStore(
+        { ...contextStore.snapshot(), ...metadata },
+        config.limits.maxContextKeys,
+      );
       const correlationId = correlationIdGenerator();
       return new CorrelationChronicleImpl(
         config,
@@ -239,6 +291,7 @@ const createChronicleInstance = (
         () => correlationId,
         correlationIdGenerator,
         forkId,
+        activeCorrelations,
       );
     },
   };
@@ -260,6 +313,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     private readonly currentCorrelationId: () => string,
     private readonly correlationIdGenerator: () => string,
     private readonly forkId: string,
+    private readonly activeCorrelations: ActiveCorrelationCounter = { count: 0 },
   ) {
     this.timer = new CorrelationTimer(this.group.timeout, () => this.timeout());
     this.autoEvents = getAutoEvents(this.group.events);
@@ -296,7 +350,14 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.forkId === ROOT_FORK_ID
         ? String(this.forkCounter)
         : `${this.forkId}${FORK_ID_SEPARATOR}${this.forkCounter}`;
-    const forkStore = new ContextStore(this.contextStore.snapshot());
+    const depth = forkDepthFromId(childForkId);
+    if (depth > this.config.limits.maxForkDepth) {
+      throw new ForkDepthExceededError(depth, this.config.limits.maxForkDepth);
+    }
+    const forkStore = new ContextStore(
+      this.contextStore.snapshot(),
+      this.config.limits.maxContextKeys,
+    );
 
     const forkChronicle = createChronicleInstance(
       this.config,
@@ -307,6 +368,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       {
         onActivity: () => this.timer.touch(),
       },
+      this.activeCorrelations,
     );
 
     if (extraContext && Object.keys(extraContext).length > 0) {
@@ -317,6 +379,9 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   }
 
   complete(fields: ContextRecord = {}): void {
+    if (!this.completed) {
+      this.activeCorrelations.count--;
+    }
     this.completionCount += 1;
     this.completed = true;
     this.timer.clear();
@@ -335,6 +400,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     if (this.completed) {
       return;
     }
+    this.activeCorrelations.count--;
     this.completed = true;
     this.timer.clear();
     this.emitAutoEvent(this.autoEvents.timeout, {}, undefined, false);
@@ -410,12 +476,24 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
     throw new ReservedFieldError(reservedMetadata);
   }
 
-  const baseContextStore = new ContextStore(config.metadata);
+  const resolvedLimits: ResolvedLimits = {
+    maxContextKeys: config.limits?.maxContextKeys ?? DEFAULT_MAX_CONTEXT_KEYS,
+    maxForkDepth: config.limits?.maxForkDepth ?? DEFAULT_MAX_FORK_DEPTH,
+    maxActiveCorrelations: config.limits?.maxActiveCorrelations ?? DEFAULT_MAX_ACTIVE_CORRELATIONS,
+  };
+
+  const baseContextStore = new ContextStore(config.metadata, resolvedLimits.maxContextKeys);
   const correlationIdGenerator =
     config.correlationIdGenerator ??
     (() => `${config.metadata.hostname ?? DEFAULT_HOSTNAME}_${Date.now()}`);
 
-  const resolvedConfig: ResolvedChroniclerConfig = { ...config, backend: resolvedBackend };
+  const resolvedConfig: ResolvedChroniclerConfig = {
+    ...config,
+    backend: resolvedBackend,
+    limits: resolvedLimits,
+  };
+
+  const activeCorrelations: ActiveCorrelationCounter = { count: 0 };
 
   return createChronicleInstance(
     resolvedConfig,
@@ -423,5 +501,7 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
     () => correlationIdGenerator(),
     correlationIdGenerator,
     ROOT_FORK_ID,
+    {},
+    activeCorrelations,
   );
 };

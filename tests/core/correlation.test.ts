@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createChronicle } from '../../src/core/chronicle';
+import { CorrelationLimitExceededError } from '../../src/core/errors';
 import { defineCorrelationGroup, defineEvent } from '../../src/core/events';
 import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
@@ -79,5 +80,89 @@ describe('correlation chronicle', () => {
     expect(completeCalls).toHaveLength(2);
     const second = completeCalls[1]!;
     expect(second._validation?.multipleCompletes).toBe(true);
+  });
+});
+
+describe('correlation limits', () => {
+  it('throws CorrelationLimitExceededError when active limit exceeded', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      limits: { maxActiveCorrelations: 2 },
+    });
+
+    chronicle.startCorrelation(events);
+    chronicle.startCorrelation(events);
+
+    expect(() => chronicle.startCorrelation(events)).toThrow(CorrelationLimitExceededError);
+  });
+
+  it('decrements on complete(), allowing new correlations', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      limits: { maxActiveCorrelations: 1 },
+    });
+
+    const corr1 = chronicle.startCorrelation(events);
+    corr1.complete();
+
+    // Should succeed since corr1 was completed
+    const corr2 = chronicle.startCorrelation(events);
+    expect(corr2).toBeDefined();
+  });
+
+  it('decrements on timeout(), allowing new correlations', () => {
+    vi.useFakeTimers();
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      limits: { maxActiveCorrelations: 1 },
+    });
+
+    chronicle.startCorrelation(events);
+    vi.advanceTimersByTime(200); // trigger timeout
+
+    // Should succeed since corr1 timed out
+    const corr2 = chronicle.startCorrelation(events);
+    expect(corr2).toBeDefined();
+    vi.useRealTimers();
+  });
+
+  it('counter shared across forks', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      limits: { maxActiveCorrelations: 2 },
+    });
+
+    const fork = chronicle.fork();
+    chronicle.startCorrelation(events);
+    fork.startCorrelation(events);
+
+    expect(() => chronicle.startCorrelation(events)).toThrow(CorrelationLimitExceededError);
+  });
+
+  it('no double-decrement on multiple complete() calls', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      limits: { maxActiveCorrelations: 2 },
+    });
+
+    const corr1 = chronicle.startCorrelation(events);
+    chronicle.startCorrelation(events);
+
+    corr1.complete();
+    corr1.complete(); // second complete should not double-decrement
+
+    // Only 1 slot freed, so starting 2 more should fail on the second
+    chronicle.startCorrelation(events);
+    expect(() => chronicle.startCorrelation(events)).toThrow(CorrelationLimitExceededError);
   });
 });

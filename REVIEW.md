@@ -33,23 +33,23 @@
 
 ## HIGH -- Security
 
-- [ ] **S-1: Prototype pollution via `__proto__`/`constructor` keys in ContextStore** (`ContextStore.ts:67,74,104`)
+- [x] **S-1: Prototype pollution via `__proto__`/`constructor` keys in ContextStore** (`ContextStore.ts:67,74,104`)
       `JSON.parse('{"__proto__":{"polluted":"yes"}}')` passes `Object.entries` and reaches `Object.assign`. Keys like `constructor` and `toString` are not blocked.
       **Fix:** Use `Object.create(null)` for internal context store, or add a denylist for dangerous property names.
 
-- [ ] **S-2: No limits on context store growth -- DoS** (`ContextStore.ts:88-116`)
+- [x] **S-2: No limits on context store growth -- DoS** (`ContextStore.ts:88-116`)
       Unlimited key accumulation via `add()`. Every `event()` call copies the entire context via `snapshot()`, amplifying memory cost.
       **Fix:** Add configurable `maxContextKeys` limit.
 
-- [ ] **S-3: Unbounded fork tree -- DoS** (`chronicle.ts:208-227,290-313`)
+- [x] **S-3: Unbounded fork tree -- DoS** (`chronicle.ts:208-227,290-313`)
       `fork()` can be called recursively without depth or count limits. Each fork clones the parent's context store.
       **Fix:** Add configurable `maxForkDepth` and/or `maxForkCount`.
 
-- [ ] **S-4: Unbounded correlation creation -- timer exhaustion** (`chronicle.ts:228-241`)
+- [x] **S-4: Unbounded correlation creation -- timer exhaustion** (`chronicle.ts:228-241`)
       Each `startCorrelation()` creates a `setTimeout`. Millions of uncompleted correlations exhaust memory and degrade the event loop.
       **Fix:** Add configurable `maxActiveCorrelations`. Track active count.
 
-- [ ] **S-5: Correlation timer prevents process exit** (`CorrelationTimer.ts:22`)
+- [x] **S-5: Correlation timer prevents process exit** (`CorrelationTimer.ts:22`)
       `setTimeout` keeps the event loop alive. Uncompleted correlations with default 5min timeout block graceful shutdown.
       **Fix:** Call `.unref()` on the timeout handle.
 

@@ -37,6 +37,20 @@ export const chroniclerSystemEvents = defineEventGroup({
     } as const),
 
     /**
+     * Emitted when context key limit is reached and keys are dropped.
+     */
+    contextLimitReached: defineEvent({
+      key: `${SYSTEM_EVENT_PREFIX}contextLimitReached`,
+      level: 'warn',
+      message: 'Context key limit reached, keys dropped',
+      doc: 'Emitted when addContext() exceeds the configured maxContextKeys limit',
+      fields: {
+        keys: t.string().doc('Comma-separated list of dropped keys'),
+        count: t.number().doc('Number of dropped keys'),
+      },
+    } as const),
+
+    /**
      * Emitted when reserved field names are used in context.
      * Reserved fields are silently dropped.
      * Multiple reserved field attempts from a single addContext() call are combined into one event.
