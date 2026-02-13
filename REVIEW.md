@@ -55,27 +55,27 @@
 
 ## HIGH -- Code Quality
 
-- [ ] **Q-1: `VALID_LOG_LEVELS` in validator duplicates `constants.ts`** (`validator.ts:9-19`)
+- [x] **Q-1: `VALID_LOG_LEVELS` in validator duplicates `constants.ts`** (`validator.ts:9-19`)
       If a level is added to `constants.ts`, the validator silently fails to accept it.
       **Fix:** Import from `constants.ts` as the single source of truth.
 
-- [ ] **Q-2: `correlationAutoFields` uses raw objects instead of `t` builders** (`events.ts:56-83`)
+- [x] **Q-2: `correlationAutoFields` uses raw objects instead of `t` builders** (`events.ts:56-83`)
       Manually constructs `FieldBuilder`-shaped objects with `as` casts, bypassing builder logic.
       **Fix:** Use `t.number().optional().doc('...')` etc.
 
-- [ ] **Q-3: `getAutoEvents` is a needless identity extraction with unsafe cast** (`chronicle.ts:376-384`)
+- [x] **Q-3: `getAutoEvents` is a needless identity extraction with unsafe cast** (`chronicle.ts:376-384`)
       Casts to `CorrelationAutoEvents` then destructures the same keys back out.
       **Fix:** Access `this.group.events.start` etc. directly.
 
-- [ ] **Q-4: Field builder `doc()` mutates readonly via cast** (`fields.ts:70,77`)
+- [x] **Q-4: Field builder `doc()` mutates readonly via cast** (`fields.ts:70,77`)
       Violates the `readonly` contract. Could cause bugs if builder instances are shared.
       **Fix:** Return a new object from `doc()` instead of mutating.
 
-- [ ] **Q-5: Non-null assertion on `node.arguments[0]!` in AST parser** (`ast-parser.ts:195`)
+- [x] **Q-5: Non-null assertion on `node.arguments[0]!` in AST parser** (`ast-parser.ts:195`)
       `defineEventGroup()` with zero arguments will throw at runtime.
       **Fix:** Guard with `if (!node.arguments[0]) return null;`.
 
-- [ ] **Q-6: Unsafe `as Record<string, unknown>` cast on fields** (`chronicle.ts:195,271`)
+- [x] **Q-6: Unsafe `as Record<string, unknown>` cast on fields** (`chronicle.ts:195,271`)
       Both `event()` methods cast away generic type safety at the boundary.
       **Fix:** Accept the cast as deliberate type erasure boundary and add a comment, or make `buildPayload` generic.
 

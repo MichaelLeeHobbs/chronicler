@@ -55,30 +55,28 @@ export const t = {
 /**
  * Internal: Create a field builder with optional/doc chaining support
  */
-function createFieldBuilder<T extends string>(type: T): RequiredFieldBuilder<T> {
-  const builder: RequiredFieldBuilder<T> = {
+function makeOptional<T extends string>(type: T, doc: string | undefined): OptionalFieldBuilder<T> {
+  return {
+    _type: type,
+    _required: false as const,
+    _doc: doc,
+    optional: () => makeOptional(type, doc),
+    doc: (description: string) => makeOptional(type, description),
+  };
+}
+
+function makeRequired<T extends string>(type: T, doc: string | undefined): RequiredFieldBuilder<T> {
+  return {
     _type: type,
     _required: true as const,
-    _doc: undefined,
-    optional: () => {
-      const optional: OptionalFieldBuilder<T> = {
-        _type: type,
-        _required: false as const,
-        _doc: builder._doc,
-        optional: () => optional,
-        doc: (description: string) => {
-          (optional as { _doc: string | undefined })._doc = description;
-          return optional;
-        },
-      };
-      return optional;
-    },
-    doc: (description: string) => {
-      (builder as { _doc: string | undefined })._doc = description;
-      return builder;
-    },
+    _doc: doc,
+    optional: () => makeOptional(type, doc),
+    doc: (description: string) => makeRequired(type, description),
   };
-  return builder;
+}
+
+function createFieldBuilder<T extends string>(type: T): RequiredFieldBuilder<T> {
+  return makeRequired(type, undefined);
 }
 
 /**

@@ -1,6 +1,6 @@
 import { LogLevel } from './backend';
 import { DEFAULT_CORRELATION_TIMEOUT_MS } from './constants';
-import type { FieldBuilder, InferFields } from './fields';
+import { type FieldBuilder, type InferFields, t } from './fields';
 
 export type { LogLevel };
 
@@ -56,29 +56,13 @@ export interface CorrelationEventGroup {
 const correlationAutoFields = {
   start: {},
   complete: {
-    duration: {
-      _type: 'number',
-      _required: false,
-      _doc: 'Duration of the correlation in milliseconds',
-    } as FieldBuilder<'number', false>,
+    duration: t.number().optional().doc('Duration of the correlation in milliseconds'),
   },
   timeout: {},
   metadataWarning: {
-    attemptedKey: {
-      _type: 'string',
-      _required: true,
-      _doc: 'Key attempted to override',
-    } as FieldBuilder<'string', true>,
-    existingValue: {
-      _type: 'string',
-      _required: true,
-      _doc: 'Existing value preserved',
-    } as FieldBuilder<'string', true>,
-    attemptedValue: {
-      _type: 'string',
-      _required: true,
-      _doc: 'Value that was rejected',
-    } as FieldBuilder<'string', true>,
+    attemptedKey: t.string().doc('Key attempted to override'),
+    existingValue: t.string().doc('Existing value preserved'),
+    attemptedValue: t.string().doc('Value that was rejected'),
   },
 };
 

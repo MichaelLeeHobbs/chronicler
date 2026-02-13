@@ -192,6 +192,7 @@ function extractGroupFromCallExpression(node: ts.CallExpression): ParsedEventGro
     return null;
   }
 
+  if (node.arguments.length === 0) return null;
   const arg = unwrapAsConst(node.arguments[0]!);
   if (!ts.isObjectLiteralExpression(arg)) {
     return null;

@@ -235,6 +235,8 @@ const createChronicleInstance = (
         config,
         contextStore,
         eventDef,
+        // Deliberate type erasure: EventFields<E> is erased to Record<string, unknown>
+        // at this validation boundary so buildPayload can validate fields generically
         fields as Record<string, unknown>,
         currentCorrelationId,
         forkId,
@@ -316,7 +318,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     private readonly activeCorrelations: ActiveCorrelationCounter = { count: 0 },
   ) {
     this.timer = new CorrelationTimer(this.group.timeout, () => this.timeout());
-    this.autoEvents = getAutoEvents(this.group.events);
+    this.autoEvents = this.group.events as CorrelationAutoEvents;
     this.timer.start();
     this.emitAutoEvent(this.autoEvents.start, {});
   }
@@ -326,6 +328,8 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.config,
       this.contextStore,
       eventDef,
+      // Deliberate type erasure: EventFields<E> is erased to Record<string, unknown>
+      // at this validation boundary so buildPayload can validate fields generically
       fields as Record<string, unknown>,
       this.currentCorrelationId,
       this.forkId,
@@ -441,16 +445,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     }
   }
 }
-
-const getAutoEvents = (events: NormalizedCorrelationGroup['events']): CorrelationAutoEvents => {
-  const auto = events as CorrelationAutoEvents;
-  return {
-    start: auto.start,
-    complete: auto.complete,
-    timeout: auto.timeout,
-    metadataWarning: auto.metadataWarning,
-  };
-};
 
 /**
  * Create a root Chronicler instance.

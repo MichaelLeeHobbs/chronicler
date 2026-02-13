@@ -2,21 +2,10 @@
  * Validation rules for event definitions
  */
 
+import { DEFAULT_REQUIRED_LEVELS } from '../../core/constants';
 import type { EventDefinition } from '../../core/events';
 import { RESERVED_TOP_LEVEL_FIELDS } from '../../core/reserved';
 import type { ParsedEventGroup, ParsedEventTree, ValidationError } from '../types';
-
-const VALID_LOG_LEVELS = [
-  'fatal',
-  'critical',
-  'alert',
-  'error',
-  'warn',
-  'audit',
-  'info',
-  'debug',
-  'trace',
-] as const;
 
 /**
  * Validate parsed event tree
@@ -58,10 +47,10 @@ export function validateEvent(event: EventDefinition): ValidationError[] {
 
   // Validate log level
   const levelString = event.level as string;
-  if (!VALID_LOG_LEVELS.includes(levelString as (typeof VALID_LOG_LEVELS)[number])) {
+  if (!DEFAULT_REQUIRED_LEVELS.includes(levelString as (typeof DEFAULT_REQUIRED_LEVELS)[number])) {
     errors.push({
       type: 'invalid-level',
-      message: `Invalid log level "${event.level}" in event "${event.key}". Valid levels: ${VALID_LOG_LEVELS.join(', ')}`,
+      message: `Invalid log level "${event.level}" in event "${event.key}". Valid levels: ${DEFAULT_REQUIRED_LEVELS.join(', ')}`,
       location: {
         file: '<unknown>',
         line: 0,
