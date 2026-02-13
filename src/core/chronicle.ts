@@ -36,7 +36,6 @@ import {
   type EventFields,
   type EventRecord,
 } from './events';
-import { type PerfContext, type PerfOptions, samplePerformance } from './perf';
 import { assertNoReservedKeys } from './reserved';
 import { chroniclerSystemEvents } from './system-events';
 import { stringifyValue } from './utils';
@@ -52,7 +51,6 @@ export interface ChroniclerConfig {
   backend?: LogBackend;
   metadata: Record<string, string | number | boolean | null>;
   correlationIdGenerator?: () => string;
-  monitoring?: PerfOptions;
   limits?: ChroniclerLimits;
 }
 
@@ -108,39 +106,28 @@ export interface CorrelationChronicle {
  * This function orchestrates multiple validation and sampling operations:
  * 1. Field validation - checks required fields and types
  * 2. Validation metadata - aggregates validation errors
- * 3. Performance sampling - captures memory/CPU metrics if enabled
- * 4. Payload assembly - combines all data into final structure
+ * 3. Payload assembly - combines all data into final structure
  *
- * **Why not split this function?**
- * While this handles multiple concerns, they're all steps in a linear pipeline
- * that must happen in this order. Splitting would add unnecessary indirection
- * without improving testability (each step has its own unit tests).
- *
- * @param config - Chronicler configuration (backend, metadata, monitoring options)
  * @param contextStore - Context storage for metadata snapshot
  * @param eventDef - Event definition with field requirements
  * @param fields - Actual field values being logged
  * @param currentCorrelationId - Function to get current correlation ID
  * @param forkId - Hierarchical fork identifier (e.g., '0', '1', '1.1')
- * @param perfContext - Performance tracking context (for CPU delta calculations)
  * @param validationOverrides - Additional validation metadata (e.g., from correlations)
  * @returns Complete log payload ready for backend
  *
  * @internal This is an internal implementation detail
  */
 const buildPayload = (
-  config: ResolvedChroniclerConfig,
   contextStore: ContextStore,
   eventDef: EventDefinition,
   fields: Record<string, unknown>,
   currentCorrelationId: () => string,
   forkId: string,
-  perfContext?: PerfContext,
   validationOverrides?: Partial<ValidationMetadata>,
 ): LogPayload => {
   const fieldValidation = validateFields(eventDef, fields);
   const validationMetadata = buildValidationMetadata(fieldValidation, validationOverrides);
-  const perfSample = samplePerformance(config.monitoring ?? {}, perfContext);
   const payload: LogPayload = {
     eventKey: eventDef.key,
     fields: fieldValidation.normalizedFields,
@@ -152,10 +139,6 @@ const buildPayload = (
 
   if (validationMetadata) {
     payload._validation = validationMetadata;
-  }
-
-  if (perfSample) {
-    payload._perf = perfSample;
   }
 
   return payload;
@@ -227,12 +210,10 @@ const createChronicleInstance = (
   activeCorrelations: ActiveCorrelationCounter = { count: 0 },
 ): Chronicler => {
   let forkCounter = 0;
-  const perfContext: PerfContext = {}; // Instance-specific performance context
 
   return {
     event(eventDef, fields) {
       const payload = buildPayload(
-        config,
         contextStore,
         eventDef,
         // Deliberate type erasure: EventFields<E> is erased to Record<string, unknown>
@@ -240,7 +221,6 @@ const createChronicleInstance = (
         fields as Record<string, unknown>,
         currentCorrelationId,
         forkId,
-        perfContext, // Pass instance-specific context
       );
       callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
       hooks.onActivity?.();
@@ -305,7 +285,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   private completionCount = 0;
   private readonly startedAt = Date.now();
   private readonly autoEvents: CorrelationAutoEvents;
-  private readonly perfContext: PerfContext = {};
   private forkCounter = 0;
 
   constructor(
@@ -325,7 +304,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
 
   event<E extends EventDefinition>(eventDef: E, fields: EventFields<E>): void {
     const payload = buildPayload(
-      this.config,
       this.contextStore,
       eventDef,
       // Deliberate type erasure: EventFields<E> is erased to Record<string, unknown>
@@ -333,7 +311,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       fields as Record<string, unknown>,
       this.currentCorrelationId,
       this.forkId,
-      this.perfContext,
     );
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
     this.timer.touch();
@@ -430,13 +407,11 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     touchTimer = true,
   ): void {
     const payload = buildPayload(
-      this.config,
       this.contextStore,
       eventDef,
       fields,
       this.currentCorrelationId,
       this.forkId,
-      this.perfContext,
       overrides,
     );
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
@@ -452,7 +427,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
  * This is the main entry point for the library. The returned `Chronicler`
  * can log events, add context, start correlations, and create forks.
  *
- * @param config - Chronicler configuration with optional backend, metadata, and optional monitoring/correlation settings
+ * @param config - Chronicler configuration with optional backend, metadata, and optional correlation settings
  * @returns A configured `Chronicler` instance
  * @throws {UnsupportedLogLevelError} If the backend is missing required log-level methods
  * @throws {ReservedFieldError} If `config.metadata` contains reserved field names

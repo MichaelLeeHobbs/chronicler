@@ -85,15 +85,15 @@
       `fatal` vs `critical` vs `alert` creates decision tax. `audit` is a concern, not a severity. Every backend must implement all 9.
       **Fix:** Reduce to 5 (`error`, `warn`, `info`, `debug`, `trace`). Handle `audit` as a tag/concern.
 
-- [ ] **Y-2: Field builder system adds complexity for 3 properties** (`fields.ts`)
+- [x] **Y-2: Field builder system adds complexity for 3 properties** (`fields.ts`)
       82 lines + complex type gymnastics to produce `{ _type, _required, _doc }`. Uses mutation-through-cast. Requires `as const`.
       **Fix:** Consider plain object literals with a helper type. The builder adds zero runtime value.
 
-- [ ] **Y-3: Performance monitoring is scope creep** (`perf.ts`)
+- [x] **Y-3: Performance monitoring is scope creep** (`perf.ts`)
       `process.memoryUsage()` on every log event is a perf anti-pattern inside a perf feature. Point-in-time samples have no causal relationship to the event. Dedicated APM tools do this properly.
       **Fix:** Remove entirely. Users can add perf data as fields if needed.
 
-- [ ] **Y-4: AST parser could be replaced with runtime import** (`ast-parser.ts`)
+- [x] **Y-4: AST parser could be replaced with runtime import** (`ast-parser.ts`)
       414 lines of TypeScript compiler API usage that can't follow variable references or imports. The config loader already dynamically imports TS files via `tsx`.
       **Fix:** Import the events file at runtime, inspect exports. Delete the AST parser.
 

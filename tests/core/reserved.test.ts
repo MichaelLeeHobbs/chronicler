@@ -15,13 +15,12 @@ describe('reserved fields', () => {
 
   it('detects nested reserved paths', () => {
     expect(isReservedFieldPath('_validation.missingFields')).toBe(true);
-    expect(isReservedFieldPath('_perf.heapUsed')).toBe(true);
     expect(isReservedFieldPath('fields.port')).toBe(false);
   });
 
   it('finds reserved keys within objects', () => {
-    const invalid = assertNoReservedKeys({ eventKey: 'x', custom: 1, _perf: 'bad' });
+    const invalid = assertNoReservedKeys({ eventKey: 'x', custom: 1 });
 
-    expect(invalid).toEqual(['eventKey', '_perf']);
+    expect(invalid).toEqual(['eventKey']);
   });
 });

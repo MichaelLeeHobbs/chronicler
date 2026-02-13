@@ -36,15 +36,6 @@ export interface ValidationMetadata {
   multipleCompletes?: boolean;
 }
 
-export interface PerformanceSample {
-  heapUsed: number;
-  heapTotal: number;
-  external: number;
-  rss: number;
-  cpuUser?: number;
-  cpuSystem?: number;
-}
-
 export interface LogPayload {
   eventKey: string;
   fields: Record<string, unknown>;
@@ -53,7 +44,6 @@ export interface LogPayload {
   metadata: Record<string, unknown>;
   timestamp: string;
   _validation?: ValidationMetadata;
-  _perf?: PerformanceSample;
   [key: string]: unknown;
 }
 

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ChroniclerCliConfig } from '../../src/cli/config';
 import { generateDocs } from '../../src/cli/generator/docs-generator';
-import { parseEventsFile } from '../../src/cli/parser/ast-parser';
+import { parseEventsFile } from '../../src/cli/parser/runtime-parser';
 import { validateEventTree } from '../../src/cli/parser/validator';
 import type { ParsedEventTree } from '../../src/cli/types';
 
@@ -25,11 +25,11 @@ describe('Docs CLI end-to-end', () => {
 
   let tree: ParsedEventTree;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     if (fs.existsSync(outputDir)) {
       fs.rmSync(outputDir, { recursive: true });
     }
-    tree = parseEventsFile(fixturePath);
+    tree = await parseEventsFile(fixturePath);
   });
 
   afterEach(() => {

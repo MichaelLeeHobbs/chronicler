@@ -121,19 +121,6 @@ export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEve
   group: Group,
 ): Group => group;
 
-/**
- * Helper to extract fields from an event at the type level
- * @deprecated Use EventFields<E> instead
- */
-export type EventFieldsLegacy<
-  Event extends EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>,
-> =
-  Event extends EventDefinition<string, infer Field>
-    ? Field extends Record<string, FieldBuilder<string, boolean>>
-      ? InferFields<Field>
-      : Record<string, never>
-    : never;
-
 const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
   start: {
     key: `${groupKey}.start`,

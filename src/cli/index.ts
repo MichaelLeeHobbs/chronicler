@@ -10,7 +10,7 @@ import { Command } from 'commander';
 
 import { loadConfig, validateEventsFile } from './config-loader';
 import { generateDocs } from './generator/docs-generator';
-import { parseEventsFile } from './parser/ast-parser';
+import { parseEventsFile } from './parser/runtime-parser';
 import { formatErrors, validateEventTree } from './parser/validator';
 
 const program = new Command();
@@ -79,7 +79,7 @@ async function runValidate(options: { verbose?: boolean; json?: boolean; config?
     console.log(`📖 Parsing ${config.eventsFile}...`);
   }
 
-  const tree = parseEventsFile(config.eventsFile);
+  const tree = await parseEventsFile(config.eventsFile);
 
   if (options.verbose && !options.json) {
     console.log(`   Found ${tree.events.length} event definition(s)`);
@@ -157,7 +157,7 @@ async function runDocs(options: { format?: string; output?: string; config?: str
   validateEventsFile(config);
 
   console.log(`📖 Parsing ${config.eventsFile}...`);
-  const tree = parseEventsFile(config.eventsFile);
+  const tree = await parseEventsFile(config.eventsFile);
 
   console.log(`   Found ${tree.events.length} event(s)`);
 

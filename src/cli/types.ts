@@ -48,12 +48,3 @@ export interface ErrorLocation {
   line: number;
   column: number;
 }
-
-/**
- * Result of event parsing
- */
-export interface ParseResult {
-  success: boolean;
-  tree?: ParsedEventTree;
-  errors: ValidationError[];
-}

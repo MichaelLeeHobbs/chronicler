@@ -119,28 +119,6 @@ describe('createChronicle', () => {
     expect(collisionEvent?.fields.keys).toBe('userId');
     expect(collisionEvent?.fields.count).toBe(1);
   });
-
-  it('attaches perf metrics when monitoring enabled', () => {
-    const mock = new MockLoggerBackend();
-    const chronicle = createChronicle({
-      backend: mock.backend,
-      metadata: {},
-      monitoring: { memory: true },
-    });
-
-    chronicle.event(sampleEvent, { port: 3000 });
-
-    const payload = mock.getLastPayload();
-    const perf = payload?._perf;
-    expect(perf).toBeDefined();
-    if (!perf) {
-      throw new Error('Expected perf sample when monitoring enabled');
-    }
-    expect(typeof perf.heapUsed).toBe('number');
-    expect(typeof perf.heapTotal).toBe('number');
-    expect(typeof perf.external).toBe('number');
-    expect(typeof perf.rss).toBe('number');
-  });
 });
 
 const createChronicleInstance = (

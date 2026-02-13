@@ -77,9 +77,3 @@ export const DEFAULT_MAX_FORK_DEPTH = 10;
  * Default maximum number of active (uncompleted) correlations
  */
 export const DEFAULT_MAX_ACTIVE_CORRELATIONS = 1000;
-
-/**
- * Conversion factor from microseconds to milliseconds
- * Used for CPU usage calculations
- */
-export const MICROSECONDS_TO_MS = 1000;

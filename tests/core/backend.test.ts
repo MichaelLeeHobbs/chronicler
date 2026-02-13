@@ -154,7 +154,6 @@ describe('Backend Validation', () => {
         metadata: { service: 'test-service' },
         timestamp: '2025-11-16T00:00:00Z',
         _validation: { missingFields: ['field1'] },
-        _perf: { heapUsed: 1000, heapTotal: 2000, external: 100, rss: 3000 },
       };
 
       callBackendMethod(mock.backend, 'info', 'Test', payload);
@@ -162,8 +161,6 @@ describe('Backend Validation', () => {
       const capturedPayload = mock.getLastPayload();
       expect(capturedPayload).toEqual(payload);
       expect(capturedPayload?._validation).toEqual({ missingFields: ['field1'] });
-      expect(capturedPayload?._perf).toBeDefined();
-      expect(capturedPayload?._perf?.heapUsed).toBe(1000);
     });
   });
 });

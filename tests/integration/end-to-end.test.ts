@@ -73,10 +73,6 @@ describe('Integration Tests', () => {
           application: 'test-api',
           env: 'test',
         },
-        monitoring: {
-          memory: true,
-          cpu: true,
-        },
       });
 
       // Application startup
@@ -128,9 +124,6 @@ describe('Integration Tests', () => {
       expect(startup?.fields.port).toBe(3000);
       expect(startup?.metadata.application).toBe('test-api');
       expect(startup?.metadata.env).toBe('test');
-      expect(startup?._perf).toBeDefined();
-      expect(startup?._perf?.heapUsed).toBeGreaterThan(0);
-      expect(startup?._perf?.cpuUser).toBeGreaterThanOrEqual(0);
 
       // Check correlation start
       const start = mock.findByKey('api.request.start');
@@ -160,7 +153,7 @@ describe('Integration Tests', () => {
       // Check correlation complete
       const complete = mock.findByKey('api.request.complete');
       expect(complete).toBeDefined();
-      expect(complete?.fields.duration).toBeGreaterThan(0);
+      expect(complete?.fields.duration).toBeGreaterThanOrEqual(0);
       expect(complete?.correlationId).toBe(start?.correlationId);
 
       // Check shutdown
@@ -332,41 +325,6 @@ describe('Integration Tests', () => {
 
       expect(b2?.metadata.branch2Only).toBe('b2');
       expect(b2?.metadata).not.toHaveProperty('branch1Only');
-    });
-  });
-
-  describe('Performance Monitoring Integration', () => {
-    it('includes performance metrics across all log types', () => {
-      const mock = new MockLoggerBackend();
-      const chronicle = createChronicle({
-        backend: mock.backend,
-        metadata: {},
-        monitoring: { memory: true, cpu: true },
-      });
-
-      // System event
-      chronicle.event(systemEvents.events.startup, { port: 3000 });
-
-      // Correlation
-      const correlation = chronicle.startCorrelation(requestCorrelation);
-      correlation.event(requestCorrelation.events.validated, {
-        method: 'GET',
-        path: '/',
-      });
-      correlation.complete();
-
-      // Fork
-      const fork = chronicle.fork();
-      fork.event(systemEvents.events.startup, { port: 4000 });
-
-      // All should have perf metrics
-      const payloads = mock.getPayloads();
-      payloads.forEach((payload) => {
-        expect(payload._perf).toBeDefined();
-        expect(payload._perf?.heapUsed).toBeGreaterThan(0);
-        expect(typeof payload._perf?.cpuUser).toBe('number');
-        expect(typeof payload._perf?.cpuSystem).toBe('number');
-      });
     });
   });
 

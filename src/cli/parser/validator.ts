@@ -142,13 +142,6 @@ export function validateGroup(group: ParsedEventGroup, parentKey = ''): Validati
 }
 
 /**
- * Check if event tree has any errors
- */
-export function hasErrors(tree: ParsedEventTree): boolean {
-  return tree.errors.length > 0;
-}
-
-/**
  * Format validation errors for display
  */
 export function formatErrors(errors: ValidationError[]): string {

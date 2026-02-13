@@ -7,7 +7,6 @@ const RESERVED_TOP_LEVEL_FIELDS = [
   'timestamp', // Used in Payload
   'hostname', // Used in correlationId generation
   'fields', // Used in Payload
-  '_perf', // Used in Payload
   '_validation', // Used in Payload
 ] as const;
 
@@ -18,37 +17,23 @@ const RESERVED_VALIDATION_FIELDS = [
   'multipleCompletes',
 ] as const;
 
-const RESERVED_PERF_FIELDS = [
-  'heapUsed',
-  'heapTotal',
-  'external',
-  'rss',
-  'cpuUser',
-  'cpuSystem',
-] as const;
-
 export type ReservedTopLevelField = (typeof RESERVED_TOP_LEVEL_FIELDS)[number];
 export type ReservedValidationField = (typeof RESERVED_VALIDATION_FIELDS)[number];
-export type ReservedPerfField = (typeof RESERVED_PERF_FIELDS)[number];
 
 /**
  * Union type of all possible reserved field paths
  * Used for type narrowing in validation functions
  */
-export type AllReservedFields =
-  | ReservedTopLevelField
-  | `_validation.${ReservedValidationField}`
-  | `_perf.${ReservedPerfField}`;
+export type AllReservedFields = ReservedTopLevelField | `_validation.${ReservedValidationField}`;
 
 // Sets for O(1) lookup during validation
 const TOP_LEVEL_SET = new Set<string>(RESERVED_TOP_LEVEL_FIELDS);
 const VALIDATION_SET = new Set<string>(RESERVED_VALIDATION_FIELDS);
-const PERF_SET = new Set<string>(RESERVED_PERF_FIELDS);
 
 /**
  * Export RESERVED_TOP_LEVEL_FIELDS for CLI validation
- * RESERVED_VALIDATION_FIELDS and RESERVED_PERF_FIELDS are kept internal
- * as they're only used for nested path validation (_validation.*, _perf.*)
+ * RESERVED_VALIDATION_FIELDS is kept internal
+ * as it's only used for nested path validation (_validation.*)
  */
 export { RESERVED_TOP_LEVEL_FIELDS };
 
@@ -69,11 +54,6 @@ export const isReservedFieldPath = (key: string): key is AllReservedFields => {
   if (key.startsWith('_validation.')) {
     const field = key.replace('_validation.', '');
     return VALIDATION_SET.has(field);
-  }
-
-  if (key.startsWith('_perf.')) {
-    const field = key.replace('_perf.', '');
-    return PERF_SET.has(field);
   }
 
   return false;
