@@ -12,6 +12,7 @@
 - Enforce required/optional fields and flag type issues at runtime
 - Correlate related logs with auto start/complete/timeout events and durations
 - Fork work into sub-operations with hierarchical fork IDs
+- Auto-generate Markdown or JSON documentation from event definitions via the CLI
 - Structured payloads ready for ingestion (e.g., CloudWatch, ELK, Datadog)
 
 ## Install

@@ -40,6 +40,56 @@ describe('AST Parser', () => {
       expect(queryEvent?.fields).toBeDefined();
       expect(Object.keys(queryEvent?.fields ?? {})).toHaveLength(2);
     });
+
+    it('extracts event groups', () => {
+      const filePath = path.join(fixturesPath, 'valid-events.ts');
+      const tree = parseEventsFile(filePath);
+
+      expect(tree.groups.length).toBeGreaterThanOrEqual(2);
+
+      const systemGroup = tree.groups.find((g) => g.key === 'system');
+      expect(systemGroup).toBeDefined();
+      expect(systemGroup?.type).toBe('system');
+      expect(systemGroup?.doc).toBe('System-level events');
+    });
+
+    it('extracts correlation groups with timeout', () => {
+      const filePath = path.join(fixturesPath, 'valid-events.ts');
+      const tree = parseEventsFile(filePath);
+
+      const queryGroup = tree.groups.find((g) => g.key === 'api.query');
+      expect(queryGroup).toBeDefined();
+      expect(queryGroup?.type).toBe('correlation');
+      expect(queryGroup?.doc).toBe('API query operations');
+      expect(queryGroup?.timeout).toBe(30000);
+    });
+
+    it('extracts inline events within groups', () => {
+      const filePath = path.join(fixturesPath, 'valid-events.ts');
+      const tree = parseEventsFile(filePath);
+
+      const queryGroup = tree.groups.find((g) => g.key === 'api.query');
+      expect(queryGroup).toBeDefined();
+      expect(Object.keys(queryGroup!.events)).toContain('executed');
+
+      const executed = queryGroup!.events.executed;
+      expect(executed).toBeDefined();
+      expect(executed?.key).toBe('api.query.executed');
+      expect(executed?.level).toBe('info');
+      expect(executed?.fields).toBeDefined();
+      expect(Object.keys(executed?.fields ?? {})).toHaveLength(2);
+    });
+
+    it('handles variable reference events gracefully', () => {
+      const filePath = path.join(fixturesPath, 'valid-events.ts');
+      const tree = parseEventsFile(filePath);
+
+      // systemEvents group uses variable references (startup: startupEvent)
+      // which can't be resolved statically — events record should be empty
+      const systemGroup = tree.groups.find((g) => g.key === 'system');
+      expect(systemGroup).toBeDefined();
+      expect(Object.keys(systemGroup!.events)).toHaveLength(0);
+    });
   });
 
   describe('validator', () => {
