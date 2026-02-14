@@ -28,10 +28,15 @@ import {
   type EventRecord,
 } from './events';
 import { assertNoReservedKeys } from './reserved';
-import { buildValidationMetadata, validateFields } from './validation';
+import { buildValidationMetadata, sanitizeLogFields, validateFields } from './validation';
 
 export interface ChroniclerLimits {
   readonly maxContextKeys?: number;
+  /**
+   * Maximum fork nesting depth. A depth of N means N levels of nesting
+   * from root (e.g. depth 3 allows root → child → grandchild → great-grandchild).
+   * Defaults to {@link DEFAULT_MAX_FORK_DEPTH}.
+   */
   readonly maxForkDepth?: number;
   readonly maxActiveCorrelations?: number;
 }
@@ -70,10 +75,6 @@ type ResolvedChroniclerConfig = Omit<ChroniclerConfig, 'backend' | 'limits' | 'm
   limits: ResolvedLimits;
   minLevel: number;
 };
-
-interface ActiveCorrelationCounter {
-  count: number;
-}
 
 export interface Chronicler {
   /** Emit a typed event. Fields are validated against the event definition. */
@@ -224,7 +225,7 @@ interface ChronicleInstanceArgs {
   readonly correlationIdGenerator: () => string;
   readonly forkId: string;
   readonly hooks?: ChronicleHooks;
-  readonly activeCorrelations?: ActiveCorrelationCounter;
+  readonly activeCorrelations?: { count: number };
 }
 
 const createChronicleInstance = (args: ChronicleInstanceArgs): Chronicler => {
@@ -257,9 +258,10 @@ const createChronicleInstance = (args: ChronicleInstanceArgs): Chronicler => {
     },
     log(level, message, fields = {}) {
       if (LOG_LEVELS[level] > config.minLevel) return;
+      const sanitizedFields = config.sanitizeStrings ? sanitizeLogFields(fields) : fields;
       const payload: LogPayload = {
         eventKey: '',
-        fields,
+        fields: sanitizedFields,
         correlationId: currentCorrelationId(),
         forkId,
         metadata: contextStore.snapshot(),
@@ -326,7 +328,7 @@ interface CorrelationChronicleArgs {
   readonly currentCorrelationId: () => string;
   readonly correlationIdGenerator: () => string;
   readonly forkId: string;
-  readonly activeCorrelations?: ActiveCorrelationCounter;
+  readonly activeCorrelations?: { count: number };
 }
 
 class CorrelationChronicleImpl implements CorrelationChronicle {
@@ -336,7 +338,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   private readonly currentCorrelationId: () => string;
   private readonly correlationIdGenerator: () => string;
   private readonly forkId: string;
-  private readonly activeCorrelations: ActiveCorrelationCounter;
+  private readonly activeCorrelations: { count: number };
   private readonly timer: CorrelationTimer;
   private completed = false;
   private readonly startedAt = Date.now();
@@ -375,9 +377,10 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
 
   log(level: LogLevel, message: string, fields: Record<string, unknown> = {}): void {
     if (LOG_LEVELS[level] > this.config.minLevel) return;
+    const sanitizedFields = this.config.sanitizeStrings ? sanitizeLogFields(fields) : fields;
     const payload: LogPayload = {
       eventKey: '',
-      fields,
+      fields: sanitizedFields,
       correlationId: this.currentCorrelationId(),
       forkId: this.forkId,
       metadata: this.contextStore.snapshot(),
@@ -526,7 +529,7 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
     minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],
   };
 
-  const activeCorrelations: ActiveCorrelationCounter = { count: 0 };
+  const activeCorrelations: { count: number } = { count: 0 };
 
   return createChronicleInstance({
     config: resolvedConfig,

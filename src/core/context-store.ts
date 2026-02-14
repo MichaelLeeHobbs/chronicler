@@ -1,5 +1,10 @@
 import { isReservedTopLevelField } from './reserved';
-import { isSimpleValue } from './utils';
+
+const isSimpleValue = (value: unknown): value is string | number | boolean | null =>
+  value === null ||
+  typeof value === 'string' ||
+  typeof value === 'number' ||
+  typeof value === 'boolean';
 
 const DANGEROUS_KEYS = new Set([
   '__proto__',

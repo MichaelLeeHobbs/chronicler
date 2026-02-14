@@ -74,4 +74,4 @@ Test directories mirror source: `tests/core/`, `tests/cli/`, `tests/types/` (com
 - Constants: `UPPER_SNAKE_CASE`
 - Types/interfaces: `PascalCase`
 - Functions: `camelCase`
-- Event keys: dotted lowercase (`system.startup`, `api.request.validated`)
+- Event keys: dotted camelCase — each segment starts lowercase (`system.startup`, `api.request.validated`, `http.requestStarted`)

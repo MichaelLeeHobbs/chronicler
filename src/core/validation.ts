@@ -11,7 +11,7 @@ export interface FieldValidationResult {
   readonly normalizedFields: Record<string, unknown>;
 }
 
-const ANSI_ESCAPE_RE = /\x1b\[[0-9;]*m/g;
+const ANSI_ESCAPE_RE = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 const NEWLINE_RE = /[\r\n]/g;
 
 /**
@@ -20,6 +20,18 @@ const NEWLINE_RE = /[\r\n]/g;
  */
 const sanitizeString = (value: string): string =>
   value.replace(ANSI_ESCAPE_RE, '').replace(NEWLINE_RE, '\\n');
+
+/**
+ * Sanitize string values in an untyped fields record.
+ * Used by the `log()` escape hatch to apply the same sanitization as typed events.
+ */
+export const sanitizeLogFields = (fields: Record<string, unknown>): Record<string, unknown> => {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    result[key] = typeof value === 'string' ? sanitizeString(value) : value;
+  }
+  return result;
+};
 
 const isSimpleTypeMatch = (value: unknown, type: string): boolean => {
   switch (type) {

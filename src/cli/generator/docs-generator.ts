@@ -54,6 +54,22 @@ export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig)
   fs.writeFileSync(resolved, content, 'utf-8');
 }
 
+/** Collect all event keys from groups and their nested sub-groups. */
+function collectAllGroupEventKeys(groups: ParsedEventGroup[]): Set<string> {
+  const keys = new Set<string>();
+  const stack = [...groups];
+  while (stack.length > 0) {
+    const group = stack.pop()!;
+    for (const event of Object.values(group.events)) {
+      keys.add(event.key);
+    }
+    for (const nested of Object.values(group.groups)) {
+      stack.push(nested);
+    }
+  }
+  return keys;
+}
+
 /**
  * Generate Markdown documentation
  */
@@ -70,7 +86,7 @@ function generateMarkdown(tree: ParsedEventTree): string {
     lines.push('## Table of Contents');
     lines.push('');
     tree.groups.forEach((group) => {
-      lines.push(`- [${group.key}](#${group.key.replace(/\./g, '')})`);
+      lines.push(`- [${group.key}](#${group.key.replace(/\./g, '').toLowerCase()})`);
     });
     lines.push('');
     lines.push('---');
@@ -82,12 +98,9 @@ function generateMarkdown(tree: ParsedEventTree): string {
     lines.push(...generateGroupMarkdown(group));
   });
 
-  // Document standalone events (not in groups)
-  const standaloneEvents = tree.events.filter((event) => {
-    return !tree.groups.some((group) => {
-      return Object.values(group.events).some((e) => e.key === event.key);
-    });
-  });
+  // Document standalone events (not in any group or nested sub-group)
+  const groupEventKeys = collectAllGroupEventKeys(tree.groups);
+  const standaloneEvents = tree.events.filter((event) => !groupEventKeys.has(event.key));
 
   if (standaloneEvents.length > 0) {
     lines.push('## Standalone Events');
@@ -204,11 +217,7 @@ function generateJSON(tree: ParsedEventTree): string {
     groupCount: tree.groups.length,
     groups: tree.groups.map((group) => serializeGroup(group)),
     standaloneEvents: tree.events
-      .filter((event) => {
-        return !tree.groups.some((group) => {
-          return Object.values(group.events).some((e) => e.key === event.key);
-        });
-      })
+      .filter((event) => !collectAllGroupEventKeys(tree.groups).has(event.key))
       .map((event) => serializeEvent(event)),
   };
 
