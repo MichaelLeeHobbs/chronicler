@@ -166,9 +166,13 @@ describe('sanitizeStrings option', () => {
     expect(payload?.fields.name).toBe('red\\nline2');
   });
 
-  it('does not sanitize when option is off (default)', () => {
+  it('does not sanitize when option is explicitly off', () => {
     const mock = new MockLoggerBackend();
-    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      sanitizeStrings: false,
+    });
 
     const event = defineEvent({
       key: 'test.nosanit',

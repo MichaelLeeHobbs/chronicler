@@ -112,10 +112,10 @@ function convertGroup(rootGroup: EventGroupLike): ParsedEventGroup {
       key: group.key,
       type: group.type,
       doc: group.doc ?? '',
+      ...(group.timeout !== undefined ? { timeout: group.timeout } : {}),
       events,
       groups: {},
     };
-    if (group.timeout !== undefined) parsed.timeout = group.timeout;
     groupMap.set(group, parsed);
 
     if (group.groups) {
@@ -171,6 +171,13 @@ function collectEventsFromGroup(rootGroup: ParsedEventGroup, seen: Set<string>):
 
 /**
  * Parse an events file by dynamically importing it via tsx and inspecting exports.
+ *
+ * **Security note:** This function dynamically imports a user-authored TypeScript
+ * file, which executes arbitrary code. This is acceptable for a CLI tool that
+ * the user invokes locally, but callers must never pass untrusted paths.
+ *
+ * @param filePath - Path to the TypeScript events file to parse
+ * @returns Parsed event tree containing extracted events, groups, and any parse errors
  */
 export async function parseEventsFile(filePath: string): Promise<ParsedEventTree> {
   const absolutePath = path.resolve(filePath);

@@ -37,20 +37,20 @@ export type EventRecord = Record<
 >;
 
 export interface SystemEventGroup {
-  key: string;
-  type: 'system';
-  doc?: string;
-  events?: EventRecord;
-  groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
+  readonly key: string;
+  readonly type: 'system';
+  readonly doc?: string;
+  readonly events?: EventRecord;
+  readonly groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
 }
 
 export interface CorrelationEventGroup {
-  key: string;
-  type: 'correlation';
-  doc?: string;
-  timeout?: number;
-  events?: EventRecord;
-  groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
+  readonly key: string;
+  readonly type: 'correlation';
+  readonly doc?: string;
+  readonly timeout?: number;
+  readonly events?: EventRecord;
+  readonly groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
 }
 
 const correlationAutoFields = {
@@ -81,6 +81,8 @@ type WithAutoEvents<Event extends EventRecord | undefined> = (Event extends Even
   : EmptyEventRecord) &
   CorrelationAutoEvents;
 
+const EVENT_KEY_RE = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/;
+
 /**
  * Define an event with compile-time type safety.
  *
@@ -102,9 +104,11 @@ type WithAutoEvents<Event extends EventRecord | undefined> = (Event extends Even
  *   },
  * });
  * ```
+ *
+ * @param event - Event definition with key, level, message, optional doc and fields
+ * @returns The same event definition, typed for compile-time inference
+ * @throws {Error} If the event key does not match the required dotted camelCase format
  */
-const EVENT_KEY_RE = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/;
-
 export const defineEvent = <
   const Key extends string,
   const Fields extends Record<string, FieldBuilder<string, boolean>>,
@@ -252,6 +256,14 @@ export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
 } => {
   const autoEvents = buildAutoEvents(group.key);
   const prefixed = prefixEventKeys(group.key, group.events) ?? {};
+
+  const autoKeys = Object.keys(autoEvents);
+  const conflicts = autoKeys.filter((k) => Object.hasOwn(prefixed, k));
+  if (conflicts.length > 0) {
+    throw new Error(
+      `Correlation group "${group.key}" defines events that collide with auto-generated lifecycle events: ${conflicts.join(', ')}. Rename these events to avoid the conflict.`,
+    );
+  }
 
   return {
     ...group,

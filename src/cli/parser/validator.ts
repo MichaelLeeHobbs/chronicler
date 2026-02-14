@@ -26,69 +26,56 @@ export function validateEventTree(tree: ParsedEventTree): ValidationError[] {
   return errors;
 }
 
+const UNKNOWN_LOCATION = { file: '<unknown>', line: 0, column: 0 } as const;
+
+const makeError = (type: ValidationError['type'], message: string): ValidationError => ({
+  type,
+  message,
+  location: UNKNOWN_LOCATION,
+});
+
 /**
  * Validate a single event definition
  */
-export function validateEvent(event: EventDefinition): ValidationError[] {
+function validateEvent(event: EventDefinition): ValidationError[] {
   const errors: ValidationError[] = [];
 
-  // Validate reserved event key prefix
   if (event.key.startsWith('chronicler.')) {
-    errors.push({
-      type: 'reserved-prefix',
-      message: `Event key "${event.key}" uses reserved prefix "chronicler.". This prefix is reserved for internal Chronicler system events.`,
-      location: {
-        file: '<unknown>',
-        line: 0,
-        column: 0,
-      },
-    });
+    errors.push(
+      makeError(
+        'reserved-prefix',
+        `Event key "${event.key}" uses reserved prefix "chronicler.". This prefix is reserved for internal Chronicler system events.`,
+      ),
+    );
   }
 
-  // Validate log level
   const levelString = event.level as string;
   if (!DEFAULT_REQUIRED_LEVELS.includes(levelString as (typeof DEFAULT_REQUIRED_LEVELS)[number])) {
-    errors.push({
-      type: 'invalid-level',
-      message: `Invalid log level "${event.level}" in event "${event.key}". Valid levels: ${DEFAULT_REQUIRED_LEVELS.join(', ')}`,
-      location: {
-        file: '<unknown>',
-        line: 0,
-        column: 0,
-      },
-    });
+    errors.push(
+      makeError(
+        'invalid-level',
+        `Invalid log level "${event.level}" in event "${event.key}". Valid levels: ${DEFAULT_REQUIRED_LEVELS.join(', ')}`,
+      ),
+    );
   }
 
-  // Warn if doc is missing
   if (!event.doc) {
-    errors.push({
-      type: 'missing-doc',
-      message: `Event "${event.key}" is missing a "doc" description`,
-      location: {
-        file: '<unknown>',
-        line: 0,
-        column: 0,
-      },
-    });
+    errors.push(makeError('missing-doc', `Event "${event.key}" is missing a "doc" description`));
   }
 
-  // Validate reserved fields
   if (event.fields) {
-    Object.keys(event.fields).forEach((fieldName) => {
+    for (const fieldName of Object.keys(event.fields)) {
       if (
         RESERVED_TOP_LEVEL_FIELDS.includes(fieldName as (typeof RESERVED_TOP_LEVEL_FIELDS)[number])
       ) {
-        errors.push({
-          type: 'reserved-field',
-          message: `Field "${fieldName}" in event "${event.key}" is a reserved field name`,
-          location: {
-            file: '<unknown>',
-            line: 0,
-            column: 0,
-          },
-        });
+        errors.push(
+          makeError(
+            'reserved-field',
+            `Field "${fieldName}" in event "${event.key}" is a reserved field name`,
+          ),
+        );
       }
-    });
+    }
   }
 
   return errors;
@@ -97,7 +84,7 @@ export function validateEvent(event: EventDefinition): ValidationError[] {
 /**
  * Validate event group and its hierarchy (iterative)
  */
-export function validateGroup(rootGroup: ParsedEventGroup, parentKey = ''): ValidationError[] {
+function validateGroup(rootGroup: ParsedEventGroup, parentKey = ''): ValidationError[] {
   const errors: ValidationError[] = [];
   const stack: { group: ParsedEventGroup; parentKey: string }[] = [{ group: rootGroup, parentKey }];
 
@@ -106,31 +93,31 @@ export function validateGroup(rootGroup: ParsedEventGroup, parentKey = ''): Vali
     const expectedPrefix = parent ? `${parent}.` : '';
 
     if (parent && !group.key.startsWith(expectedPrefix)) {
-      errors.push({
-        type: 'key-path',
-        message: `Group key "${group.key}" should start with "${expectedPrefix}"`,
-        location: { file: '<unknown>', line: 0, column: 0 },
-      });
+      errors.push(
+        makeError('key-path', `Group key "${group.key}" should start with "${expectedPrefix}"`),
+      );
     }
 
-    Object.entries(group.events).forEach(([name, event]) => {
+    for (const [name, event] of Object.entries(group.events)) {
       const expectedKey = `${group.key}.${name}`;
       if (event.key !== expectedKey) {
-        errors.push({
-          type: 'key-path',
-          message: `Event key "${event.key}" should be "${expectedKey}" based on its position in the hierarchy`,
-          location: { file: '<unknown>', line: 0, column: 0 },
-        });
+        errors.push(
+          makeError(
+            'key-path',
+            `Event key "${event.key}" should be "${expectedKey}" based on its position in the hierarchy`,
+          ),
+        );
       }
       errors.push(...validateEvent(event));
-    });
+    }
 
     if (group.type === 'correlation' && group.timeout !== undefined && group.timeout < 0) {
-      errors.push({
-        type: 'invalid-timeout',
-        message: `Correlation group "${group.key}" has invalid timeout: ${group.timeout}. Must be non-negative.`,
-        location: { file: '<unknown>', line: 0, column: 0 },
-      });
+      errors.push(
+        makeError(
+          'invalid-timeout',
+          `Correlation group "${group.key}" has invalid timeout: ${group.timeout}. Must be non-negative.`,
+        ),
+      );
     }
 
     for (const nestedGroup of Object.values(group.groups)) {

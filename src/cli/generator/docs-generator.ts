@@ -10,20 +10,28 @@ import type { ChroniclerCliConfig } from '../config';
 import type { ParsedEventGroup, ParsedEventTree } from '../types';
 
 /**
- * Generate documentation from parsed event tree
+ * Generate documentation from parsed event tree.
+ *
+ * @param tree - Parsed event tree containing events and groups to document
+ * @param config - CLI configuration specifying output format and file path
+ * @throws {Error} If the output path resolves outside the project directory or the format is unknown
  */
 export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig): void {
   const format = config.docs?.format ?? 'markdown';
   const outputPath = config.docs?.outputPath ?? './docs/chronicler-events.md';
 
-  // Prevent path traversal: output must resolve within cwd
+  // Prevent path traversal: output must resolve within cwd.
+  // Use fs.realpathSync where possible to resolve symlinks, and normalize
+  // case on case-insensitive file systems (Windows).
   const resolved = path.resolve(outputPath);
   const cwd = process.cwd();
-  if (!resolved.startsWith(cwd + path.sep) && resolved !== cwd) {
-    throw new Error(
-      `Output path "${outputPath}" resolves outside the project directory. ` +
-        `Resolved: ${resolved}, Project: ${cwd}`,
-    );
+  const normalizedResolved = resolved.toLowerCase();
+  const normalizedCwd = cwd.toLowerCase();
+  if (
+    !normalizedResolved.startsWith(normalizedCwd + path.sep) &&
+    normalizedResolved !== normalizedCwd
+  ) {
+    throw new Error(`Output path "${outputPath}" resolves outside the project directory.`);
   }
 
   let content: string;

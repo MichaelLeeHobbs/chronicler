@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { Command } from 'commander';
 
+import type { ChroniclerCliConfig } from './config';
 import { loadConfig, validateEventsFile } from './config-loader';
 import { generateDocs } from './generator/docs-generator';
 import { parseEventsFile } from './parser/runtime-parser';
@@ -143,9 +144,9 @@ async function runDocs(options: { format?: string; output?: string; config?: str
   const startTime = Date.now();
 
   console.log('🔍 Loading configuration...');
-  const config = await loadConfig(resolveCwd(options.config));
-  const { format, outputPath } = resolveDocsOptions(config, options);
-  config.docs = { format, outputPath };
+  const loadedConfig = await loadConfig(resolveCwd(options.config));
+  const { format, outputPath } = resolveDocsOptions(loadedConfig, options);
+  const config: ChroniclerCliConfig = { ...loadedConfig, docs: { format, outputPath } };
 
   console.log(`📂 Validating events file exists...`);
   validateEventsFile(config);

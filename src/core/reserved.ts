@@ -6,7 +6,11 @@ const RESERVED_TOP_LEVEL_FIELDS = [
   'forkId', // Used in Payload
   'timestamp', // Used in Payload
   'hostname', // Commonly set by log infrastructure; reserved to prevent conflicts
+  'environment', // Commonly set by log infrastructure; reserved to prevent conflicts
+  'version', // Commonly set by log infrastructure; reserved to prevent conflicts
+  'service', // Commonly set by log infrastructure; reserved to prevent conflicts
   'fields', // Used in Payload
+  '_perf', // Reserved for internal performance metadata
   '_validation', // Used in Payload
 ] as const;
 
@@ -21,7 +25,10 @@ const TOP_LEVEL_SET = new Set<string>(RESERVED_TOP_LEVEL_FIELDS);
 export { RESERVED_TOP_LEVEL_FIELDS };
 
 /**
- * Check if a key is a reserved top-level field
+ * Check if a key is a reserved top-level field.
+ *
+ * @param key - Field name to check against the reserved set
+ * @returns True if the key is reserved and must not be used in user context or metadata
  */
 export const isReservedTopLevelField = (key: string): key is ReservedTopLevelField =>
   TOP_LEVEL_SET.has(key);

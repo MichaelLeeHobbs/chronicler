@@ -28,20 +28,19 @@ const LEVEL_FALLBACK_CHAINS: Record<LogLevel, readonly LogLevel[]> = {
 };
 
 export interface ValidationMetadata {
-  missingFields?: string[];
-  typeErrors?: string[];
-  unknownFields?: string[];
+  readonly missingFields?: string[];
+  readonly typeErrors?: string[];
+  readonly unknownFields?: string[];
 }
 
 export interface LogPayload {
-  eventKey: string;
-  fields: Record<string, unknown>;
-  correlationId: string;
-  forkId: string;
-  metadata: Record<string, unknown>;
-  timestamp: string;
-  _validation?: ValidationMetadata;
-  [key: string]: unknown;
+  readonly eventKey: string;
+  readonly fields: Record<string, unknown>;
+  readonly correlationId: string;
+  readonly forkId: string;
+  readonly metadata: Record<string, unknown>;
+  readonly timestamp: string;
+  readonly _validation?: ValidationMetadata;
 }
 
 export type LogLevel = keyof typeof LOG_LEVELS;
@@ -68,12 +67,17 @@ export const validateBackendMethods = (
 };
 
 /**
- * Call a backend logger method
+ * Call a backend logger method.
+ *
+ * Backend exceptions are caught and reported to `console.error` so that
+ * logging never crashes the caller.  Only missing backend methods (a
+ * configuration error) still throw.
+ *
  * @param backend - Logger object
  * @param level - Log level
  * @param message - Log message
  * @param payload - Log payload
- * @throws Error if the backend does not support the log level
+ * @throws {ChroniclerError} `BACKEND_METHOD` if the backend does not support the log level
  */
 export const callBackendMethod = (
   backend: LogBackend,
@@ -81,12 +85,13 @@ export const callBackendMethod = (
   message: string,
   payload: LogPayload,
 ): void => {
-  if (typeof backend[level] === 'function') {
-    backend[level](message, payload);
-  } else {
-    // This should never happen if validateBackendMethods is used correctly
-    // However, they somehow broke the contract by providing a valid backend that later became invalid
+  if (typeof backend[level] !== 'function') {
     throw new ChroniclerError('BACKEND_METHOD', `Backend does not support log level: ${level}`);
+  }
+  try {
+    backend[level](message, payload);
+  } catch (err: unknown) {
+    console.error('[chronicler] Backend error during log emission:', err);
   }
 };
 
@@ -96,6 +101,8 @@ export const callBackendMethod = (
  * Maps each of the 9 Chronicler levels to the appropriate `console` method:
  * fatal/critical/alert/error → `console.error`, warn → `console.warn`,
  * audit/info → `console.info`, debug/trace → `console.debug`.
+ *
+ * @returns A fully populated LogBackend using console methods for all levels
  */
 export const createConsoleBackend = (): LogBackend => {
   const backend = {} as LogBackend;
@@ -112,6 +119,9 @@ export const createConsoleBackend = (): LogBackend => {
  * For each missing level, the fallback chain is tried in order (e.g. `fatal` →
  * `critical` → `error` → `warn` → `info`). If no fallback is provided either,
  * the corresponding `console` method is used.
+ *
+ * @param partial - Partial backend with handlers for a subset of log levels
+ * @returns A fully populated LogBackend with fallbacks applied for missing levels
  */
 export const createBackend = (partial: Partial<LogBackend>): LogBackend => {
   const backend = {} as LogBackend;

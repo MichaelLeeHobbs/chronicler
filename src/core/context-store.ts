@@ -22,16 +22,16 @@ export type ContextValue = string | number | boolean | null;
 export type ContextRecord = Record<string, ContextValue>;
 
 export interface ContextCollisionDetail {
-  key: string;
-  existingValue: ContextValue;
-  attemptedValue: ContextValue;
+  readonly key: string;
+  readonly existingValue: ContextValue;
+  readonly attemptedValue: ContextValue;
 }
 
 export interface ContextValidationResult {
-  collisions: string[];
-  reserved: string[];
-  collisionDetails: ContextCollisionDetail[];
-  dropped: string[];
+  readonly collisions: string[];
+  readonly reserved: string[];
+  readonly collisionDetails: ContextCollisionDetail[];
+  readonly dropped: string[];
 }
 
 /**

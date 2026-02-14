@@ -5,10 +5,10 @@ import type { EventDefinition, EventFields } from './events';
 import type { FieldBuilder } from './fields';
 
 export interface FieldValidationResult {
-  missingFields: string[];
-  typeErrors: string[];
-  unknownFields: string[];
-  normalizedFields: Record<string, unknown>;
+  readonly missingFields: string[];
+  readonly typeErrors: string[];
+  readonly unknownFields: string[];
+  readonly normalizedFields: Record<string, unknown>;
 }
 
 const ANSI_ESCAPE_RE = /\x1b\[[0-9;]*m/g;
@@ -18,25 +18,34 @@ const NEWLINE_RE = /[\r\n]/g;
  * Sanitize a string value to prevent log injection.
  * Strips ANSI escape sequences and replaces newlines with a visible placeholder.
  */
-export const sanitizeString = (value: string): string =>
+const sanitizeString = (value: string): string =>
   value.replace(ANSI_ESCAPE_RE, '').replace(NEWLINE_RE, '\\n');
 
 const isSimpleTypeMatch = (value: unknown, type: string): boolean => {
-  if (type === 'error') {
-    return value instanceof Error || typeof value === 'string';
+  switch (type) {
+    case 'error':
+      return value instanceof Error || typeof value === 'string';
+    case 'string':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    default:
+      // Unknown field type — always fail validation so new types
+      // surface as type errors until this switch is updated.
+      return false;
   }
-  if (type === 'string') {
-    return typeof value === 'string';
-  }
-  if (type === 'number') {
-    return typeof value === 'number';
-  }
-  if (type === 'boolean') {
-    return typeof value === 'boolean';
-  }
-  return false;
 };
 
+/**
+ * Validate event fields against their definitions and normalize values.
+ *
+ * @param event - Event definition containing field schemas to validate against
+ * @param payload - User-provided field values to validate
+ * @param options - Validation options (e.g. whether to sanitize string values)
+ * @returns Validation result with missing fields, type errors, unknown fields, and normalized values
+ */
 export const validateFields = <
   E extends EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>,
 >(
@@ -97,23 +106,29 @@ export const validateFields = <
   return { missingFields, typeErrors, unknownFields, normalizedFields };
 };
 
+/**
+ * Build validation metadata from field validation results, omitting empty arrays.
+ *
+ * @param fieldValidation - Result from {@link validateFields} containing validation issues
+ * @param overrides - Additional metadata entries to merge into the result
+ * @returns Validation metadata object, or undefined if there are no issues or overrides
+ */
 export const buildValidationMetadata = (
   fieldValidation: FieldValidationResult,
   overrides?: Partial<ValidationMetadata>,
 ): ValidationMetadata | undefined => {
-  const metadata: ValidationMetadata = { ...(overrides ?? {}) };
-
-  if (fieldValidation.missingFields.length > 0) {
-    metadata.missingFields = [...fieldValidation.missingFields];
-  }
-
-  if (fieldValidation.typeErrors.length > 0) {
-    metadata.typeErrors = [...fieldValidation.typeErrors];
-  }
-
-  if (fieldValidation.unknownFields.length > 0) {
-    metadata.unknownFields = [...fieldValidation.unknownFields];
-  }
+  const metadata: ValidationMetadata = {
+    ...(overrides ?? {}),
+    ...(fieldValidation.missingFields.length > 0
+      ? { missingFields: [...fieldValidation.missingFields] }
+      : {}),
+    ...(fieldValidation.typeErrors.length > 0
+      ? { typeErrors: [...fieldValidation.typeErrors] }
+      : {}),
+    ...(fieldValidation.unknownFields.length > 0
+      ? { unknownFields: [...fieldValidation.unknownFields] }
+      : {}),
+  };
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 };
