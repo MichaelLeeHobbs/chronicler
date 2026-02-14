@@ -25,23 +25,6 @@ export interface ChroniclerCliConfig {
      */
     format?: 'markdown' | 'json';
   };
-
-  /**
-   * Validation options
-   */
-  validation?: {
-    /**
-     * Enforce that event keys match their hierarchy path
-     * @default true
-     */
-    enforceKeyPaths?: boolean;
-
-    /**
-     * Check for usage of reserved field names
-     * @default true
-     */
-    checkReservedFields?: boolean;
-  };
 }
 
 export const DEFAULT_CLI_CONFIG: Required<ChroniclerCliConfig> = {
@@ -49,9 +32,5 @@ export const DEFAULT_CLI_CONFIG: Required<ChroniclerCliConfig> = {
   docs: {
     outputPath: './docs/chronicler-events.md',
     format: 'markdown',
-  },
-  validation: {
-    enforceKeyPaths: true,
-    checkReservedFields: true,
   },
 };

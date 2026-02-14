@@ -95,61 +95,48 @@ export function validateEvent(event: EventDefinition): ValidationError[] {
 }
 
 /**
- * Validate event group and its hierarchy
+ * Validate event group and its hierarchy (iterative)
  */
-export function validateGroup(group: ParsedEventGroup, parentKey = ''): ValidationError[] {
+export function validateGroup(rootGroup: ParsedEventGroup, parentKey = ''): ValidationError[] {
   const errors: ValidationError[] = [];
-  const expectedPrefix = parentKey ? `${parentKey}.` : '';
+  const stack: { group: ParsedEventGroup; parentKey: string }[] = [{ group: rootGroup, parentKey }];
 
-  // Validate group key matches parent path
-  if (parentKey && !group.key.startsWith(expectedPrefix)) {
-    errors.push({
-      type: 'key-path',
-      message: `Group key "${group.key}" should start with "${expectedPrefix}"`,
-      location: {
-        file: '<unknown>',
-        line: 0,
-        column: 0,
-      },
-    });
-  }
+  while (stack.length > 0) {
+    const { group, parentKey: parent } = stack.pop()!;
+    const expectedPrefix = parent ? `${parent}.` : '';
 
-  // Validate nested events have correct key paths
-  Object.entries(group.events).forEach(([name, event]) => {
-    const expectedKey = `${group.key}.${name}`;
-    if (event.key !== expectedKey) {
+    if (parent && !group.key.startsWith(expectedPrefix)) {
       errors.push({
         type: 'key-path',
-        message: `Event key "${event.key}" should be "${expectedKey}" based on its position in the hierarchy`,
-        location: {
-          file: '<unknown>',
-          line: 0,
-          column: 0,
-        },
+        message: `Group key "${group.key}" should start with "${expectedPrefix}"`,
+        location: { file: '<unknown>', line: 0, column: 0 },
       });
     }
 
-    // Validate the event itself
-    errors.push(...validateEvent(event));
-  });
-
-  // Validate correlation group timeout
-  if (group.type === 'correlation' && group.timeout !== undefined && group.timeout <= 0) {
-    errors.push({
-      type: 'invalid-timeout',
-      message: `Correlation group "${group.key}" has invalid timeout: ${group.timeout}. Must be positive.`,
-      location: {
-        file: '<unknown>',
-        line: 0,
-        column: 0,
-      },
+    Object.entries(group.events).forEach(([name, event]) => {
+      const expectedKey = `${group.key}.${name}`;
+      if (event.key !== expectedKey) {
+        errors.push({
+          type: 'key-path',
+          message: `Event key "${event.key}" should be "${expectedKey}" based on its position in the hierarchy`,
+          location: { file: '<unknown>', line: 0, column: 0 },
+        });
+      }
+      errors.push(...validateEvent(event));
     });
-  }
 
-  // Recursively validate nested groups
-  Object.values(group.groups).forEach((nestedGroup) => {
-    errors.push(...validateGroup(nestedGroup, group.key));
-  });
+    if (group.type === 'correlation' && group.timeout !== undefined && group.timeout < 0) {
+      errors.push({
+        type: 'invalid-timeout',
+        message: `Correlation group "${group.key}" has invalid timeout: ${group.timeout}. Must be non-negative.`,
+        location: { file: '<unknown>', line: 0, column: 0 },
+      });
+    }
+
+    for (const nestedGroup of Object.values(group.groups)) {
+      stack.push({ group: nestedGroup, parentKey: group.key });
+    }
+  }
 
   return errors;
 }

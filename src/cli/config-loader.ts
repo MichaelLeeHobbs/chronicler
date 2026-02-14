@@ -53,10 +53,6 @@ export async function loadConfig(cwd: string = process.cwd()): Promise<Chronicle
           ...DEFAULT_CLI_CONFIG.docs,
           ...config.docs,
         },
-        validation: {
-          ...DEFAULT_CLI_CONFIG.validation,
-          ...config.validation,
-        },
       };
 
       return mergedConfig;

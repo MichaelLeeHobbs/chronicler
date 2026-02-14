@@ -322,9 +322,12 @@ const createChronicleInstance = (
       activeCorrelations.count++;
       const definedGroup = resolveCorrelationGroup(group);
       const correlationStore = new ContextStore(
-        { ...contextStore.snapshot(), ...metadata },
+        contextStore.snapshot(),
         config.limits.maxContextKeys,
       );
+      if (Object.keys(metadata).length > 0) {
+        correlationStore.add(metadata);
+      }
       const correlationId = correlationIdGenerator();
       return new CorrelationChronicleImpl(
         config,
@@ -440,9 +443,10 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   }
 
   fail(error?: unknown, fields: ContextRecord = {}): void {
-    if (!this.completed) {
-      this.activeCorrelations.count--;
+    if (this.completed) {
+      return;
     }
+    this.activeCorrelations.count--;
     this.completed = true;
     this.timer.clear();
     this.emitAutoEvent(
@@ -537,7 +541,7 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
   return createChronicleInstance(
     resolvedConfig,
     baseContextStore,
-    () => correlationIdGenerator(),
+    () => '',
     correlationIdGenerator,
     ROOT_FORK_ID,
     {},

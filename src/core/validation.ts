@@ -7,6 +7,7 @@ import type { FieldBuilder } from './fields';
 export interface FieldValidationResult {
   missingFields: string[];
   typeErrors: string[];
+  unknownFields: string[];
   normalizedFields: Record<string, unknown>;
 }
 
@@ -47,8 +48,10 @@ export const validateFields = <
   const normalizedFields: Record<string, unknown> = {};
   const missingFields: string[] = [];
   const typeErrors: string[] = [];
+  const unknownFields: string[] = [];
 
   const fieldBuilders = event.fields ?? ({} as Record<string, FieldBuilder<string, boolean>>);
+  const definedFieldNames = new Set(Object.keys(fieldBuilders));
 
   for (const [name, builder] of Object.entries(fieldBuilders)) {
     const value = providedFields[name];
@@ -79,7 +82,19 @@ export const validateFields = <
     }
   }
 
-  return { missingFields, typeErrors, normalizedFields };
+  // Pass through extra fields not in the event definition
+  for (const [name, value] of Object.entries(providedFields)) {
+    if (!definedFieldNames.has(name) && value !== undefined && value !== null) {
+      unknownFields.push(name);
+      if (options.sanitizeStrings && typeof value === 'string') {
+        normalizedFields[name] = sanitizeString(value);
+      } else {
+        normalizedFields[name] = value;
+      }
+    }
+  }
+
+  return { missingFields, typeErrors, unknownFields, normalizedFields };
 };
 
 export const buildValidationMetadata = (
@@ -94,6 +109,10 @@ export const buildValidationMetadata = (
 
   if (fieldValidation.typeErrors.length > 0) {
     metadata.typeErrors = [...fieldValidation.typeErrors];
+  }
+
+  if (fieldValidation.unknownFields.length > 0) {
+    metadata.unknownFields = [...fieldValidation.unknownFields];
   }
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;

@@ -82,69 +82,88 @@ function extractFields(
 }
 
 /**
- * Convert a runtime event group to a ParsedEventGroup.
+ * Convert a runtime event group to a ParsedEventGroup (iterative).
  * Filters out auto-generated correlation events (start, complete, timeout, metadataWarning).
  */
-function convertGroup(group: EventGroupLike): ParsedEventGroup {
-  const events: Record<string, EventDefinition> = {};
+function convertGroup(rootGroup: EventGroupLike): ParsedEventGroup {
+  // First pass: create ParsedEventGroup shells for all groups
+  const groupMap = new Map<EventGroupLike, ParsedEventGroup>();
+  const stack: EventGroupLike[] = [rootGroup];
 
-  if (group.events) {
-    for (const [name, value] of Object.entries(group.events)) {
-      // Skip auto-generated correlation events
-      if (group.type === 'correlation' && CORRELATION_AUTO_EVENTS.has(name)) {
-        continue;
+  while (stack.length > 0) {
+    const group = stack.pop()!;
+    const events: Record<string, EventDefinition> = {};
+
+    if (group.events) {
+      for (const [name, value] of Object.entries(group.events)) {
+        if (group.type === 'correlation' && CORRELATION_AUTO_EVENTS.has(name)) continue;
+        if (isEventDefinition(value)) {
+          const fields = value.fields
+            ? extractFields(value.fields as Record<string, unknown>)
+            : undefined;
+          events[name] = fields
+            ? { ...value, doc: value.doc ?? '', fields }
+            : { key: value.key, level: value.level, message: value.message, doc: value.doc ?? '' };
+        }
       }
-      if (isEventDefinition(value)) {
-        const fields = value.fields
-          ? extractFields(value.fields as Record<string, unknown>)
-          : undefined;
-        events[name] = fields
-          ? { ...value, doc: value.doc ?? '', fields }
-          : { key: value.key, level: value.level, message: value.message, doc: value.doc ?? '' };
+    }
+
+    const parsed: ParsedEventGroup = {
+      key: group.key,
+      type: group.type,
+      doc: group.doc ?? '',
+      events,
+      groups: {},
+    };
+    if (group.timeout !== undefined) parsed.timeout = group.timeout;
+    groupMap.set(group, parsed);
+
+    if (group.groups) {
+      for (const [, value] of Object.entries(group.groups)) {
+        if (isEventGroup(value)) {
+          stack.push(value);
+        }
       }
     }
   }
 
-  const nestedGroups: Record<string, ParsedEventGroup> = {};
-  if (group.groups) {
-    for (const [name, value] of Object.entries(group.groups)) {
-      if (isEventGroup(value)) {
-        nestedGroups[name] = convertGroup(value);
+  // Second pass: wire up parent-child group relationships
+  const wireStack: EventGroupLike[] = [rootGroup];
+  while (wireStack.length > 0) {
+    const group = wireStack.pop()!;
+    const parsed = groupMap.get(group)!;
+    if (group.groups) {
+      for (const [name, value] of Object.entries(group.groups)) {
+        if (isEventGroup(value)) {
+          parsed.groups[name] = groupMap.get(value)!;
+          wireStack.push(value);
+        }
       }
     }
   }
 
-  const parsed: ParsedEventGroup = {
-    key: group.key,
-    type: group.type,
-    doc: group.doc ?? '',
-    events,
-    groups: nestedGroups,
-  };
-
-  if (group.timeout !== undefined) {
-    parsed.timeout = group.timeout;
-  }
-
-  return parsed;
+  return groupMap.get(rootGroup)!;
 }
 
 /**
- * Recursively collect all events from a group (including nested groups) into a flat list.
+ * Iteratively collect all events from a group (including nested groups) into a flat list.
  * Uses a Set of event keys for deduplication.
  */
-function collectEventsFromGroup(group: ParsedEventGroup, seen: Set<string>): EventDefinition[] {
+function collectEventsFromGroup(rootGroup: ParsedEventGroup, seen: Set<string>): EventDefinition[] {
   const events: EventDefinition[] = [];
+  const stack: ParsedEventGroup[] = [rootGroup];
 
-  for (const event of Object.values(group.events)) {
-    if (!seen.has(event.key)) {
-      seen.add(event.key);
-      events.push(event);
+  while (stack.length > 0) {
+    const group = stack.pop()!;
+    for (const event of Object.values(group.events)) {
+      if (!seen.has(event.key)) {
+        seen.add(event.key);
+        events.push(event);
+      }
     }
-  }
-
-  for (const nestedGroup of Object.values(group.groups)) {
-    events.push(...collectEventsFromGroup(nestedGroup, seen));
+    for (const nestedGroup of Object.values(group.groups)) {
+      stack.push(nestedGroup);
+    }
   }
 
   return events;
