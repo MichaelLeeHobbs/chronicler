@@ -151,35 +151,35 @@
 
 ### Code Quality
 
-- [ ] **Q-7: Dead code: `EventFieldsLegacy`, `ParseResult`, `hasErrors`, `extractFieldMetadata`**
+- [x] **Q-7: Dead code: `EventFieldsLegacy`, `ParseResult`, `hasErrors`, `extractFieldMetadata`**
       All defined/exported but never used anywhere.
       **Fix:** Delete all four.
 
-- [ ] **Q-8: Dead code: `RESERVED_VALIDATION_FIELDS`, `RESERVED_PERF_FIELDS` nested path checking** (`reserved.ts`)
+- [x] **Q-8: Dead code: `RESERVED_VALIDATION_FIELDS`, `RESERVED_PERF_FIELDS` nested path checking** (`reserved.ts`)
       `isReservedFieldPath` nested logic is never called from user-facing code.
       **Fix:** Simplify to top-level field checking only.
 
-- [ ] **Q-9: Legacy deprecated types still exported at v0.1.0** (`index.ts`)
+- [x] **Q-9: Legacy deprecated types still exported at v0.1.0** (`index.ts`)
       `FieldDefinition`, `FieldDefinitions`, `FieldType` are deprecated but exported. No external consumers exist.
       **Fix:** Delete them. You are pre-1.0.
 
-- [ ] **Q-10: `ContextStore.ts` and `CorrelationTimer.ts` use PascalCase filenames**
+- [x] **Q-10: `ContextStore.ts` and `CorrelationTimer.ts` use PascalCase filenames**
       All other files use kebab-case. CLAUDE.md doesn't specify but consistency matters.
       **Fix:** Rename to `context-store.ts` / `correlation-timer.ts`, or document the convention.
 
-- [ ] **Q-11: `@chronicler/*` path alias declared but never used** (`tsconfig.base.json`)
+- [x] **Q-11: `@chronicler/*` path alias declared but never used** (`tsconfig.base.json`)
       All imports use relative paths.
       **Fix:** Use the alias or remove it.
 
-- [ ] **Q-12: `defineCorrelationGroup` called at runtime for every `startCorrelation`** (`chronicle.ts:229`)
+- [x] **Q-12: `defineCorrelationGroup` called at runtime for every `startCorrelation`** (`chronicle.ts:229`)
       Rebuilds auto events on every call. Could be built once.
       **Fix:** Cache the normalized group or expect callers to pass the result (which they already do).
 
-- [ ] **Q-13: CLI `--format` cast without validation** (`cli/index.ts:146`)
+- [x] **Q-13: CLI `--format` cast without validation** (`cli/index.ts:146`)
       `--format xml` silently creates invalid config that fails later.
       **Fix:** Validate before casting.
 
-- [ ] **Q-14: Missing test coverage** -- No tests for `CorrelationTimer` in isolation, `config-loader.ts`, or `system-events.ts` structure.
+- [x] **Q-14: Missing test coverage** -- No tests for `CorrelationTimer` in isolation, `config-loader.ts`, or `system-events.ts` structure.
 
 ### YAGNI/KISS
 

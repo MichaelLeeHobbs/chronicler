@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { ContextStore, type ContextValue, sanitizeContextInput } from '../../src/core/ContextStore';
+import {
+  ContextStore,
+  type ContextValue,
+  sanitizeContextInput,
+} from '../../src/core/context-store';
 
 describe('context sanitizer', () => {
   it('strips reserved keys', () => {

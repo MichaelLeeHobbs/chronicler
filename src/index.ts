@@ -15,7 +15,7 @@ export {
   type ContextRecord,
   ContextStore,
   type ContextValidationResult,
-} from './core/ContextStore';
+} from './core/context-store';
 export {
   BackendMethodError,
   CorrelationLimitExceededError,

@@ -62,7 +62,6 @@ Clean re-export surface. All public types and functions are exported from here.
 - **Immutable context**: `ContextStore` returns copies, not references. Collisions preserve original values.
 - **Fork hierarchy**: Dotted IDs (`0`, `1`, `1.1`, `1.2.1`) represent parent-child fork relationships. Root is always `0`.
 - **`as const` required**: Event definitions must use `as const` for full type inference through the field builder system.
-- **Path alias**: `@chronicler/*` maps to `src/*` in tsconfig.
 
 ## Testing
 

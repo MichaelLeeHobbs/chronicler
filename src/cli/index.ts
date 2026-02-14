@@ -141,7 +141,14 @@ async function runDocs(options: { format?: string; output?: string; config?: str
   );
 
   // Override config with CLI options
+  const VALID_FORMATS = ['markdown', 'json'] as const;
   if (options.format) {
+    if (!VALID_FORMATS.includes(options.format as (typeof VALID_FORMATS)[number])) {
+      console.error(
+        `Error: Invalid format "${options.format}". Must be one of: ${VALID_FORMATS.join(', ')}`,
+      );
+      process.exit(1);
+    }
     config.docs = config.docs ?? {};
     config.docs.format = options.format as 'markdown' | 'json';
   }

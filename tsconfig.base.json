@@ -22,10 +22,7 @@
     "sourceMap": true,
     "outDir": "dist",
     "noEmit": false,
-    "baseUrl": ".",
-    "paths": {
-      "@chronicler/*": ["src/*"]
-    }
+    "baseUrl": "."
   },
   "include": ["src", "tests", "vitest.config.ts", "tsup.config.ts"],
   "exclude": ["dist", "node_modules"]

@@ -21,8 +21,8 @@ import {
   type ContextRecord,
   ContextStore,
   type ContextValidationResult,
-} from './ContextStore';
-import { CorrelationTimer } from './CorrelationTimer';
+} from './context-store';
+import { CorrelationTimer } from './correlation-timer';
 import {
   CorrelationLimitExceededError,
   ForkDepthExceededError,
@@ -211,6 +211,17 @@ type NormalizedCorrelationGroup = Omit<CorrelationEventGroup, 'events' | 'timeou
   events: EventRecord & CorrelationAutoEvents;
 };
 
+const correlationGroupCache = new WeakMap<CorrelationEventGroup, NormalizedCorrelationGroup>();
+
+const resolveCorrelationGroup = (group: CorrelationEventGroup): NormalizedCorrelationGroup => {
+  let resolved = correlationGroupCache.get(group);
+  if (!resolved) {
+    resolved = defineCorrelationGroup(group) as NormalizedCorrelationGroup;
+    correlationGroupCache.set(group, resolved);
+  }
+  return resolved;
+};
+
 /**
  * Create a Chronicle instance
  *
@@ -299,7 +310,7 @@ const createChronicleInstance = (
         throw new CorrelationLimitExceededError(config.limits.maxActiveCorrelations);
       }
       activeCorrelations.count++;
-      const definedGroup = defineCorrelationGroup(group) as NormalizedCorrelationGroup;
+      const definedGroup = resolveCorrelationGroup(group);
       const correlationStore = new ContextStore(
         { ...contextStore.snapshot(), ...metadata },
         config.limits.maxContextKeys,

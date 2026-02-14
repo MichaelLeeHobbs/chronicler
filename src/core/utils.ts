@@ -2,7 +2,7 @@
  * Shared utility functions used across Chronicler
  */
 
-import type { ContextValue } from './ContextStore';
+import type { ContextValue } from './context-store';
 
 /**
  * Check if a value is a simple, serializable value
