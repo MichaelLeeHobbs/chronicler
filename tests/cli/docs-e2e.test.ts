@@ -191,7 +191,6 @@ describe('Docs CLI end-to-end', () => {
       expect(markdown).toContain('`http.request.start`');
       expect(markdown).toContain('`http.request.complete`');
       expect(markdown).toContain('`http.request.timeout`');
-      expect(markdown).toContain('`http.request.metadataWarning`');
     });
 
     it('documents correlation group inline events with fields', () => {
@@ -317,13 +316,7 @@ describe('Docs CLI end-to-end', () => {
       expect(httpGroup.type).toBe('correlation');
       expect(httpGroup.doc).toBe('HTTP request lifecycle');
       expect(httpGroup.timeout).toBe(30000);
-      expect(httpGroup.autoEvents).toEqual([
-        'start',
-        'complete',
-        'fail',
-        'timeout',
-        'metadataWarning',
-      ]);
+      expect(httpGroup.autoEvents).toEqual(['start', 'complete', 'fail', 'timeout']);
     });
 
     it('serializes correlation group events with fields', () => {

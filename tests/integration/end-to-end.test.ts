@@ -218,22 +218,21 @@ describe('Integration Tests', () => {
   });
 
   describe('Context Collision Detection', () => {
-    it('detects and warns about metadata collisions', () => {
-      const mock = new MockLoggerBackend();
-      const chronicle = createChronicle({ backend: mock.backend, metadata: { userId: '123' } });
+    it('returns collision info from addContext', () => {
+      const chronicle = createChronicle({
+        backend: new MockLoggerBackend().backend,
+        metadata: { userId: '123' },
+      });
 
       chronicle.addContext({ sessionId: 'abc' });
-      chronicle.addContext({ userId: '456' }); // Collision!
+      const result = chronicle.addContext({ userId: '456' }); // Collision!
 
-      // Check that chronicler.contextCollision event was emitted
-      const collisionEvent = mock.findByKey('chronicler.contextCollision');
-      expect(collisionEvent).toBeDefined();
-      expect(collisionEvent?.fields.keys).toBe('userId');
-      expect(collisionEvent?.fields.count).toBe(1);
-      expect(collisionEvent?.metadata.userId).toBe('123'); // Original preserved
+      expect(result.collisions).toEqual(['userId']);
+      expect(result.collisionDetails).toHaveLength(1);
+      expect(result.collisionDetails[0]?.key).toBe('userId');
     });
 
-    it('emits metadata warning in correlations', () => {
+    it('returns collision info in correlations', () => {
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
@@ -241,11 +240,9 @@ describe('Integration Tests', () => {
         userId: 'original',
       });
 
-      correlation.addContext({ userId: 'attempted' }); // Collision
+      const result = correlation.addContext({ userId: 'attempted' }); // Collision
 
-      const warning = mock.findByKey('api.request.metadataWarning');
-      expect(warning).toBeDefined();
-      expect(warning?.fields.attemptedKey).toBe('userId');
+      expect(result.collisions).toEqual(['userId']);
     });
   });
 

@@ -1,5 +1,5 @@
 import { DEFAULT_REQUIRED_LEVELS, LOG_LEVELS } from './constants';
-import { BackendMethodError } from './errors';
+import { ChroniclerError } from './errors';
 
 // Re-export for public API
 export { DEFAULT_REQUIRED_LEVELS, LOG_LEVELS };
@@ -88,7 +88,7 @@ export const callBackendMethod = (
   } else {
     // This should never happen if validateBackendMethods is used correctly
     // However, they somehow broke the contract by providing a valid backend that later became invalid
-    throw new BackendMethodError(level);
+    throw new ChroniclerError('BACKEND_METHOD', `Backend does not support log level: ${level}`);
   }
 };
 

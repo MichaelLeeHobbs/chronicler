@@ -2,8 +2,6 @@
  * Shared utility functions used across Chronicler
  */
 
-import type { ContextValue } from './context-store';
-
 /**
  * Check if a value is a simple, serializable value
  * Simple values: string, number, boolean, null
@@ -19,15 +17,4 @@ export const isSimpleValue = (value: unknown): value is string | number | boolea
     typeof value === 'number' ||
     typeof value === 'boolean'
   );
-};
-
-/**
- * Convert ContextValue to string for logging
- *
- * @param value - Value to stringify
- * @returns String representation
- */
-export const stringifyValue = (value: ContextValue): string => {
-  if (value === null) return 'null';
-  return String(value);
 };

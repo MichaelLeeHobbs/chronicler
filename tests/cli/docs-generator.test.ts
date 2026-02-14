@@ -127,7 +127,6 @@ describe('Documentation Generator', () => {
       expect(content).toContain('`api.request.start`');
       expect(content).toContain('`api.request.complete`');
       expect(content).toContain('`api.request.timeout`');
-      expect(content).toContain('`api.request.metadataWarning`');
     });
   });
 

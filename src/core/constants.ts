@@ -58,12 +58,6 @@ export const FORK_ID_SEPARATOR = '.';
 export const DEFAULT_HOSTNAME = process.env.HOSTNAME ?? os.hostname() ?? 'unknown-host';
 
 /**
- * Reserved prefix for Chronicler system events
- * User events cannot start with this prefix
- */
-export const SYSTEM_EVENT_PREFIX = 'chronicler.';
-
-/**
  * Default maximum number of context keys per ContextStore
  */
 export const DEFAULT_MAX_CONTEXT_KEYS = 100;

@@ -11,13 +11,7 @@ import type { FieldBuilder } from '../../core/fields';
 import type { ParsedEventGroup, ParsedEventTree } from '../types';
 
 /** Auto-generated event property names added by defineCorrelationGroup */
-const CORRELATION_AUTO_EVENTS = new Set([
-  'start',
-  'complete',
-  'fail',
-  'timeout',
-  'metadataWarning',
-]);
+const CORRELATION_AUTO_EVENTS = new Set(['start', 'complete', 'fail', 'timeout']);
 
 /**
  * Type guard: is the value an EventDefinition?

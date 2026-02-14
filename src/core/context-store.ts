@@ -56,7 +56,6 @@ export interface ContextValidationResult {
  * @returns Sanitized context and validation results
  *
  * @see {@link ContextValidationResult} for validation result structure
- * @see {@link chroniclerSystemEvents} for system events emitted on violations
  */
 export const sanitizeContextInput = (
   context: ContextRecord,

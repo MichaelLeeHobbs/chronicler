@@ -183,21 +183,21 @@
 
 ### YAGNI/KISS
 
-- [ ] **Y-5: `metadataWarning` auto-event is deprecated and duplicates system events**
+- [x] **Y-5: `metadataWarning` auto-event is deprecated and duplicates system events**
       Already marked deprecated in JSDoc. Fires per collision detail, duplicating `contextCollision`.
       **Fix:** Remove it entirely.
 
-- [ ] **Y-6: System events pollute user's log stream** (`system-events.ts`)
+- [x] **Y-6: System events pollute user's log stream** (`system-events.ts`)
       Internal diagnostics appear in production logs. A logging library logging about itself.
       **Fix:** Use `console.warn()` in dev, or return collision info from `addContext()`.
 
-- [ ] **Y-7: 4 custom error classes with identical structure** (`errors.ts`)
+- [x] **Y-7: 4 custom error classes with identical structure** (`errors.ts`)
       Nobody catches by type. All thrown from exactly one location each.
       **Fix:** Use plain `Error` with descriptive messages, or a single `ChroniclerError` with `code`.
 
-- [ ] **Y-8: `commander` is a production dependency** (`package.json`)
+- [x] **Y-8: `commander` is a production dependency** (`package.json`)
       Library consumers get Commander.js bundled even though they never use the CLI.
-      **Fix:** Move to `devDependencies` or make CLI a separate entry point.
+      **Fix:** Keep in `dependencies` (CLI needs it). Added `bin` field and CLI build entry so consumers can run `npx @ubercode/chronicler validate`.
 
 ### DX
 

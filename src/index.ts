@@ -16,14 +16,7 @@ export {
   ContextStore,
   type ContextValidationResult,
 } from './core/context-store';
-export {
-  BackendMethodError,
-  CorrelationLimitExceededError,
-  ForkDepthExceededError,
-  InvalidConfigError,
-  ReservedFieldError,
-  UnsupportedLogLevelError,
-} from './core/errors';
+export { ChroniclerError, type ChroniclerErrorCode } from './core/errors';
 export {
   type CorrelationEventGroup,
   defineCorrelationGroup,
@@ -43,4 +36,3 @@ export {
   type RequiredFieldBuilder,
   t,
 } from './core/fields';
-export { chroniclerSystemEvents } from './core/system-events';

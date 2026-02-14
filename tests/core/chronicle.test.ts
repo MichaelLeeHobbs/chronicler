@@ -106,18 +106,16 @@ describe('createChronicle', () => {
     expect(payload?.fields.error as string).toContain('failure');
   });
 
-  it('emits system event for context collisions', () => {
+  it('returns collision info from addContext', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
     chronicle.addContext({ userId: '123' });
-    chronicle.addContext({ userId: '456' }); // Collision
+    const result = chronicle.addContext({ userId: '456' }); // Collision
 
-    // Check that chronicler.contextCollision event was emitted
-    const collisionEvent = mock.findByKey('chronicler.contextCollision');
-    expect(collisionEvent).toBeDefined();
-    expect(collisionEvent?.fields.keys).toBe('userId');
-    expect(collisionEvent?.fields.count).toBe(1);
+    expect(result.collisions).toEqual(['userId']);
+    expect(result.collisionDetails).toHaveLength(1);
+    expect(result.collisionDetails[0]?.key).toBe('userId');
   });
 });
 
@@ -132,19 +130,16 @@ const createChronicleInstance = (
 };
 
 describe('context limits via config', () => {
-  it('emits contextLimitReached when context keys exceed maxContextKeys', () => {
-    const mock = new MockLoggerBackend();
+  it('returns dropped keys when context keys exceed maxContextKeys', () => {
     const chronicle = createChronicle({
-      backend: mock.backend,
+      backend: new MockLoggerBackend().backend,
       metadata: {},
       limits: { maxContextKeys: 2 },
     });
 
-    chronicle.addContext({ a: '1', b: '2', c: '3' });
+    const result = chronicle.addContext({ a: '1', b: '2', c: '3' });
 
-    const limitEvent = mock.findByKey('chronicler.contextLimitReached');
-    expect(limitEvent).toBeDefined();
-    expect(limitEvent?.fields.count).toBe(1);
+    expect(result.dropped).toHaveLength(1);
   });
 });
 

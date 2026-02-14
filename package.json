@@ -30,6 +30,9 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "chronicler": "./dist/cli.js"
+  },
   "files": [
     "dist"
   ],

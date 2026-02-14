@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createChronicle } from '../../src/core/chronicle';
-import { CorrelationLimitExceededError } from '../../src/core/errors';
+import { ChroniclerError } from '../../src/core/errors';
 import { defineCorrelationGroup, defineEvent } from '../../src/core/events';
 import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
@@ -58,14 +58,14 @@ describe('correlation chronicle', () => {
     vi.useRealTimers();
   });
 
-  it('emits metadataWarning when context collisions occur', () => {
+  it('returns collision info from addContext on correlations', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
     const correlation = chronicle.startCorrelation(events, { userId: 'old' });
 
-    correlation.addContext({ userId: 'new' });
+    const result = correlation.addContext({ userId: 'new' });
 
-    expect(mock.getPayloads().some((p) => p.eventKey === 'api.request.metadataWarning')).toBe(true);
+    expect(result.collisions).toEqual(['userId']);
   });
 
   it('emits fail event at error level with duration', () => {
@@ -113,7 +113,7 @@ describe('correlation chronicle', () => {
 });
 
 describe('correlation limits', () => {
-  it('throws CorrelationLimitExceededError when active limit exceeded', () => {
+  it('throws ChroniclerError when active limit exceeded', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({
       backend: mock.backend,
@@ -124,7 +124,7 @@ describe('correlation limits', () => {
     chronicle.startCorrelation(events);
     chronicle.startCorrelation(events);
 
-    expect(() => chronicle.startCorrelation(events)).toThrow(CorrelationLimitExceededError);
+    expect(() => chronicle.startCorrelation(events)).toThrow(ChroniclerError);
   });
 
   it('decrements on complete(), allowing new correlations', () => {
@@ -173,7 +173,7 @@ describe('correlation limits', () => {
     chronicle.startCorrelation(events);
     fork.startCorrelation(events);
 
-    expect(() => chronicle.startCorrelation(events)).toThrow(CorrelationLimitExceededError);
+    expect(() => chronicle.startCorrelation(events)).toThrow(ChroniclerError);
   });
 
   it('decrements on fail(), allowing new correlations', () => {
@@ -207,6 +207,6 @@ describe('correlation limits', () => {
 
     // Only 1 slot freed, so starting 2 more should fail on the second
     chronicle.startCorrelation(events);
-    expect(() => chronicle.startCorrelation(events)).toThrow(CorrelationLimitExceededError);
+    expect(() => chronicle.startCorrelation(events)).toThrow(ChroniclerError);
   });
 });

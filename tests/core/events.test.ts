@@ -37,7 +37,7 @@ describe('event helpers', () => {
     });
 
     expect(group.events.start.key).toBe('api.request.start');
-    expect(group.events.metadataWarning.fields!.attemptedKey._required).toBe(true);
+    expect(group.events.fail.fields!.error._required).toBe(false);
   });
 
   it('auto-derives event keys from group key + property name', () => {

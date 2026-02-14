@@ -127,7 +127,6 @@ function generateGroupMarkdown(group: ParsedEventGroup, level = 2): string[] {
       `- \`${group.key}.fail\` - Logged when correlation fails (includes \`duration\` and \`error\` fields)`,
     );
     lines.push(`- \`${group.key}.timeout\` - Logged when correlation times out due to inactivity`);
-    lines.push(`- \`${group.key}.metadataWarning\` - Logged when metadata collision is detected`);
     lines.push('');
   }
 
@@ -209,10 +208,7 @@ function serializeGroup(group: ParsedEventGroup): Record<string, unknown> {
     type: group.type,
     doc: group.doc ?? '',
     timeout: group.timeout,
-    autoEvents:
-      group.type === 'correlation'
-        ? ['start', 'complete', 'fail', 'timeout', 'metadataWarning']
-        : undefined,
+    autoEvents: group.type === 'correlation' ? ['start', 'complete', 'fail', 'timeout'] : undefined,
     events: Object.entries(group.events).map(([name, event]) => ({
       name,
       ...serializeEvent(event),

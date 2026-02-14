@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createChronicle } from '../../src/core/chronicle';
-import { ForkDepthExceededError } from '../../src/core/errors';
+import { ChroniclerError } from '../../src/core/errors';
 import { defineCorrelationGroup, defineEvent } from '../../src/core/events';
 import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
@@ -259,9 +259,7 @@ describe('Fork System', () => {
 
       fork.event(sampleEvent, { taskId: 'test' });
 
-      // Should NOT have any collision events — extraContext keys are new
-      const collisionEvents = mock.findAllByKey('chronicler.contextCollision');
-      expect(collisionEvents).toHaveLength(0);
+      // No collisions since extraContext keys are new
 
       // Fork should have both correlation context and extra context
       expect(mock.getLastPayload()?.metadata).toMatchObject({
@@ -296,7 +294,7 @@ describe('Fork System', () => {
   });
 
   describe('Fork depth limits', () => {
-    it('throws ForkDepthExceededError at configured limit', () => {
+    it('throws ChroniclerError at configured limit', () => {
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({
         backend: mock.backend,
@@ -307,7 +305,7 @@ describe('Fork System', () => {
       const fork1 = chronicle.fork();
       const fork1_1 = fork1.fork(); // depth 2
 
-      expect(() => fork1_1.fork()).toThrow(ForkDepthExceededError);
+      expect(() => fork1_1.fork()).toThrow(ChroniclerError);
     });
 
     it('allows forks within default depth limit', () => {
@@ -336,24 +334,21 @@ describe('Fork System', () => {
       const correlation = chronicle.startCorrelation(correlationGroup);
       const fork = correlation.fork(); // depth 1
 
-      expect(() => fork.fork()).toThrow(ForkDepthExceededError);
+      expect(() => fork.fork()).toThrow(ChroniclerError);
     });
   });
 
   describe('5.5 Context Collision in Forks', () => {
-    it('tracks context collisions in forks', () => {
+    it('returns collision info from addContext in forks', () => {
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       const fork = chronicle.fork({ userId: '123' });
-      fork.addContext({ userId: '456' }); // Collision
+      const result = fork.addContext({ userId: '456' }); // Collision
 
-      // Check that chronicler.contextCollision event was emitted
-      const collisionEvent = mock.findByKey('chronicler.contextCollision');
-      expect(collisionEvent).toBeDefined();
-      expect(collisionEvent?.fields.keys).toBe('userId');
-      expect(collisionEvent?.fields.count).toBe(1);
-      expect(collisionEvent?.metadata.userId).toBe('123'); // Original preserved
+      expect(result.collisions).toEqual(['userId']);
+      expect(result.collisionDetails).toHaveLength(1);
+      expect(result.collisionDetails[0]?.key).toBe('userId');
     });
   });
 });

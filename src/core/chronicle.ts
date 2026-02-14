@@ -16,19 +16,9 @@ import {
   FORK_ID_SEPARATOR,
   ROOT_FORK_ID,
 } from './constants';
-import {
-  type ContextCollisionDetail,
-  type ContextRecord,
-  ContextStore,
-  type ContextValidationResult,
-} from './context-store';
+import { type ContextRecord, ContextStore, type ContextValidationResult } from './context-store';
 import { CorrelationTimer } from './correlation-timer';
-import {
-  CorrelationLimitExceededError,
-  ForkDepthExceededError,
-  ReservedFieldError,
-  UnsupportedLogLevelError,
-} from './errors';
+import { ChroniclerError } from './errors';
 import {
   type CorrelationAutoEvents,
   type CorrelationEventGroup,
@@ -38,8 +28,6 @@ import {
   type EventRecord,
 } from './events';
 import { assertNoReservedKeys } from './reserved';
-import { chroniclerSystemEvents } from './system-events';
-import { stringifyValue } from './utils';
 import { buildValidationMetadata, validateFields } from './validation';
 
 export interface ChroniclerLimits {
@@ -84,7 +72,7 @@ export interface Chronicler {
    */
   log(level: LogLevel, message: string, fields?: Record<string, unknown>): void;
 
-  addContext(context: ContextRecord): void;
+  addContext(context: ContextRecord): ContextValidationResult;
 
   startCorrelation(group: CorrelationEventGroup, metadata?: ContextRecord): CorrelationChronicle;
 
@@ -96,7 +84,7 @@ export interface Chronicler {
  *
  * Unlike a root Chronicler, a correlation:
  * - Has a single shared correlation ID for all events
- * - Has lifecycle events (start, complete, timeout, metadataWarning)
+ * - Has lifecycle events (start, complete, fail, timeout)
  * - Can timeout if not completed within the configured duration
  * - Cannot start nested correlations (use fork() for parallel work within a correlation)
  */
@@ -109,7 +97,7 @@ export interface CorrelationChronicle {
    */
   log(level: LogLevel, message: string, fields?: Record<string, unknown>): void;
 
-  addContext(context: ContextRecord): void;
+  addContext(context: ContextRecord): ContextValidationResult;
 
   fork(context?: ContextRecord): Chronicler;
 
@@ -167,35 +155,6 @@ const buildPayload = (
   }
 
   return payload;
-};
-
-const emitContextValidationEvents = (
-  validation: ContextValidationResult,
-  emitEvent: (eventDef: EventDefinition, fields: Record<string, unknown>) => void,
-): void => {
-  if (validation.collisionDetails.length > 0) {
-    const keys = validation.collisionDetails.map((d) => d.key).join(', ');
-    emitEvent(chroniclerSystemEvents.events.contextCollision, {
-      keys,
-      count: validation.collisionDetails.length,
-    });
-  }
-
-  if (validation.reserved.length > 0) {
-    const keys = validation.reserved.join(', ');
-    emitEvent(chroniclerSystemEvents.events.reservedFieldAttempt, {
-      keys,
-      count: validation.reserved.length,
-    });
-  }
-
-  if (validation.dropped.length > 0) {
-    const keys = validation.dropped.join(', ');
-    emitEvent(chroniclerSystemEvents.events.contextLimitReached, {
-      keys,
-      count: validation.dropped.length,
-    });
-  }
 };
 
 const forkDepthFromId = (forkId: string): number =>
@@ -277,8 +236,8 @@ const createChronicleInstance = (
     },
     addContext(context) {
       const validation = contextStore.add(context);
-      emitContextValidationEvents(validation, (eventDef, fields) => this.event(eventDef, fields));
       hooks.onContextValidation?.(validation);
+      return validation;
     },
     fork(extraContext = {}) {
       forkCounter++;
@@ -288,7 +247,10 @@ const createChronicleInstance = (
           : `${forkId}${FORK_ID_SEPARATOR}${forkCounter}`;
       const depth = forkDepthFromId(childForkId);
       if (depth > config.limits.maxForkDepth) {
-        throw new ForkDepthExceededError(depth, config.limits.maxForkDepth);
+        throw new ChroniclerError(
+          'FORK_DEPTH_EXCEEDED',
+          `Fork depth ${depth} exceeds maximum allowed depth of ${config.limits.maxForkDepth}`,
+        );
       }
       const forkStore = new ContextStore(contextStore.snapshot(), config.limits.maxContextKeys);
       const forkChronicle = createChronicleInstance(
@@ -307,7 +269,10 @@ const createChronicleInstance = (
     },
     startCorrelation(group, metadata = {}) {
       if (activeCorrelations.count >= config.limits.maxActiveCorrelations) {
-        throw new CorrelationLimitExceededError(config.limits.maxActiveCorrelations);
+        throw new ChroniclerError(
+          'CORRELATION_LIMIT_EXCEEDED',
+          `Active correlation limit of ${config.limits.maxActiveCorrelations} exceeded`,
+        );
       }
       activeCorrelations.count++;
       const definedGroup = resolveCorrelationGroup(group);
@@ -380,13 +345,8 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     this.timer.touch();
   }
 
-  addContext(context: ContextRecord): void {
-    const validation = this.contextStore.add(context);
-    emitContextValidationEvents(validation, (eventDef, fields) => this.event(eventDef, fields));
-
-    if (validation.collisionDetails.length > 0) {
-      this.emitMetadataWarnings(validation.collisionDetails);
-    }
+  addContext(context: ContextRecord): ContextValidationResult {
+    return this.contextStore.add(context);
   }
 
   fork(extraContext: ContextRecord = {}): Chronicler {
@@ -397,7 +357,10 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
         : `${this.forkId}${FORK_ID_SEPARATOR}${this.forkCounter}`;
     const depth = forkDepthFromId(childForkId);
     if (depth > this.config.limits.maxForkDepth) {
-      throw new ForkDepthExceededError(depth, this.config.limits.maxForkDepth);
+      throw new ChroniclerError(
+        'FORK_DEPTH_EXCEEDED',
+        `Fork depth ${depth} exceeds maximum allowed depth of ${this.config.limits.maxForkDepth}`,
+      );
     }
     const forkStore = new ContextStore(
       this.contextStore.snapshot(),
@@ -462,19 +425,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     this.emitAutoEvent(this.autoEvents.timeout, {}, undefined, false);
   }
 
-  private emitMetadataWarnings(details: ContextCollisionDetail[]): void {
-    if (details.length === 0) {
-      return;
-    }
-    details.forEach((detail) =>
-      this.emitAutoEvent(this.autoEvents.metadataWarning, {
-        attemptedKey: detail.key,
-        existingValue: stringifyValue(detail.existingValue),
-        attemptedValue: stringifyValue(detail.attemptedValue),
-      }),
-    );
-  }
-
   private emitAutoEvent(
     eventDef: EventDefinition,
     fields: Record<string, unknown>,
@@ -505,20 +455,26 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
  *
  * @param config - Chronicler configuration with optional backend, metadata, and optional correlation settings
  * @returns A configured `Chronicler` instance
- * @throws {UnsupportedLogLevelError} If the backend is missing required log-level methods
- * @throws {ReservedFieldError} If `config.metadata` contains reserved field names
+ * @throws {ChroniclerError} `UNSUPPORTED_LOG_LEVEL` if the backend is missing required methods
+ * @throws {ChroniclerError} `RESERVED_FIELD` if `config.metadata` contains reserved field names
  */
 export const createChronicle = (config: ChroniclerConfig): Chronicler => {
   const resolvedBackend = config.backend ?? createConsoleBackend();
 
   const missing = validateBackendMethods(resolvedBackend, DEFAULT_REQUIRED_LEVELS);
   if (missing.length > 0) {
-    throw new UnsupportedLogLevelError(missing.join(', '));
+    throw new ChroniclerError(
+      'UNSUPPORTED_LOG_LEVEL',
+      `Log backend does not support level: ${missing.join(', ')}`,
+    );
   }
 
   const reservedMetadata = assertNoReservedKeys(config.metadata);
   if (reservedMetadata.length > 0) {
-    throw new ReservedFieldError(reservedMetadata);
+    throw new ChroniclerError(
+      'RESERVED_FIELD',
+      `Reserved fields cannot be used in metadata: ${reservedMetadata.join(', ')}`,
+    );
   }
 
   const resolvedLimits: ResolvedLimits = {

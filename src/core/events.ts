@@ -63,11 +63,6 @@ const correlationAutoFields = {
     error: t.error().optional().doc('Error that caused the failure'),
   },
   timeout: {},
-  metadataWarning: {
-    attemptedKey: t.string().doc('Key attempted to override'),
-    existingValue: t.string().doc('Existing value preserved'),
-    attemptedValue: t.string().doc('Value that was rejected'),
-  },
 };
 
 export type CorrelationAutoEvents = {
@@ -182,13 +177,6 @@ const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
     message: `${groupKey} timed out`,
     doc: 'Auto-generated correlation timeout event',
   },
-  metadataWarning: {
-    key: `${groupKey}.metadataWarning`,
-    level: 'warn',
-    message: 'Metadata collision detected',
-    doc: 'Logged when metadata overrides are attempted',
-    fields: correlationAutoFields.metadataWarning,
-  },
 });
 
 /**
@@ -203,7 +191,6 @@ const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
  * - `{key}.complete` - Emitted when complete() is called (includes duration)
  * - `{key}.fail` - Emitted when fail() is called (includes duration and error)
  * - `{key}.timeout` - Emitted if no activity within timeout period
- * - `{key}.metadataWarning` - Emitted on context collisions (deprecated, see system events)
  *
  * **Timeout behavior:**
  * - Defaults to 5 minutes (300,000ms) if not specified
@@ -244,7 +231,6 @@ const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
  * // - requestGroup.events.start
  * // - requestGroup.events.complete
  * // - requestGroup.events.timeout
- * // - requestGroup.events.metadataWarning
  * // - requestGroup.events.validated (your event)
  * // - requestGroup.events.processed (your event)
  * ```
