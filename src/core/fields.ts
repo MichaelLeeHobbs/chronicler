@@ -28,7 +28,9 @@ export interface RequiredFieldBuilder<T extends string> extends FieldBuilder<T, 
 }
 
 /**
- * Field type builders - use these to define fields in events
+ * Field type builders - use these to define fields in events.
+ *
+ * Tip: if `t` collides with your i18n library, import the {@link field} alias instead.
  *
  * @example
  * ```typescript
@@ -41,8 +43,8 @@ export interface RequiredFieldBuilder<T extends string> extends FieldBuilder<T, 
  *     age: t.number().optional().doc('User age'),
  *     isActive: t.boolean(),
  *     error: t.error().optional(),
- *   }
- * } as const);
+ *   },
+ * });
  * ```
  */
 export const t = {
@@ -51,6 +53,13 @@ export const t = {
   boolean: (): RequiredFieldBuilder<'boolean'> => createFieldBuilder('boolean'),
   error: (): RequiredFieldBuilder<'error'> => createFieldBuilder('error'),
 } as const;
+
+/**
+ * Alias for {@link t} — use whichever name fits your codebase.
+ *
+ * `field` avoids collisions with common i18n conventions that also use `t`.
+ */
+export const field = t;
 
 /**
  * Internal: Create a field builder with optional/doc chaining support

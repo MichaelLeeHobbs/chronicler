@@ -35,6 +35,7 @@ export interface ValidationError {
     | 'reserved-prefix'
     | 'invalid-level'
     | 'invalid-timeout'
+    | 'missing-doc'
     | 'parse-error';
   message: string;
   location: ErrorLocation;

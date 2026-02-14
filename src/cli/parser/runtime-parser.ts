@@ -11,7 +11,13 @@ import type { FieldBuilder } from '../../core/fields';
 import type { ParsedEventGroup, ParsedEventTree } from '../types';
 
 /** Auto-generated event property names added by defineCorrelationGroup */
-const CORRELATION_AUTO_EVENTS = new Set(['start', 'complete', 'timeout', 'metadataWarning']);
+const CORRELATION_AUTO_EVENTS = new Set([
+  'start',
+  'complete',
+  'fail',
+  'timeout',
+  'metadataWarning',
+]);
 
 /**
  * Type guard: is the value an EventDefinition?
@@ -23,7 +29,7 @@ function isEventDefinition(value: unknown): value is EventDefinition {
     typeof v.key === 'string' &&
     typeof v.level === 'string' &&
     typeof v.message === 'string' &&
-    typeof v.doc === 'string'
+    (v.doc === undefined || typeof v.doc === 'string')
   );
 }
 
@@ -39,7 +45,7 @@ function isFieldBuilder(value: unknown): value is FieldBuilder<string, boolean> 
 interface EventGroupLike {
   key: string;
   type: 'system' | 'correlation';
-  doc: string;
+  doc?: string;
   timeout?: number;
   events?: Record<string, unknown>;
   groups?: Record<string, unknown>;
@@ -54,7 +60,7 @@ function isEventGroup(value: unknown): value is EventGroupLike {
   return (
     typeof v.key === 'string' &&
     (v.type === 'system' || v.type === 'correlation') &&
-    typeof v.doc === 'string'
+    (v.doc === undefined || typeof v.doc === 'string')
   );
 }
 
@@ -99,8 +105,8 @@ function convertGroup(group: EventGroupLike): ParsedEventGroup {
           ? extractFields(value.fields as Record<string, unknown>)
           : undefined;
         events[name] = fields
-          ? { ...value, fields }
-          : { key: value.key, level: value.level, message: value.message, doc: value.doc };
+          ? { ...value, doc: value.doc ?? '', fields }
+          : { key: value.key, level: value.level, message: value.message, doc: value.doc ?? '' };
       }
     }
   }
@@ -117,7 +123,7 @@ function convertGroup(group: EventGroupLike): ParsedEventGroup {
   const parsed: ParsedEventGroup = {
     key: group.key,
     type: group.type,
-    doc: group.doc,
+    doc: group.doc ?? '',
     events,
     groups: nestedGroups,
   };
@@ -180,8 +186,13 @@ export async function parseEventsFile(filePath: string): Promise<ParsedEventTree
             : undefined;
           events.push(
             fields
-              ? { ...value, fields }
-              : { key: value.key, level: value.level, message: value.message, doc: value.doc },
+              ? { ...value, doc: value.doc ?? '', fields }
+              : {
+                  key: value.key,
+                  level: value.level,
+                  message: value.message,
+                  doc: value.doc ?? '',
+                },
           );
         }
       }

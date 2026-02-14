@@ -40,6 +40,51 @@ describe('event helpers', () => {
     expect(group.events.metadataWarning.fields!.attemptedKey._required).toBe(true);
   });
 
+  it('auto-derives event keys from group key + property name', () => {
+    const group = defineEventGroup({
+      key: 'api',
+      type: 'system',
+      doc: 'API events',
+      events: {
+        started: defineEvent({
+          key: 'started', // short key, should become 'api.started'
+          level: 'info',
+          message: 'started',
+          doc: 'start event',
+        }),
+        stopped: defineEvent({
+          key: 'api.stopped', // already fully qualified, passes through
+          level: 'info',
+          message: 'stopped',
+          doc: 'stop event',
+        }),
+      },
+    });
+
+    expect(group.events?.started.key).toBe('api.started');
+    expect(group.events?.stopped.key).toBe('api.stopped');
+  });
+
+  it('auto-derives keys in correlation groups', () => {
+    const group = defineCorrelationGroup({
+      key: 'http.request',
+      type: 'correlation',
+      doc: 'HTTP',
+      events: {
+        validated: defineEvent({
+          key: 'validated', // short key
+          level: 'info',
+          message: 'validated',
+          doc: 'validated',
+        }),
+      },
+    });
+
+    expect(group.events.validated.key).toBe('http.request.validated');
+    // auto-events still work
+    expect(group.events.start.key).toBe('http.request.start');
+  });
+
   it('supports nested groups', () => {
     const system = defineEventGroup({
       key: 'system',

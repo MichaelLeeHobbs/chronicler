@@ -317,7 +317,13 @@ describe('Docs CLI end-to-end', () => {
       expect(httpGroup.type).toBe('correlation');
       expect(httpGroup.doc).toBe('HTTP request lifecycle');
       expect(httpGroup.timeout).toBe(30000);
-      expect(httpGroup.autoEvents).toEqual(['start', 'complete', 'timeout', 'metadataWarning']);
+      expect(httpGroup.autoEvents).toEqual([
+        'start',
+        'complete',
+        'fail',
+        'timeout',
+        'metadataWarning',
+      ]);
     });
 
     it('serializes correlation group events with fields', () => {

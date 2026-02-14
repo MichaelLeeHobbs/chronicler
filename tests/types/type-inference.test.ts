@@ -46,6 +46,79 @@ describe('Type Inference Tests', () => {
     });
   });
 
+  describe('doc is optional', () => {
+    it('allows event definition without doc', () => {
+      const event = defineEvent({
+        key: 'test.nodoc',
+        level: 'info',
+        message: 'Test without doc',
+        fields: {
+          count: t.number(),
+        },
+      });
+
+      expect(event.key).toBe('test.nodoc');
+      expect(event.doc).toBeUndefined();
+      expect(event.fields?.count._type).toBe('number');
+    });
+
+    it('allows event group without doc', () => {
+      const group = defineEventGroup({
+        key: 'nodoc',
+        type: 'system',
+        events: {
+          ping: defineEvent({
+            key: 'nodoc.ping',
+            level: 'info',
+            message: 'Ping',
+          }),
+        },
+      });
+
+      expect(group.key).toBe('nodoc');
+      expect((group as Record<string, unknown>).doc).toBeUndefined();
+      expect(group.events.ping.key).toBe('nodoc.ping');
+    });
+
+    it('allows correlation group without doc', () => {
+      const group = defineCorrelationGroup({
+        key: 'nodoc.corr',
+        type: 'correlation',
+        events: {},
+      });
+
+      expect((group as Record<string, unknown>).doc).toBeUndefined();
+      expect(group.events.start.key).toBe('nodoc.corr.start');
+    });
+  });
+
+  describe('as const is not required', () => {
+    it('infers field types correctly without as const', () => {
+      const event = defineEvent({
+        key: 'test.noconst',
+        level: 'info',
+        message: 'Test',
+        doc: 'Test event without as const',
+        fields: {
+          name: t.string().doc('Name'),
+          count: t.number().optional().doc('Count'),
+          active: t.boolean(),
+          err: t.error().optional(),
+        },
+      });
+
+      expect(event.key).toBe('test.noconst');
+      expect(event.fields?.name._type).toBe('string');
+      expect(event.fields?.name._required).toBe(true);
+      expect(event.fields?.count._type).toBe('number');
+      expect(event.fields?.count._required).toBe(false);
+      expect(event.fields?.active._type).toBe('boolean');
+      expect(event.fields?.active._required).toBe(true);
+      expect(event.fields?.err._type).toBe('error');
+      expect(event.fields?.err._required).toBe(false);
+    });
+  });
+
   describe('Event Definition Structure', () => {
     it('preserves event definition properties', () => {
       const event = defineEvent({
@@ -126,6 +199,33 @@ describe('Type Inference Tests', () => {
 
       expect(group.groups.v1).toBeDefined();
       expect(group.groups.v1.key).toBe('api.v1');
+    });
+  });
+
+  describe('Auto-derived Event Keys', () => {
+    it('auto-prefixes short keys with group key', () => {
+      const group = defineEventGroup({
+        key: 'billing',
+        type: 'system',
+        doc: 'Billing events',
+        events: {
+          charged: defineEvent({
+            key: 'charged',
+            level: 'info',
+            message: 'Charged',
+            doc: 'Customer charged',
+          }),
+          refunded: defineEvent({
+            key: 'billing.refunded', // already qualified
+            level: 'info',
+            message: 'Refunded',
+            doc: 'Customer refunded',
+          }),
+        },
+      });
+
+      expect(group.events.charged.key).toBe('billing.charged');
+      expect(group.events.refunded.key).toBe('billing.refunded');
     });
   });
 

@@ -68,6 +68,37 @@ describe('correlation chronicle', () => {
     expect(mock.getPayloads().some((p) => p.eventKey === 'api.request.metadataWarning')).toBe(true);
   });
 
+  it('emits fail event at error level with duration', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+    const correlation = chronicle.startCorrelation(events);
+    correlation.fail(new Error('something broke'));
+
+    const keys = mock.getPayloads().map((p) => p.eventKey);
+    expect(keys).toEqual(['api.request.start', 'api.request.fail']);
+
+    const failPayload = mock.findByKey('api.request.fail');
+    expect(failPayload).toBeDefined();
+    expect(failPayload?.fields.duration).toBeGreaterThanOrEqual(0);
+    expect(failPayload?.fields.error).toBeDefined();
+  });
+
+  it('fail() prevents timeout', () => {
+    vi.useFakeTimers();
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+    const correlation = chronicle.startCorrelation(events);
+    correlation.fail();
+
+    vi.advanceTimersByTime(200);
+
+    const keys = mock.getPayloads().map((p) => p.eventKey);
+    expect(keys).not.toContain('api.request.timeout');
+    vi.useRealTimers();
+  });
+
   it('marks multiple completes via validation metadata', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
@@ -145,6 +176,21 @@ describe('correlation limits', () => {
     fork.startCorrelation(events);
 
     expect(() => chronicle.startCorrelation(events)).toThrow(CorrelationLimitExceededError);
+  });
+
+  it('decrements on fail(), allowing new correlations', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      limits: { maxActiveCorrelations: 1 },
+    });
+
+    const corr1 = chronicle.startCorrelation(events);
+    corr1.fail(new Error('oops'));
+
+    const corr2 = chronicle.startCorrelation(events);
+    expect(corr2).toBeDefined();
   });
 
   it('no double-decrement on multiple complete() calls', () => {

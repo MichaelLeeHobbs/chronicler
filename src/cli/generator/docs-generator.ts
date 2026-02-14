@@ -100,8 +100,10 @@ function generateGroupMarkdown(group: ParsedEventGroup, level = 2): string[] {
     lines.push('');
   }
 
-  lines.push(group.doc);
-  lines.push('');
+  if (group.doc) {
+    lines.push(group.doc);
+    lines.push('');
+  }
 
   // Auto-generated events for correlation groups
   if (group.type === 'correlation') {
@@ -110,6 +112,9 @@ function generateGroupMarkdown(group: ParsedEventGroup, level = 2): string[] {
     lines.push(`- \`${group.key}.start\` - Logged when correlation starts`);
     lines.push(
       `- \`${group.key}.complete\` - Logged when correlation completes (includes \`duration\` field)`,
+    );
+    lines.push(
+      `- \`${group.key}.fail\` - Logged when correlation fails (includes \`duration\` and \`error\` fields)`,
     );
     lines.push(`- \`${group.key}.timeout\` - Logged when correlation times out due to inactivity`);
     lines.push(`- \`${group.key}.metadataWarning\` - Logged when metadata collision is detected`);
@@ -144,8 +149,10 @@ function generateEventMarkdown(event: EventDefinition, level = 3): string[] {
   lines.push(`**Level:** \`${event.level}\``);
   lines.push(`**Message:** "${event.message}"`);
   lines.push('');
-  lines.push(event.doc);
-  lines.push('');
+  if (event.doc) {
+    lines.push(event.doc);
+    lines.push('');
+  }
 
   if (event.fields && Object.keys(event.fields).length > 0) {
     lines.push('**Fields:**');
@@ -190,11 +197,11 @@ function serializeGroup(group: ParsedEventGroup): Record<string, unknown> {
   return {
     key: group.key,
     type: group.type,
-    doc: group.doc,
+    doc: group.doc ?? '',
     timeout: group.timeout,
     autoEvents:
       group.type === 'correlation'
-        ? ['start', 'complete', 'timeout', 'metadataWarning']
+        ? ['start', 'complete', 'fail', 'timeout', 'metadataWarning']
         : undefined,
     events: Object.entries(group.events).map(([name, event]) => ({
       name,
@@ -215,7 +222,7 @@ function serializeEvent(event: EventDefinition): Record<string, unknown> {
     key: event.key,
     level: event.level,
     message: event.message,
-    doc: event.doc,
+    doc: event.doc ?? '',
     fields: event.fields
       ? Object.entries(event.fields).map(([name, field]) => ({
           name,

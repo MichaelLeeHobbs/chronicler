@@ -99,31 +99,31 @@
 
 ## HIGH -- DX
 
-- [ ] **D-1: `as const` may be unnecessary with `const` generic parameters** (`events.ts:120-125`)
+- [x] **D-1: `as const` may be unnecessary with `const` generic parameters** (`events.ts:120-125`)
       `defineEvent` already uses `const Key`, `const Fields` generics (TS 5.0+). If `as const` is truly redundant, all docs and examples are misleading. If not, the edge cases should be documented.
       **Fix:** Test whether `as const` is still needed. Update docs accordingly.
 
-- [ ] **D-2: `doc` required on every event is punishing during prototyping**
+- [x] **D-2: `doc` required on every event is punishing during prototyping**
       50 events = 50 `doc: 'TODO'` strings.
       **Fix:** Make `doc` optional with default `''`. CLI `validate` can warn about missing docs.
 
-- [ ] **D-3: Redundant key specification in groups**
+- [x] **D-3: Redundant key specification in groups**
       Group key `http.request` + event key `http.request.started` is manual and error-prone.
       **Fix:** Auto-derive event keys from group key + property name. Allow explicit override.
 
-- [ ] **D-4: `t` is not discoverable** (`fields.ts:48`)
+- [x] **D-4: `t` is not discoverable** (`fields.ts:48`)
       Single-character name with no obvious meaning. Collides with i18n and test conventions.
       **Fix:** Export both `t` and `field` as aliases. Or rename to `field`.
 
-- [ ] **D-5: No incremental adoption path from existing loggers**
+- [x] **D-5: No incremental adoption path from existing loggers**
       All-or-nothing rewrite required. No way to run alongside Winston/Pino and migrate gradually.
       **Fix:** Add an untyped escape hatch: `chronicle.log('info', 'message', { any: 'fields' })`. Provide adapter factories.
 
-- [ ] **D-6: Example app is 17 files -- needs a minimal example**
+- [x] **D-6: Example app is 17 files -- needs a minimal example**
       Overwhelming for "getting started." New users want 1 file, not an Express app.
       **Fix:** Create `examples/minimal/` with a single file under 30 lines.
 
-- [ ] **D-7: No `fail()` method on correlations**
+- [x] **D-7: No `fail()` method on correlations**
       If a request fails, you call `complete()` which is semantically wrong.
       **Fix:** Add `corr.fail(error?, fields?)` that emits `{key}.failed`.
 

@@ -328,6 +328,35 @@ describe('Integration Tests', () => {
     });
   });
 
+  describe('Correlation Failure', () => {
+    it('fail() emits .fail event and marks correlation completed', () => {
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+      const correlation = chronicle.startCorrelation(requestCorrelation, {
+        requestId: 'req-fail',
+      });
+
+      correlation.event(requestCorrelation.events.validated, {
+        method: 'POST',
+        path: '/api/broken',
+      });
+
+      const err = new Error('DB connection lost');
+      correlation.fail(err, { retryable: true });
+
+      const failEvent = mock.findByKey('api.request.fail');
+      expect(failEvent).toBeDefined();
+      expect(failEvent?.fields.duration).toBeGreaterThanOrEqual(0);
+      expect(failEvent?.fields.error).toBeDefined();
+      expect(failEvent?.metadata.requestId).toBe('req-fail');
+
+      // Should not emit timeout after fail
+      const keys = mock.getPayloads().map((p) => p.eventKey);
+      expect(keys).not.toContain('api.request.timeout');
+    });
+  });
+
   describe('Multiple Correlation Completes', () => {
     it('allows multiple complete() calls with validation warning', () => {
       const mock = new MockLoggerBackend();

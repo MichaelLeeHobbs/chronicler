@@ -2,6 +2,7 @@ import {
   callBackendMethod,
   createConsoleBackend,
   type LogBackend,
+  type LogLevel,
   type LogPayload,
   validateBackendMethods,
   type ValidationMetadata,
@@ -72,6 +73,12 @@ interface ActiveCorrelationCounter {
 export interface Chronicler {
   event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
 
+  /**
+   * Untyped escape hatch — log at any level without a pre-defined event.
+   * Useful for incremental adoption or ad-hoc debugging.
+   */
+  log(level: LogLevel, message: string, fields?: Record<string, unknown>): void;
+
   addContext(context: ContextRecord): void;
 
   startCorrelation(group: CorrelationEventGroup, metadata?: ContextRecord): CorrelationChronicle;
@@ -91,11 +98,19 @@ export interface Chronicler {
 export interface CorrelationChronicle {
   event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
 
+  /**
+   * Untyped escape hatch — log at any level without a pre-defined event.
+   * Useful for incremental adoption or ad-hoc debugging.
+   */
+  log(level: LogLevel, message: string, fields?: Record<string, unknown>): void;
+
   addContext(context: ContextRecord): void;
 
   fork(context?: ContextRecord): Chronicler;
 
   complete(fields?: ContextRecord): void;
+
+  fail(error?: unknown, fields?: ContextRecord): void;
 
   timeout(): void;
 }
@@ -225,6 +240,18 @@ const createChronicleInstance = (
       callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
       hooks.onActivity?.();
     },
+    log(level, message, fields = {}) {
+      const payload: LogPayload = {
+        eventKey: '',
+        fields,
+        correlationId: currentCorrelationId(),
+        forkId,
+        metadata: contextStore.snapshot(),
+        timestamp: new Date().toISOString(),
+      };
+      callBackendMethod(config.backend, level, message, payload);
+      hooks.onActivity?.();
+    },
     addContext(context) {
       const validation = contextStore.add(context);
       emitContextValidationEvents(validation, (eventDef, fields) => this.event(eventDef, fields));
@@ -316,6 +343,19 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     this.timer.touch();
   }
 
+  log(level: LogLevel, message: string, fields: Record<string, unknown> = {}): void {
+    const payload: LogPayload = {
+      eventKey: '',
+      fields,
+      correlationId: this.currentCorrelationId(),
+      forkId: this.forkId,
+      metadata: this.contextStore.snapshot(),
+      timestamp: new Date().toISOString(),
+    };
+    callBackendMethod(this.config.backend, level, message, payload);
+    this.timer.touch();
+  }
+
   addContext(context: ContextRecord): void {
     const validation = this.contextStore.add(context);
     emitContextValidationEvents(validation, (eventDef, fields) => this.event(eventDef, fields));
@@ -373,6 +413,20 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.autoEvents.complete,
       { duration: Date.now() - this.startedAt, ...fields },
       overrides,
+      false,
+    );
+  }
+
+  fail(error?: unknown, fields: ContextRecord = {}): void {
+    if (!this.completed) {
+      this.activeCorrelations.count--;
+    }
+    this.completed = true;
+    this.timer.clear();
+    this.emitAutoEvent(
+      this.autoEvents.fail,
+      { duration: Date.now() - this.startedAt, error, ...fields },
+      undefined,
       false,
     );
   }

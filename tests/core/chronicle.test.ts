@@ -148,6 +148,42 @@ describe('context limits via config', () => {
   });
 });
 
+describe('log() escape hatch', () => {
+  it('logs without a pre-defined event', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: { app: 'test' } });
+
+    chronicle.log('info', 'hello world', { foo: 'bar' });
+
+    const payload = mock.getLastPayload();
+    expect(payload?.eventKey).toBe('');
+    expect(payload?.fields).toEqual({ foo: 'bar' });
+    expect(payload?.metadata.app).toBe('test');
+    expect(mock.findByLevel('info')).toBeDefined();
+  });
+
+  it('logs at different levels', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+    chronicle.log('error', 'something broke');
+    chronicle.log('debug', 'checking state');
+
+    expect(mock.findByLevel('error')).toBeDefined();
+    expect(mock.findByLevel('debug')).toBeDefined();
+  });
+
+  it('defaults fields to empty object', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+    chronicle.log('warn', 'watch out');
+
+    const payload = mock.getLastPayload();
+    expect(payload?.fields).toEqual({});
+  });
+});
+
 describe('createChronicleExtended', () => {
   it('verifies startCorrelation availability', () => {
     const mock = new MockLoggerBackend();

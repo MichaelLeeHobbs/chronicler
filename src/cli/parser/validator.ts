@@ -59,6 +59,19 @@ export function validateEvent(event: EventDefinition): ValidationError[] {
     });
   }
 
+  // Warn if doc is missing
+  if (!event.doc) {
+    errors.push({
+      type: 'missing-doc',
+      message: `Event "${event.key}" is missing a "doc" description`,
+      location: {
+        file: '<unknown>',
+        line: 0,
+        column: 0,
+      },
+    });
+  }
+
   // Validate reserved fields
   if (event.fields) {
     Object.keys(event.fields).forEach((fieldName) => {

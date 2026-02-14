@@ -35,6 +35,7 @@ export {
   type SystemEventGroup,
 } from './core/events';
 export {
+  field,
   type FieldBuilder,
   type InferFields,
   type InferFieldType,

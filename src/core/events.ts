@@ -17,7 +17,7 @@ export interface EventDefinition<
   readonly key: Key;
   readonly level: LogLevel;
   readonly message: string;
-  readonly doc: string;
+  readonly doc?: string;
   readonly fields?: Fields;
 }
 
@@ -39,7 +39,7 @@ export type EventRecord = Record<
 export interface SystemEventGroup {
   key: string;
   type: 'system';
-  doc: string;
+  doc?: string;
   events?: EventRecord;
   groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
 }
@@ -47,7 +47,7 @@ export interface SystemEventGroup {
 export interface CorrelationEventGroup {
   key: string;
   type: 'correlation';
-  doc: string;
+  doc?: string;
   timeout?: number;
   events?: EventRecord;
   groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
@@ -57,6 +57,10 @@ const correlationAutoFields = {
   start: {},
   complete: {
     duration: t.number().optional().doc('Duration of the correlation in milliseconds'),
+  },
+  fail: {
+    duration: t.number().optional().doc('Duration of the correlation in milliseconds'),
+    error: t.error().optional().doc('Error that caused the failure'),
   },
   timeout: {},
   metadataWarning: {
@@ -83,8 +87,11 @@ type WithAutoEvents<Event extends EventRecord | undefined> = (Event extends Even
   CorrelationAutoEvents;
 
 /**
- * Define an event with compile-time type safety
- * Use `as const` for full type inference
+ * Define an event with compile-time type safety.
+ *
+ * `as const` is **not required** — `defineEvent` uses TypeScript `const` generic
+ * parameters (TS 5.0+), so literal types and field builders are narrowed automatically.
+ * You may still add `as const` if you prefer, but it has no effect.
  *
  * @example
  * ```typescript
@@ -97,8 +104,8 @@ type WithAutoEvents<Event extends EventRecord | undefined> = (Event extends Even
  *     userId: t.string().doc('User ID'),
  *     email: t.string(),
  *     age: t.number().optional(),
- *   }
- * } as const);
+ *   },
+ * });
  * ```
  */
 export const defineEvent = <
@@ -117,9 +124,36 @@ export const defineEvent = <
  * @param group - Event group definition (system or correlation)
  * @returns The same group definition, typed for compile-time inference
  */
+/**
+ * Auto-prefix event keys in a group's events with `${groupKey}.${propertyName}`
+ * when the event's key doesn't already start with `${groupKey}.`.
+ * Existing fully-qualified keys pass through unchanged.
+ */
+const prefixEventKeys = (
+  groupKey: string,
+  events: EventRecord | undefined,
+): EventRecord | undefined => {
+  if (!events) return events;
+  const result: EventRecord = {};
+  for (const [name, event] of Object.entries(events)) {
+    if (event.key.startsWith(`${groupKey}.`)) {
+      result[name] = event;
+    } else {
+      result[name] = { ...event, key: `${groupKey}.${name}` };
+    }
+  }
+  return result;
+};
+
 export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEventGroup>(
   group: Group,
-): Group => group;
+): Group => {
+  const prefixed = prefixEventKeys(group.key, group.events);
+  if (prefixed !== group.events) {
+    return { ...group, events: prefixed } as Group;
+  }
+  return group;
+};
 
 const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
   start: {
@@ -134,6 +168,13 @@ const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
     message: `${groupKey} completed`,
     doc: 'Auto-generated correlation completion event',
     fields: correlationAutoFields.complete,
+  },
+  fail: {
+    key: `${groupKey}.fail`,
+    level: 'error',
+    message: `${groupKey} failed`,
+    doc: 'Auto-generated correlation failure event',
+    fields: correlationAutoFields.fail,
   },
   timeout: {
     key: `${groupKey}.timeout`,
@@ -160,6 +201,7 @@ const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
  * **Automatic events added:**
  * - `{key}.start` - Emitted when startCorrelation() is called
  * - `{key}.complete` - Emitted when complete() is called (includes duration)
+ * - `{key}.fail` - Emitted when fail() is called (includes duration and error)
  * - `{key}.timeout` - Emitted if no activity within timeout period
  * - `{key}.metadataWarning` - Emitted on context collisions (deprecated, see system events)
  *
@@ -214,12 +256,13 @@ export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
   timeout: number;
 } => {
   const autoEvents = buildAutoEvents(group.key);
+  const prefixed = prefixEventKeys(group.key, group.events) ?? {};
 
   return {
     ...group,
     timeout: group.timeout ?? DEFAULT_CORRELATION_TIMEOUT_MS,
     events: {
-      ...(group.events ?? {}),
+      ...prefixed,
       ...autoEvents,
     } as WithAutoEvents<Group['events']>,
   };
