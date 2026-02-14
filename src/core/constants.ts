@@ -1,5 +1,3 @@
-import * as os from 'node:os';
-
 /**
  * Global constants used throughout Chronicler
  */
@@ -51,11 +49,6 @@ export const ROOT_FORK_ID = '0';
  * @example '1.1', '1.2.3'
  */
 export const FORK_ID_SEPARATOR = '.';
-
-/**
- * Default hostname for correlation ID generation
- */
-export const DEFAULT_HOSTNAME = process.env.HOSTNAME ?? os.hostname() ?? 'unknown-host';
 
 /**
  * Default maximum number of context keys per ContextStore

@@ -97,7 +97,7 @@ function generateMarkdown(tree: ParsedEventTree): string {
  */
 function generateGroupMarkdown(group: ParsedEventGroup, level = 2): string[] {
   const lines: string[] = [];
-  const heading = '#'.repeat(level);
+  const heading = '#'.repeat(Math.min(level, 6));
 
   lines.push(`${heading} ${group.key}`);
   lines.push('');
@@ -151,7 +151,7 @@ function generateGroupMarkdown(group: ParsedEventGroup, level = 2): string[] {
  */
 function generateEventMarkdown(event: EventDefinition, level = 3): string[] {
   const lines: string[] = [];
-  const heading = '#'.repeat(level);
+  const heading = '#'.repeat(Math.min(level, 6));
 
   lines.push(`${heading} ${event.key}`);
   lines.push('');

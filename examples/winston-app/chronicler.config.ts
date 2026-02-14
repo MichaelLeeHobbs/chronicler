@@ -1,4 +1,4 @@
-import type { ChroniclerCliConfig } from 'chronicler';
+import type { ChroniclerCliConfig } from '@ubercode/chronicler';
 
 const config: ChroniclerCliConfig = {
   eventsFile: './src/events.ts',

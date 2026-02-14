@@ -237,18 +237,41 @@
 
 ## LOW
 
-- [ ] **L-1: `replace` without global flag in reserved field path parsing** (`reserved.ts:70,75`)
-- [ ] **L-2: `forkCounter` integer overflow at `Number.MAX_SAFE_INTEGER`** (`chronicle.ts:186`)
-- [ ] **L-3: Information leakage in metadata collision warnings** (`chronicle.ts:340-351`)
-- [ ] **L-4: Event keys not validated for format at runtime** (`events.ts:120-125`)
-- [ ] **L-5: `hostname` leaked in default correlation IDs** (`constants.ts:58`)
-- [ ] **L-6: Markdown heading level not bounded at 6** (`docs-generator.ts:88-90`)
-- [ ] **L-7: `DEFAULT_HOSTNAME` computed at module load time** (`constants.ts:58`)
-- [ ] **L-8: Example imports use `'chronicler'` instead of `'@ubercode/chronicler'`**
-- [ ] **L-9: Timing-sensitive perf tests are inherently flaky** (`perf.test.ts`)
-- [ ] **L-10: `ContextStore` exported in public API but is internal** (`index.ts:8`)
-- [ ] **L-11: Duplicated fork logic between `Chronicler` and `CorrelationChronicle`** (`chronicle.ts`)
-- [ ] **L-12: `backend.ts` re-exports constants creating dual import paths**
+- [x] **L-1: `replace` without global flag in reserved field path parsing** (`reserved.ts:70,75`)
+      N/A — no `.replace()` calls exist in `reserved.ts`. Already clean.
+
+- [x] **L-2: `forkCounter` integer overflow at `Number.MAX_SAFE_INTEGER`** (`chronicle.ts:186`)
+      Theoretical only — a single chronicle would need 9×10¹⁵ forks. Not actionable.
+
+- [x] **L-3: Information leakage in metadata collision warnings** (`chronicle.ts:340-351`)
+      Resolved in Y-6 — system events removed. Collision details are returned in `ContextValidationResult`, not logged.
+
+- [x] **L-4: Event keys not validated for format at runtime** (`events.ts:120-125`)
+      **Fix:** Added regex validation in `defineEvent()`. Keys must be dotted camelCase identifiers (e.g. `user.created`).
+
+- [x] **L-5: `hostname` leaked in default correlation IDs** (`constants.ts:58`)
+      Resolved in D-12 — default correlation IDs now use `crypto.randomUUID()`. Hostname is intentionally useful in logging metadata for scaled services; users can include it via `metadata` config if desired.
+
+- [x] **L-6: Markdown heading level not bounded at 6** (`docs-generator.ts:88-90`)
+      **Fix:** Capped `'#'.repeat()` to `Math.min(level, 6)` in both `generateGroupMarkdown` and `generateEventMarkdown`.
+
+- [x] **L-7: `DEFAULT_HOSTNAME` computed at module load time** (`constants.ts:58`)
+      **Fix:** Removed dead `DEFAULT_HOSTNAME` constant and `node:os` import. No longer used after D-12.
+
+- [x] **L-8: Example imports use `'chronicler'` instead of `'@ubercode/chronicler'`**
+      **Fix:** Updated 3 files in `examples/winston-app/` to use `@ubercode/chronicler`.
+
+- [x] **L-9: Timing-sensitive perf tests are inherently flaky** (`perf.test.ts`)
+      N/A — no perf test files exist in the test suite.
+
+- [x] **L-10: `ContextStore` exported in public API but is internal** (`index.ts:8`)
+      Intentional — `ContextStore` is useful for advanced consumers building custom chronicle wrappers or testing utilities. Keeping the export.
+
+- [x] **L-11: Duplicated fork logic between `Chronicler` and `CorrelationChronicle`** (`chronicle.ts`)
+      **Fix:** Extracted `nextForkId()` helper that handles fork ID generation and depth validation. Both `createChronicleInstance.fork()` and `CorrelationChronicleImpl.fork()` now delegate to it.
+
+- [x] **L-12: `backend.ts` re-exports constants creating dual import paths**
+      **Fix:** Removed `export { DEFAULT_REQUIRED_LEVELS, LOG_LEVELS }` re-export from `backend.ts`. All internal imports already use `constants.ts` directly.
 
 ---
 

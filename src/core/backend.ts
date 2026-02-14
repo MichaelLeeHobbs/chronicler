@@ -1,9 +1,6 @@
 import { DEFAULT_REQUIRED_LEVELS, LOG_LEVELS } from './constants';
 import { ChroniclerError } from './errors';
 
-// Re-export for public API
-export { DEFAULT_REQUIRED_LEVELS, LOG_LEVELS };
-
 type ConsoleMethod = 'error' | 'warn' | 'info' | 'debug';
 
 const CONSOLE_LEVEL_MAP: Record<LogLevel, ConsoleMethod> = {

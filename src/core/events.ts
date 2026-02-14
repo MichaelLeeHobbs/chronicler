@@ -103,12 +103,21 @@ type WithAutoEvents<Event extends EventRecord | undefined> = (Event extends Even
  * });
  * ```
  */
+const EVENT_KEY_RE = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/;
+
 export const defineEvent = <
   const Key extends string,
   const Fields extends Record<string, FieldBuilder<string, boolean>>,
 >(
   event: EventDefinition<Key, Fields>,
-): EventDefinition<Key, Fields> => event;
+): EventDefinition<Key, Fields> => {
+  if (!EVENT_KEY_RE.test(event.key)) {
+    throw new Error(
+      `Invalid event key "${event.key}". Keys must be dotted camelCase identifiers (e.g. "user.created", "http.request.started").`,
+    );
+  }
+  return event;
+};
 
 /**
  * Define a system or correlation event group for organizational purposes.

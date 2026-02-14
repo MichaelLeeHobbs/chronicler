@@ -5,7 +5,7 @@ const RESERVED_TOP_LEVEL_FIELDS = [
   'correlationId', // Used in Payload
   'forkId', // Used in Payload
   'timestamp', // Used in Payload
-  'hostname', // Used in correlationId generation
+  'hostname', // Commonly set by log infrastructure; reserved to prevent conflicts
   'fields', // Used in Payload
   '_validation', // Used in Payload
 ] as const;

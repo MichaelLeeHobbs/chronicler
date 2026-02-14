@@ -197,6 +197,21 @@ const buildPayload = (
 const forkDepthFromId = (forkId: string): number =>
   forkId === ROOT_FORK_ID ? 0 : forkId.split(FORK_ID_SEPARATOR).length;
 
+const nextForkId = (parentForkId: string, counter: number, maxDepth: number): string => {
+  const childForkId =
+    parentForkId === ROOT_FORK_ID
+      ? String(counter)
+      : `${parentForkId}${FORK_ID_SEPARATOR}${counter}`;
+  const depth = forkDepthFromId(childForkId);
+  if (depth > maxDepth) {
+    throw new ChroniclerError(
+      'FORK_DEPTH_EXCEEDED',
+      `Fork depth ${depth} exceeds maximum allowed depth of ${maxDepth}`,
+    );
+  }
+  return childForkId;
+};
+
 interface ChronicleHooks {
   onActivity?: () => void;
   onContextValidation?: (validation: ContextValidationResult) => void;
@@ -281,17 +296,7 @@ const createChronicleInstance = (
     },
     fork(extraContext = {}) {
       forkCounter++;
-      const childForkId =
-        forkId === ROOT_FORK_ID
-          ? String(forkCounter)
-          : `${forkId}${FORK_ID_SEPARATOR}${forkCounter}`;
-      const depth = forkDepthFromId(childForkId);
-      if (depth > config.limits.maxForkDepth) {
-        throw new ChroniclerError(
-          'FORK_DEPTH_EXCEEDED',
-          `Fork depth ${depth} exceeds maximum allowed depth of ${config.limits.maxForkDepth}`,
-        );
-      }
+      const childForkId = nextForkId(forkId, forkCounter, config.limits.maxForkDepth);
       const forkStore = new ContextStore(contextStore.snapshot(), config.limits.maxContextKeys);
       const forkChronicle = createChronicleInstance(
         config,
@@ -394,17 +399,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
 
   fork(extraContext: ContextRecord = {}): Chronicler {
     this.forkCounter++;
-    const childForkId =
-      this.forkId === ROOT_FORK_ID
-        ? String(this.forkCounter)
-        : `${this.forkId}${FORK_ID_SEPARATOR}${this.forkCounter}`;
-    const depth = forkDepthFromId(childForkId);
-    if (depth > this.config.limits.maxForkDepth) {
-      throw new ChroniclerError(
-        'FORK_DEPTH_EXCEEDED',
-        `Fork depth ${depth} exceeds maximum allowed depth of ${this.config.limits.maxForkDepth}`,
-      );
-    }
+    const childForkId = nextForkId(this.forkId, this.forkCounter, this.config.limits.maxForkDepth);
     const forkStore = new ContextStore(
       this.contextStore.snapshot(),
       this.config.limits.maxContextKeys,

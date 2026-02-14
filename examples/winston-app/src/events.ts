@@ -1,4 +1,4 @@
-import { defineCorrelationGroup, defineEvent, defineEventGroup, t } from 'chronicler';
+import { defineCorrelationGroup, defineEvent, defineEventGroup, t } from '@ubercode/chronicler';
 
 /**
  * System lifecycle events
