@@ -1,5 +1,3 @@
-import * as os from 'node:os';
-
 /**
  * Global constants used throughout Chronicler
  */
@@ -53,18 +51,16 @@ export const ROOT_FORK_ID = '0';
 export const FORK_ID_SEPARATOR = '.';
 
 /**
- * Default hostname for correlation ID generation
+ * Default maximum number of context keys per ContextStore
  */
-export const DEFAULT_HOSTNAME = process.env.HOSTNAME ?? os.hostname() ?? 'unknown-host';
+export const DEFAULT_MAX_CONTEXT_KEYS = 100;
 
 /**
- * Reserved prefix for Chronicler system events
- * User events cannot start with this prefix
+ * Default maximum fork nesting depth
  */
-export const SYSTEM_EVENT_PREFIX = 'chronicler.';
+export const DEFAULT_MAX_FORK_DEPTH = 10;
 
 /**
- * Conversion factor from microseconds to milliseconds
- * Used for CPU usage calculations
+ * Default maximum number of active (uncompleted) correlations
  */
-export const MICROSECONDS_TO_MS = 1000;
+export const DEFAULT_MAX_ACTIVE_CORRELATIONS = 1000;

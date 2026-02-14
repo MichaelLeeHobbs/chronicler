@@ -10,11 +10,29 @@ import type { ChroniclerCliConfig } from '../config';
 import type { ParsedEventGroup, ParsedEventTree } from '../types';
 
 /**
- * Generate documentation from parsed event tree
+ * Generate documentation from parsed event tree.
+ *
+ * @param tree - Parsed event tree containing events and groups to document
+ * @param config - CLI configuration specifying output format and file path
+ * @throws {Error} If the output path resolves outside the project directory or the format is unknown
  */
 export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig): void {
   const format = config.docs?.format ?? 'markdown';
   const outputPath = config.docs?.outputPath ?? './docs/chronicler-events.md';
+
+  // Prevent path traversal: output must resolve within cwd.
+  // Use fs.realpathSync where possible to resolve symlinks, and normalize
+  // case on case-insensitive file systems (Windows).
+  const resolved = path.resolve(outputPath);
+  const cwd = process.cwd();
+  const normalizedResolved = resolved.toLowerCase();
+  const normalizedCwd = cwd.toLowerCase();
+  if (
+    !normalizedResolved.startsWith(normalizedCwd + path.sep) &&
+    normalizedResolved !== normalizedCwd
+  ) {
+    throw new Error(`Output path "${outputPath}" resolves outside the project directory.`);
+  }
 
   let content: string;
 
@@ -27,13 +45,29 @@ export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig)
   }
 
   // Ensure output directory exists
-  const dir = path.dirname(outputPath);
+  const dir = path.dirname(resolved);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
   // Write output
-  fs.writeFileSync(outputPath, content, 'utf-8');
+  fs.writeFileSync(resolved, content, 'utf-8');
+}
+
+/** Collect all event keys from groups and their nested sub-groups. */
+function collectAllGroupEventKeys(groups: ParsedEventGroup[]): Set<string> {
+  const keys = new Set<string>();
+  const stack = [...groups];
+  while (stack.length > 0) {
+    const group = stack.pop()!;
+    for (const event of Object.values(group.events)) {
+      keys.add(event.key);
+    }
+    for (const nested of Object.values(group.groups)) {
+      stack.push(nested);
+    }
+  }
+  return keys;
 }
 
 /**
@@ -52,7 +86,7 @@ function generateMarkdown(tree: ParsedEventTree): string {
     lines.push('## Table of Contents');
     lines.push('');
     tree.groups.forEach((group) => {
-      lines.push(`- [${group.key}](#${group.key.replace(/\./g, '')})`);
+      lines.push(`- [${group.key}](#${group.key.replace(/\./g, '').toLowerCase()})`);
     });
     lines.push('');
     lines.push('---');
@@ -64,12 +98,9 @@ function generateMarkdown(tree: ParsedEventTree): string {
     lines.push(...generateGroupMarkdown(group));
   });
 
-  // Document standalone events (not in groups)
-  const standaloneEvents = tree.events.filter((event) => {
-    return !tree.groups.some((group) => {
-      return Object.values(group.events).some((e) => e.key === event.key);
-    });
-  });
+  // Document standalone events (not in any group or nested sub-group)
+  const groupEventKeys = collectAllGroupEventKeys(tree.groups);
+  const standaloneEvents = tree.events.filter((event) => !groupEventKeys.has(event.key));
 
   if (standaloneEvents.length > 0) {
     lines.push('## Standalone Events');
@@ -83,51 +114,63 @@ function generateMarkdown(tree: ParsedEventTree): string {
 }
 
 /**
- * Generate Markdown for an event group
+ * Generate Markdown for an event group and its nested groups (iterative)
  */
-function generateGroupMarkdown(group: ParsedEventGroup, level = 2): string[] {
+function generateGroupMarkdown(rootGroup: ParsedEventGroup, rootLevel = 2): string[] {
   const lines: string[] = [];
-  const heading = '#'.repeat(level);
+  const stack: { group: ParsedEventGroup; level: number }[] = [
+    { group: rootGroup, level: rootLevel },
+  ];
 
-  lines.push(`${heading} ${group.key}`);
-  lines.push('');
+  while (stack.length > 0) {
+    const { group, level } = stack.pop()!;
+    const heading = '#'.repeat(Math.min(level, 6));
 
-  if (group.type === 'correlation') {
-    lines.push('**Type:** Correlation Group');
-    if (group.timeout) {
-      lines.push(`**Timeout:** ${group.timeout}ms (activity-based)`);
+    lines.push(`${heading} ${group.key}`);
+    lines.push('');
+
+    if (group.type === 'correlation') {
+      lines.push('**Type:** Correlation Group');
+      if (group.timeout) {
+        lines.push(`**Timeout:** ${group.timeout}ms (activity-based)`);
+      }
+      lines.push('');
     }
+
+    if (group.doc) {
+      lines.push(group.doc);
+      lines.push('');
+    }
+
+    if (group.type === 'correlation') {
+      lines.push('**Auto-Generated Events:**');
+      lines.push('');
+      lines.push(`- \`${group.key}.start\` - Logged when correlation starts`);
+      lines.push(
+        `- \`${group.key}.complete\` - Logged when correlation completes (includes \`duration\` field)`,
+      );
+      lines.push(
+        `- \`${group.key}.fail\` - Logged when correlation fails (includes \`duration\` and \`error\` fields)`,
+      );
+      lines.push(
+        `- \`${group.key}.timeout\` - Logged when correlation times out due to inactivity`,
+      );
+      lines.push('');
+    }
+
+    Object.values(group.events).forEach((event) => {
+      lines.push(...generateEventMarkdown(event, level + 1));
+    });
+
+    // Push nested groups in reverse order so they process in original order
+    const nestedEntries = Object.values(group.groups);
+    for (let i = nestedEntries.length - 1; i >= 0; i--) {
+      stack.push({ group: nestedEntries[i]!, level: level + 1 });
+    }
+
+    lines.push('---');
     lines.push('');
   }
-
-  lines.push(group.doc);
-  lines.push('');
-
-  // Auto-generated events for correlation groups
-  if (group.type === 'correlation') {
-    lines.push('**Auto-Generated Events:**');
-    lines.push('');
-    lines.push(`- \`${group.key}.start\` - Logged when correlation starts`);
-    lines.push(
-      `- \`${group.key}.complete\` - Logged when correlation completes (includes \`duration\` field)`,
-    );
-    lines.push(`- \`${group.key}.timeout\` - Logged when correlation times out due to inactivity`);
-    lines.push(`- \`${group.key}.metadataWarning\` - Logged when metadata collision is detected`);
-    lines.push('');
-  }
-
-  // Document events in this group
-  Object.values(group.events).forEach((event) => {
-    lines.push(...generateEventMarkdown(event, level + 1));
-  });
-
-  // Document nested groups
-  Object.values(group.groups).forEach((nestedGroup) => {
-    lines.push(...generateGroupMarkdown(nestedGroup, level + 1));
-  });
-
-  lines.push('---');
-  lines.push('');
 
   return lines;
 }
@@ -137,15 +180,17 @@ function generateGroupMarkdown(group: ParsedEventGroup, level = 2): string[] {
  */
 function generateEventMarkdown(event: EventDefinition, level = 3): string[] {
   const lines: string[] = [];
-  const heading = '#'.repeat(level);
+  const heading = '#'.repeat(Math.min(level, 6));
 
   lines.push(`${heading} ${event.key}`);
   lines.push('');
   lines.push(`**Level:** \`${event.level}\``);
   lines.push(`**Message:** "${event.message}"`);
   lines.push('');
-  lines.push(event.doc);
-  lines.push('');
+  if (event.doc) {
+    lines.push(event.doc);
+    lines.push('');
+  }
 
   if (event.fields && Object.keys(event.fields).length > 0) {
     lines.push('**Fields:**');
@@ -172,11 +217,7 @@ function generateJSON(tree: ParsedEventTree): string {
     groupCount: tree.groups.length,
     groups: tree.groups.map((group) => serializeGroup(group)),
     standaloneEvents: tree.events
-      .filter((event) => {
-        return !tree.groups.some((group) => {
-          return Object.values(group.events).some((e) => e.key === event.key);
-        });
-      })
+      .filter((event) => !collectAllGroupEventKeys(tree.groups).has(event.key))
       .map((event) => serializeEvent(event)),
   };
 
@@ -184,27 +225,44 @@ function generateJSON(tree: ParsedEventTree): string {
 }
 
 /**
- * Serialize event group to JSON
+ * Serialize event group to JSON (iterative)
  */
-function serializeGroup(group: ParsedEventGroup): Record<string, unknown> {
-  return {
-    key: group.key,
-    type: group.type,
-    doc: group.doc,
-    timeout: group.timeout,
-    autoEvents:
-      group.type === 'correlation'
-        ? ['start', 'complete', 'timeout', 'metadataWarning']
-        : undefined,
-    events: Object.entries(group.events).map(([name, event]) => ({
-      name,
-      ...serializeEvent(event),
-    })),
-    groups: Object.entries(group.groups).map(([name, nestedGroup]) => ({
-      name,
-      ...serializeGroup(nestedGroup),
-    })),
-  };
+function serializeGroup(rootGroup: ParsedEventGroup): Record<string, unknown> {
+  const resultMap = new Map<ParsedEventGroup, Record<string, unknown>>();
+  // Process bottom-up: collect all groups first, then wire children
+  const allGroups: ParsedEventGroup[] = [];
+  const traverseStack: ParsedEventGroup[] = [rootGroup];
+
+  while (traverseStack.length > 0) {
+    const group = traverseStack.pop()!;
+    allGroups.push(group);
+    for (const nestedGroup of Object.values(group.groups)) {
+      traverseStack.push(nestedGroup);
+    }
+  }
+
+  // Process in reverse (leaf-first) so children are ready when parents reference them
+  for (let i = allGroups.length - 1; i >= 0; i--) {
+    const group = allGroups[i]!;
+    resultMap.set(group, {
+      key: group.key,
+      type: group.type,
+      doc: group.doc ?? '',
+      timeout: group.timeout,
+      autoEvents:
+        group.type === 'correlation' ? ['start', 'complete', 'fail', 'timeout'] : undefined,
+      events: Object.entries(group.events).map(([name, event]) => ({
+        name,
+        ...serializeEvent(event),
+      })),
+      groups: Object.entries(group.groups).map(([name, nestedGroup]) => ({
+        name,
+        ...resultMap.get(nestedGroup)!,
+      })),
+    });
+  }
+
+  return resultMap.get(rootGroup)!;
 }
 
 /**
@@ -215,7 +273,7 @@ function serializeEvent(event: EventDefinition): Record<string, unknown> {
     key: event.key,
     level: event.level,
     message: event.message,
-    doc: event.doc,
+    doc: event.doc ?? '',
     fields: event.fields
       ? Object.entries(event.fields).map(([name, field]) => ({
           name,

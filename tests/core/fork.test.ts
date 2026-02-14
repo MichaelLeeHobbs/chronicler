@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createChronicle } from '../../src/core/chronicle';
+import { ChroniclerError } from '../../src/core/errors';
 import { defineCorrelationGroup, defineEvent } from '../../src/core/events';
 import { t } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
@@ -248,6 +249,24 @@ describe('Fork System', () => {
       expect(payloads[1]!.correlationId).toBe(correlationId);
       expect(payloads[2]!.correlationId).toBe(correlationId);
     });
+
+    it('fork from correlation with extra context does not emit contextCollision', () => {
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+      const correlation = chronicle.startCorrelation(correlationGroup, { workflowId: 'wf1' });
+      const fork = correlation.fork({ parallelTask: 'task1' });
+
+      fork.event(sampleEvent, { taskId: 'test' });
+
+      // No collisions since extraContext keys are new
+
+      // Fork should have both correlation context and extra context
+      expect(mock.getLastPayload()?.metadata).toMatchObject({
+        workflowId: 'wf1',
+        parallelTask: 'task1',
+      });
+    });
   });
 
   describe('5.4 Fork Deep Nesting', () => {
@@ -274,20 +293,62 @@ describe('Fork System', () => {
     });
   });
 
+  describe('Fork depth limits', () => {
+    it('throws ChroniclerError at configured limit', () => {
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({
+        backend: mock.backend,
+        metadata: {},
+        limits: { maxForkDepth: 2 },
+      });
+
+      const fork1 = chronicle.fork();
+      const fork1_1 = fork1.fork(); // depth 2
+
+      expect(() => fork1_1.fork()).toThrow(ChroniclerError);
+    });
+
+    it('allows forks within default depth limit', () => {
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+      let current = chronicle;
+      // Default limit is 10, create 10 levels
+      for (let i = 0; i < 10; i++) {
+        current = current.fork();
+      }
+
+      // Should work fine
+      current.event(sampleEvent, { taskId: 'deep' });
+      expect(mock.getLastPayload()?.forkId).toBeDefined();
+    });
+
+    it('throws from correlation fork too', () => {
+      const mock = new MockLoggerBackend();
+      const chronicle = createChronicle({
+        backend: mock.backend,
+        metadata: {},
+        limits: { maxForkDepth: 1 },
+      });
+
+      const correlation = chronicle.startCorrelation(correlationGroup);
+      const fork = correlation.fork(); // depth 1
+
+      expect(() => fork.fork()).toThrow(ChroniclerError);
+    });
+  });
+
   describe('5.5 Context Collision in Forks', () => {
-    it('tracks context collisions in forks', () => {
+    it('returns collision info from addContext in forks', () => {
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       const fork = chronicle.fork({ userId: '123' });
-      fork.addContext({ userId: '456' }); // Collision
+      const result = fork.addContext({ userId: '456' }); // Collision
 
-      // Check that chronicler.contextCollision event was emitted
-      const collisionEvent = mock.findByKey('chronicler.contextCollision');
-      expect(collisionEvent).toBeDefined();
-      expect(collisionEvent?.fields.keys).toBe('userId');
-      expect(collisionEvent?.fields.count).toBe(1);
-      expect(collisionEvent?.metadata.userId).toBe('123'); // Original preserved
+      expect(result.collisions).toEqual(['userId']);
+      expect(result.collisionDetails).toHaveLength(1);
+      expect(result.collisionDetails[0]?.key).toBe('userId');
     });
   });
 });

@@ -30,6 +30,9 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "chronicler": "./dist/cli.js"
+  },
   "files": [
     "dist"
   ],
@@ -74,25 +77,24 @@
     "access": "public"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.7",
-    "@types/node": "^24.10.1",
-    "@typescript-eslint/eslint-plugin": "^8.46.4",
-    "@typescript-eslint/parser": "^8.46.4",
-    "@vitest/coverage-c8": "^0.33.0",
+    "@changesets/cli": "2.29.7",
+    "@types/node": "24.10.1",
+    "@typescript-eslint/eslint-plugin": "8.46.4",
+    "@typescript-eslint/parser": "8.46.4",
     "@vitest/coverage-v8": "4.0.9",
-    "eslint": "^9.39.1",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-import-resolver-typescript": "^4.4.4",
-    "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-simple-import-sort": "^12.1.1",
-    "husky": "^9.1.7",
-    "lint-staged": "^16.2.6",
-    "prettier": "^3.6.2",
-    "rimraf": "^6.1.0",
-    "tsup": "^8.5.1",
-    "tsx": "^4.20.6",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.9"
+    "eslint": "9.39.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-import-resolver-typescript": "4.4.4",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-simple-import-sort": "12.1.1",
+    "husky": "9.1.7",
+    "lint-staged": "16.2.6",
+    "prettier": "3.6.2",
+    "rimraf": "6.1.0",
+    "tsup": "8.5.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vitest": "4.0.9"
   },
   "dependencies": {
     "commander": "14.0.2",

@@ -1,17 +1,23 @@
 export { ChroniclerCliConfig } from './cli/config';
-export { type LogBackend } from './core/backend';
-export { type Chronicler, type CorrelationChronicle, createChronicle } from './core/chronicle';
+export {
+  createBackend,
+  createConsoleBackend,
+  type LogBackend,
+  type LogPayload,
+} from './core/backend';
+export {
+  type Chronicler,
+  type ChroniclerConfig,
+  type ChroniclerLimits,
+  type CorrelationChronicle,
+  createChronicle,
+} from './core/chronicle';
 export {
   type ContextRecord,
   ContextStore,
   type ContextValidationResult,
-} from './core/ContextStore';
-export {
-  BackendMethodError,
-  InvalidConfigError,
-  ReservedFieldError,
-  UnsupportedLogLevelError,
-} from './core/errors';
+} from './core/context-store';
+export { ChroniclerError, type ChroniclerErrorCode } from './core/errors';
 export {
   type CorrelationEventGroup,
   defineCorrelationGroup,
@@ -23,15 +29,11 @@ export {
   type SystemEventGroup,
 } from './core/events';
 export {
+  field,
   type FieldBuilder,
-  // Legacy exports (deprecated)
-  type FieldDefinition,
-  type FieldDefinitions,
-  type FieldType,
   type InferFields,
   type InferFieldType,
   type OptionalFieldBuilder,
   type RequiredFieldBuilder,
   t,
 } from './core/fields';
-export { chroniclerSystemEvents } from './core/system-events';

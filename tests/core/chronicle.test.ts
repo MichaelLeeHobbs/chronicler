@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Chronicler } from '../../src/core/chronicle';
 import { createChronicle } from '../../src/core/chronicle';
@@ -27,6 +27,16 @@ const errorEvent = defineEvent({
 } as const);
 
 describe('createChronicle', () => {
+  it('works without a backend (uses default console backend)', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(vi.fn());
+    const chronicle = createChronicle({ metadata: {} });
+
+    chronicle.event(sampleEvent, { port: 3000 });
+
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    infoSpy.mockRestore();
+  });
+
   it('throws if backend missing levels', () => {
     const mock = new MockLoggerBackend();
 
@@ -34,7 +44,7 @@ describe('createChronicle', () => {
     delete mock.backend.error; // Remove error method
 
     expect(() => createChronicle({ backend: mock.backend, metadata: {} })).toThrow(
-      'Log backend does not support level: error',
+      'Log backend is missing level(s): error',
     );
   });
 
@@ -96,40 +106,16 @@ describe('createChronicle', () => {
     expect(payload?.fields.error as string).toContain('failure');
   });
 
-  it('emits system event for context collisions', () => {
+  it('returns collision info from addContext', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
     chronicle.addContext({ userId: '123' });
-    chronicle.addContext({ userId: '456' }); // Collision
+    const result = chronicle.addContext({ userId: '456' }); // Collision
 
-    // Check that chronicler.contextCollision event was emitted
-    const collisionEvent = mock.findByKey('chronicler.contextCollision');
-    expect(collisionEvent).toBeDefined();
-    expect(collisionEvent?.fields.keys).toBe('userId');
-    expect(collisionEvent?.fields.count).toBe(1);
-  });
-
-  it('attaches perf metrics when monitoring enabled', () => {
-    const mock = new MockLoggerBackend();
-    const chronicle = createChronicle({
-      backend: mock.backend,
-      metadata: {},
-      monitoring: { memory: true },
-    });
-
-    chronicle.event(sampleEvent, { port: 3000 });
-
-    const payload = mock.getLastPayload();
-    const perf = payload?._perf;
-    expect(perf).toBeDefined();
-    if (!perf) {
-      throw new Error('Expected perf sample when monitoring enabled');
-    }
-    expect(typeof perf.heapUsed).toBe('number');
-    expect(typeof perf.heapTotal).toBe('number');
-    expect(typeof perf.external).toBe('number');
-    expect(typeof perf.rss).toBe('number');
+    expect(result.collisions).toEqual(['userId']);
+    expect(result.collisionDetails).toHaveLength(1);
+    expect(result.collisionDetails[0]?.key).toBe('userId');
   });
 });
 
@@ -143,6 +129,102 @@ const createChronicleInstance = (
   });
 };
 
+describe('context limits via config', () => {
+  it('returns dropped keys when context keys exceed maxContextKeys', () => {
+    const chronicle = createChronicle({
+      backend: new MockLoggerBackend().backend,
+      metadata: {},
+      limits: { maxContextKeys: 2 },
+    });
+
+    const result = chronicle.addContext({ a: '1', b: '2', c: '3' });
+
+    expect(result.dropped).toHaveLength(1);
+  });
+});
+
+describe('sanitizeStrings option', () => {
+  it('strips ANSI escapes and replaces newlines when enabled', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      sanitizeStrings: true,
+    });
+
+    const event = defineEvent({
+      key: 'test.sanitize',
+      level: 'info',
+      message: 'test',
+      doc: 'test',
+      fields: { name: t.string() },
+    } as const);
+
+    chronicle.event(event, { name: '\x1b[31mred\x1b[0m\nline2' });
+
+    const payload = mock.getLastPayload();
+    expect(payload?.fields.name).toBe('red\\nline2');
+  });
+
+  it('does not sanitize when option is explicitly off', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      sanitizeStrings: false,
+    });
+
+    const event = defineEvent({
+      key: 'test.nosanit',
+      level: 'info',
+      message: 'test',
+      doc: 'test',
+      fields: { name: t.string() },
+    } as const);
+
+    chronicle.event(event, { name: 'hello\nworld' });
+
+    const payload = mock.getLastPayload();
+    expect(payload?.fields.name).toBe('hello\nworld');
+  });
+});
+
+describe('log() escape hatch', () => {
+  it('logs without a pre-defined event', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: { app: 'test' } });
+
+    chronicle.log('info', 'hello world', { foo: 'bar' });
+
+    const payload = mock.getLastPayload();
+    expect(payload?.eventKey).toBe('');
+    expect(payload?.fields).toEqual({ foo: 'bar' });
+    expect(payload?.metadata.app).toBe('test');
+    expect(mock.findByLevel('info')).toBeDefined();
+  });
+
+  it('logs at different levels', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+    chronicle.log('error', 'something broke');
+    chronicle.log('debug', 'checking state');
+
+    expect(mock.findByLevel('error')).toBeDefined();
+    expect(mock.findByLevel('debug')).toBeDefined();
+  });
+
+  it('defaults fields to empty object', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+    chronicle.log('warn', 'watch out');
+
+    const payload = mock.getLastPayload();
+    expect(payload?.fields).toEqual({});
+  });
+});
+
 describe('createChronicleExtended', () => {
   it('verifies startCorrelation availability', () => {
     const mock = new MockLoggerBackend();
@@ -150,5 +232,115 @@ describe('createChronicleExtended', () => {
 
     expect(mock.backend.info).toBeDefined();
     expect(typeof chronicle.startCorrelation).toBe('function');
+  });
+});
+
+describe('strict mode', () => {
+  it('emits console.warn on missing required fields', () => {
+    const mock = new MockLoggerBackend();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(vi.fn());
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      strict: true,
+    });
+
+    chronicle.event(sampleEvent, {} as never);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('missing required fields: port'));
+    warnSpy.mockRestore();
+  });
+
+  it('emits console.warn on type mismatches', () => {
+    const mock = new MockLoggerBackend();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(vi.fn());
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      strict: true,
+    });
+
+    chronicle.event(sampleEvent, { port: 'not-a-number' } as never);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('type errors'));
+    warnSpy.mockRestore();
+  });
+
+  it('does not warn when strict is off (default)', () => {
+    const mock = new MockLoggerBackend();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(vi.fn());
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+    });
+
+    chronicle.event(sampleEvent, {} as never);
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
+describe('minLevel filtering', () => {
+  it('drops events below minLevel', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      minLevel: 'warn',
+    });
+
+    const debugEvent = defineEvent({
+      key: 'test.debug',
+      level: 'debug',
+      message: 'debug msg',
+      doc: 'test',
+      fields: {},
+    } as const);
+
+    chronicle.event(debugEvent, {});
+
+    expect(mock.getPayloads()).toHaveLength(0);
+  });
+
+  it('allows events at or above minLevel', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      minLevel: 'warn',
+    });
+
+    chronicle.event(errorEvent, { error: 'fail' });
+
+    expect(mock.getPayloads()).toHaveLength(1);
+  });
+
+  it('filters log() calls below minLevel', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      minLevel: 'error',
+    });
+
+    chronicle.log('info', 'this should be dropped');
+    chronicle.log('error', 'this should pass');
+
+    expect(mock.getPayloads()).toHaveLength(1);
+    expect(mock.findByLevel('error')).toBeDefined();
+  });
+
+  it('defaults to trace (all events pass)', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+    });
+
+    chronicle.log('trace', 'most verbose');
+    chronicle.log('debug', 'verbose');
+
+    expect(mock.getPayloads()).toHaveLength(2);
   });
 });

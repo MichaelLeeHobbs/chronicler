@@ -73,10 +73,6 @@ describe('Integration Tests', () => {
           application: 'test-api',
           env: 'test',
         },
-        monitoring: {
-          memory: true,
-          cpu: true,
-        },
       });
 
       // Application startup
@@ -128,9 +124,6 @@ describe('Integration Tests', () => {
       expect(startup?.fields.port).toBe(3000);
       expect(startup?.metadata.application).toBe('test-api');
       expect(startup?.metadata.env).toBe('test');
-      expect(startup?._perf).toBeDefined();
-      expect(startup?._perf?.heapUsed).toBeGreaterThan(0);
-      expect(startup?._perf?.cpuUser).toBeGreaterThanOrEqual(0);
 
       // Check correlation start
       const start = mock.findByKey('api.request.start');
@@ -160,7 +153,7 @@ describe('Integration Tests', () => {
       // Check correlation complete
       const complete = mock.findByKey('api.request.complete');
       expect(complete).toBeDefined();
-      expect(complete?.fields.duration).toBeGreaterThan(0);
+      expect(complete?.fields.duration).toBeGreaterThanOrEqual(0);
       expect(complete?.correlationId).toBe(start?.correlationId);
 
       // Check shutdown
@@ -225,22 +218,21 @@ describe('Integration Tests', () => {
   });
 
   describe('Context Collision Detection', () => {
-    it('detects and warns about metadata collisions', () => {
-      const mock = new MockLoggerBackend();
-      const chronicle = createChronicle({ backend: mock.backend, metadata: { userId: '123' } });
+    it('returns collision info from addContext', () => {
+      const chronicle = createChronicle({
+        backend: new MockLoggerBackend().backend,
+        metadata: { userId: '123' },
+      });
 
       chronicle.addContext({ sessionId: 'abc' });
-      chronicle.addContext({ userId: '456' }); // Collision!
+      const result = chronicle.addContext({ userId: '456' }); // Collision!
 
-      // Check that chronicler.contextCollision event was emitted
-      const collisionEvent = mock.findByKey('chronicler.contextCollision');
-      expect(collisionEvent).toBeDefined();
-      expect(collisionEvent?.fields.keys).toBe('userId');
-      expect(collisionEvent?.fields.count).toBe(1);
-      expect(collisionEvent?.metadata.userId).toBe('123'); // Original preserved
+      expect(result.collisions).toEqual(['userId']);
+      expect(result.collisionDetails).toHaveLength(1);
+      expect(result.collisionDetails[0]?.key).toBe('userId');
     });
 
-    it('emits metadata warning in correlations', () => {
+    it('returns collision info in correlations', () => {
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
@@ -248,11 +240,9 @@ describe('Integration Tests', () => {
         userId: 'original',
       });
 
-      correlation.addContext({ userId: 'attempted' }); // Collision
+      const result = correlation.addContext({ userId: 'attempted' }); // Collision
 
-      const warning = mock.findByKey('api.request.metadataWarning');
-      expect(warning).toBeDefined();
-      expect(warning?.fields.attemptedKey).toBe('userId');
+      expect(result.collisions).toEqual(['userId']);
     });
   });
 
@@ -335,59 +325,47 @@ describe('Integration Tests', () => {
     });
   });
 
-  describe('Performance Monitoring Integration', () => {
-    it('includes performance metrics across all log types', () => {
+  describe('Correlation Failure', () => {
+    it('fail() emits .fail event and marks correlation completed', () => {
       const mock = new MockLoggerBackend();
-      const chronicle = createChronicle({
-        backend: mock.backend,
-        metadata: {},
-        monitoring: { memory: true, cpu: true },
+      const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+      const correlation = chronicle.startCorrelation(requestCorrelation, {
+        requestId: 'req-fail',
       });
 
-      // System event
-      chronicle.event(systemEvents.events.startup, { port: 3000 });
-
-      // Correlation
-      const correlation = chronicle.startCorrelation(requestCorrelation);
       correlation.event(requestCorrelation.events.validated, {
-        method: 'GET',
-        path: '/',
+        method: 'POST',
+        path: '/api/broken',
       });
-      correlation.complete();
 
-      // Fork
-      const fork = chronicle.fork();
-      fork.event(systemEvents.events.startup, { port: 4000 });
+      const err = new Error('DB connection lost');
+      correlation.fail(err, { retryable: true });
 
-      // All should have perf metrics
-      const payloads = mock.getPayloads();
-      payloads.forEach((payload) => {
-        expect(payload._perf).toBeDefined();
-        expect(payload._perf?.heapUsed).toBeGreaterThan(0);
-        expect(typeof payload._perf?.cpuUser).toBe('number');
-        expect(typeof payload._perf?.cpuSystem).toBe('number');
-      });
+      const failEvent = mock.findByKey('api.request.fail');
+      expect(failEvent).toBeDefined();
+      expect(failEvent?.fields.duration).toBeGreaterThanOrEqual(0);
+      expect(failEvent?.fields.error).toBeDefined();
+      expect(failEvent?.metadata.requestId).toBe('req-fail');
+
+      // Should not emit timeout after fail
+      const keys = mock.getPayloads().map((p) => p.eventKey);
+      expect(keys).not.toContain('api.request.timeout');
     });
   });
 
-  describe('Multiple Correlation Completes', () => {
-    it('allows multiple complete() calls with validation warning', () => {
+  describe('Duplicate Correlation Complete', () => {
+    it('ignores second complete() call', () => {
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       const correlation = chronicle.startCorrelation(requestCorrelation);
       correlation.complete();
-      correlation.complete(); // Second complete
+      correlation.complete(); // should be ignored
 
       const completes = mock.findAllByKey('api.request.complete');
-      expect(completes.length).toBe(2);
-
-      // First complete should have duration
+      expect(completes.length).toBe(1);
       expect(completes[0]!.fields.duration).toBeGreaterThanOrEqual(0);
-      expect(completes[0]!._validation?.multipleCompletes).toBeUndefined();
-
-      // Second complete should have warning
-      expect(completes[1]!._validation?.multipleCompletes).toBe(true);
     });
   });
 

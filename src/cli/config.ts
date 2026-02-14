@@ -7,40 +7,23 @@ export interface ChroniclerCliConfig {
    * Path to the file containing event definitions
    * Relative to project root
    */
-  eventsFile: string;
+  readonly eventsFile: string;
 
   /**
    * Documentation generation options
    */
-  docs?: {
+  readonly docs?: {
     /**
      * Output path for generated documentation
      * @default './docs/chronicler-events.md'
      */
-    outputPath?: string;
+    readonly outputPath?: string;
 
     /**
      * Documentation format
      * @default 'markdown'
      */
-    format?: 'markdown' | 'json';
-  };
-
-  /**
-   * Validation options
-   */
-  validation?: {
-    /**
-     * Enforce that event keys match their hierarchy path
-     * @default true
-     */
-    enforceKeyPaths?: boolean;
-
-    /**
-     * Check for usage of reserved field names
-     * @default true
-     */
-    checkReservedFields?: boolean;
+    readonly format?: 'markdown' | 'json';
   };
 }
 
@@ -49,9 +32,5 @@ export const DEFAULT_CLI_CONFIG: Required<ChroniclerCliConfig> = {
   docs: {
     outputPath: './docs/chronicler-events.md',
     format: 'markdown',
-  },
-  validation: {
-    enforceKeyPaths: true,
-    checkReservedFields: true,
   },
 };

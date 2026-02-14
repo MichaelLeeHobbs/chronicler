@@ -2,7 +2,7 @@
  * Chronicler instances for different log streams
  */
 
-import { createChronicle } from 'chronicler';
+import { createChronicle } from '@ubercode/chronicler';
 
 import { config } from '../config/index.js';
 import { loggerAudit, loggerHttp, loggerMain } from './logger.js';

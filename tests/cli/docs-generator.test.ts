@@ -127,7 +127,6 @@ describe('Documentation Generator', () => {
       expect(content).toContain('`api.request.start`');
       expect(content).toContain('`api.request.complete`');
       expect(content).toContain('`api.request.timeout`');
-      expect(content).toContain('`api.request.metadataWarning`');
     });
   });
 
@@ -191,6 +190,22 @@ describe('Documentation Generator', () => {
       expect(event.fields[0]!.name).toBe('port');
       expect(event.fields[0]!.type).toBe('number');
       expect(event.fields[0]!.required).toBe(true);
+    });
+  });
+
+  describe('Path Traversal Prevention', () => {
+    it('rejects output paths that escape the project directory', () => {
+      const config: ChroniclerCliConfig = {
+        eventsFile: './test.ts',
+        docs: {
+          format: 'markdown',
+          outputPath: '../../../etc/cron.d/exploit',
+        },
+      };
+
+      expect(() => generateDocs(sampleTree, config)).toThrow(
+        /resolves outside the project directory/,
+      );
     });
   });
 
