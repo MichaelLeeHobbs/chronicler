@@ -10,6 +10,16 @@ export interface FieldValidationResult {
   normalizedFields: Record<string, unknown>;
 }
 
+const ANSI_ESCAPE_RE = /\x1b\[[0-9;]*m/g;
+const NEWLINE_RE = /[\r\n]/g;
+
+/**
+ * Sanitize a string value to prevent log injection.
+ * Strips ANSI escape sequences and replaces newlines with a visible placeholder.
+ */
+export const sanitizeString = (value: string): string =>
+  value.replace(ANSI_ESCAPE_RE, '').replace(NEWLINE_RE, '\\n');
+
 const isSimpleTypeMatch = (value: unknown, type: string): boolean => {
   if (type === 'error') {
     return value instanceof Error || typeof value === 'string';
@@ -31,6 +41,7 @@ export const validateFields = <
 >(
   event: E,
   payload: EventFields<E>,
+  options: { sanitizeStrings?: boolean } = {},
 ): FieldValidationResult => {
   const providedFields = (payload ?? {}) as Record<string, unknown>;
   const normalizedFields: Record<string, unknown> = {};
@@ -58,11 +69,14 @@ export const validateFields = <
       continue;
     }
 
-    normalizedFields[name] =
-      fieldType === 'error'
-        ? // eslint-disable-next-line @typescript-eslint/no-base-to-string
-          stderr(value, { patchToString: true }).toString()
-        : value;
+    if (fieldType === 'error') {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      normalizedFields[name] = stderr(value, { patchToString: true }).toString();
+    } else if (options.sanitizeStrings && fieldType === 'string' && typeof value === 'string') {
+      normalizedFields[name] = sanitizeString(value);
+    } else {
+      normalizedFields[name] = value;
+    }
   }
 
   return { missingFields, typeErrors, normalizedFields };

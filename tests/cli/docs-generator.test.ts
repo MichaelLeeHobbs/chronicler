@@ -194,6 +194,22 @@ describe('Documentation Generator', () => {
     });
   });
 
+  describe('Path Traversal Prevention', () => {
+    it('rejects output paths that escape the project directory', () => {
+      const config: ChroniclerCliConfig = {
+        eventsFile: './test.ts',
+        docs: {
+          format: 'markdown',
+          outputPath: '../../../etc/cron.d/exploit',
+        },
+      };
+
+      expect(() => generateDocs(sampleTree, config)).toThrow(
+        /resolves outside the project directory/,
+      );
+    });
+  });
+
   describe('Directory Creation', () => {
     it('creates output directory if it does not exist', () => {
       const deepPath = path.join(outputDir, 'nested/deep/path/events.md');

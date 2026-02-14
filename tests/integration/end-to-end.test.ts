@@ -357,24 +357,18 @@ describe('Integration Tests', () => {
     });
   });
 
-  describe('Multiple Correlation Completes', () => {
-    it('allows multiple complete() calls with validation warning', () => {
+  describe('Duplicate Correlation Complete', () => {
+    it('ignores second complete() call', () => {
       const mock = new MockLoggerBackend();
       const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
 
       const correlation = chronicle.startCorrelation(requestCorrelation);
       correlation.complete();
-      correlation.complete(); // Second complete
+      correlation.complete(); // should be ignored
 
       const completes = mock.findAllByKey('api.request.complete');
-      expect(completes.length).toBe(2);
-
-      // First complete should have duration
+      expect(completes.length).toBe(1);
       expect(completes[0]!.fields.duration).toBeGreaterThanOrEqual(0);
-      expect(completes[0]!._validation?.multipleCompletes).toBeUndefined();
-
-      // Second complete should have warning
-      expect(completes[1]!._validation?.multipleCompletes).toBe(true);
     });
   });
 

@@ -99,18 +99,16 @@ describe('correlation chronicle', () => {
     vi.useRealTimers();
   });
 
-  it('marks multiple completes via validation metadata', () => {
+  it('ignores duplicate complete() calls', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
     const correlation = chronicle.startCorrelation(events);
 
     correlation.complete();
-    correlation.complete();
+    correlation.complete(); // should be ignored
 
     const completeCalls = mock.findAllByKey('api.request.complete');
-    expect(completeCalls).toHaveLength(2);
-    const second = completeCalls[1]!;
-    expect(second._validation?.multipleCompletes).toBe(true);
+    expect(completeCalls).toHaveLength(1);
   });
 });
 
@@ -193,7 +191,7 @@ describe('correlation limits', () => {
     expect(corr2).toBeDefined();
   });
 
-  it('no double-decrement on multiple complete() calls', () => {
+  it('no double-decrement: second complete() is a no-op', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({
       backend: mock.backend,
@@ -205,7 +203,7 @@ describe('correlation limits', () => {
     chronicle.startCorrelation(events);
 
     corr1.complete();
-    corr1.complete(); // second complete should not double-decrement
+    corr1.complete(); // no-op — should not double-decrement
 
     // Only 1 slot freed, so starting 2 more should fail on the second
     chronicle.startCorrelation(events);

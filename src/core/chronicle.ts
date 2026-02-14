@@ -53,6 +53,11 @@ export interface ChroniclerConfig {
   metadata: Record<string, string | number | boolean | null>;
   correlationIdGenerator?: () => string;
   limits?: ChroniclerLimits;
+  /**
+   * Strip ANSI escape sequences and replace newlines in string field values.
+   * Prevents log injection attacks. Defaults to `false`.
+   */
+  sanitizeStrings?: boolean;
 }
 
 interface ResolvedLimits {
@@ -140,8 +145,13 @@ const buildPayload = (
   currentCorrelationId: () => string,
   forkId: string,
   validationOverrides?: Partial<ValidationMetadata>,
+  sanitizeStrings?: boolean,
 ): LogPayload => {
-  const fieldValidation = validateFields(eventDef, fields);
+  const fieldValidation = validateFields(
+    eventDef,
+    fields,
+    sanitizeStrings ? { sanitizeStrings } : {},
+  );
   const validationMetadata = buildValidationMetadata(fieldValidation, validationOverrides);
   const payload: LogPayload = {
     eventKey: eventDef.key,
@@ -236,6 +246,8 @@ const createChronicleInstance = (
         fields as Record<string, unknown>,
         currentCorrelationId,
         forkId,
+        undefined,
+        config.sanitizeStrings,
       );
       callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
       hooks.onActivity?.();
@@ -309,7 +321,6 @@ const createChronicleInstance = (
 class CorrelationChronicleImpl implements CorrelationChronicle {
   private readonly timer: CorrelationTimer;
   private completed = false;
-  private completionCount = 0;
   private readonly startedAt = Date.now();
   private readonly autoEvents: CorrelationAutoEvents;
   private forkCounter = 0;
@@ -338,6 +349,8 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       fields as Record<string, unknown>,
       this.currentCorrelationId,
       this.forkId,
+      undefined,
+      this.config.sanitizeStrings,
     );
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
     this.timer.touch();
@@ -400,19 +413,16 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   }
 
   complete(fields: ContextRecord = {}): void {
-    if (!this.completed) {
-      this.activeCorrelations.count--;
+    if (this.completed) {
+      return;
     }
-    this.completionCount += 1;
+    this.activeCorrelations.count--;
     this.completed = true;
     this.timer.clear();
-
-    const overrides: Partial<ValidationMetadata> | undefined =
-      this.completionCount > 1 ? { multipleCompletes: true } : undefined;
     this.emitAutoEvent(
       this.autoEvents.complete,
       { duration: Date.now() - this.startedAt, ...fields },
-      overrides,
+      undefined,
       false,
     );
   }
@@ -467,6 +477,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.currentCorrelationId,
       this.forkId,
       overrides,
+      this.config.sanitizeStrings,
     );
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
     if (touchTimer) {

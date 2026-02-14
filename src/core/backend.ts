@@ -33,7 +33,6 @@ const LEVEL_FALLBACK_CHAINS: Record<LogLevel, readonly LogLevel[]> = {
 export interface ValidationMetadata {
   missingFields?: string[];
   typeErrors?: string[];
-  multipleCompletes?: boolean;
 }
 
 export interface LogPayload {

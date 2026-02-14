@@ -148,6 +148,48 @@ describe('context limits via config', () => {
   });
 });
 
+describe('sanitizeStrings option', () => {
+  it('strips ANSI escapes and replaces newlines when enabled', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      sanitizeStrings: true,
+    });
+
+    const event = defineEvent({
+      key: 'test.sanitize',
+      level: 'info',
+      message: 'test',
+      doc: 'test',
+      fields: { name: t.string() },
+    } as const);
+
+    chronicle.event(event, { name: '\x1b[31mred\x1b[0m\nline2' });
+
+    const payload = mock.getLastPayload();
+    expect(payload?.fields.name).toBe('red\\nline2');
+  });
+
+  it('does not sanitize when option is off (default)', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({ backend: mock.backend, metadata: {} });
+
+    const event = defineEvent({
+      key: 'test.nosanit',
+      level: 'info',
+      message: 'test',
+      doc: 'test',
+      fields: { name: t.string() },
+    } as const);
+
+    chronicle.event(event, { name: 'hello\nworld' });
+
+    const payload = mock.getLastPayload();
+    expect(payload?.fields.name).toBe('hello\nworld');
+  });
+});
+
 describe('log() escape hatch', () => {
   it('logs without a pre-defined event', () => {
     const mock = new MockLoggerBackend();

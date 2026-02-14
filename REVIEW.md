@@ -133,19 +133,19 @@
 
 ### Security
 
-- [ ] **S-6: Log injection via unsanitized field/context values** (`validation.ts:61-65`)
+- [x] **S-6: Log injection via unsanitized field/context values** (`validation.ts:61-65`)
       Newlines and ANSI escapes in string values can forge log entries.
       **Fix:** Provide opt-in sanitization or document the risk for backend implementers.
 
-- [ ] **S-7: CLI output path traversal** (`docs-generator.ts:30-36`)
+- [x] **S-7: CLI output path traversal** (`docs-generator.ts:30-36`)
       `--output ../../../etc/cron.d/exploit` writes to arbitrary paths.
       **Fix:** Validate output path is within project directory.
 
-- [ ] **S-8: `complete()` can be called multiple times** (`chronicle.ts:316-329`)
+- [x] **S-8: `complete()` can be called multiple times** (`chronicle.ts:316-329`)
       Each call emits another `.complete` event. No guard like `timeout()` has.
       **Fix:** Return early after first completion (match `timeout()` pattern).
 
-- [ ] **S-9: `key in existingContext` checks prototype chain** (`ContextStore.ts:67`)
+- [x] **S-9: `key in existingContext` checks prototype chain** (`ContextStore.ts:67`)
       `in` operator on line 67 checks inherited properties, not just own.
       **Fix:** Use `Object.hasOwn(existingContext, key)`.
 

@@ -16,6 +16,16 @@ export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig)
   const format = config.docs?.format ?? 'markdown';
   const outputPath = config.docs?.outputPath ?? './docs/chronicler-events.md';
 
+  // Prevent path traversal: output must resolve within cwd
+  const resolved = path.resolve(outputPath);
+  const cwd = process.cwd();
+  if (!resolved.startsWith(cwd + path.sep) && resolved !== cwd) {
+    throw new Error(
+      `Output path "${outputPath}" resolves outside the project directory. ` +
+        `Resolved: ${resolved}, Project: ${cwd}`,
+    );
+  }
+
   let content: string;
 
   if (format === 'markdown') {
@@ -27,13 +37,13 @@ export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig)
   }
 
   // Ensure output directory exists
-  const dir = path.dirname(outputPath);
+  const dir = path.dirname(resolved);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
   // Write output
-  fs.writeFileSync(outputPath, content, 'utf-8');
+  fs.writeFileSync(resolved, content, 'utf-8');
 }
 
 /**

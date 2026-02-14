@@ -10,12 +10,7 @@ const RESERVED_TOP_LEVEL_FIELDS = [
   '_validation', // Used in Payload
 ] as const;
 
-const RESERVED_VALIDATION_FIELDS = [
-  'missingFields',
-  'typeErrors',
-  'contextCollisions',
-  'multipleCompletes',
-] as const;
+const RESERVED_VALIDATION_FIELDS = ['missingFields', 'typeErrors', 'contextCollisions'] as const;
 
 export type ReservedTopLevelField = (typeof RESERVED_TOP_LEVEL_FIELDS)[number];
 export type ReservedValidationField = (typeof RESERVED_VALIDATION_FIELDS)[number];
