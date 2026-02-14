@@ -201,37 +201,37 @@
 
 ### DX
 
-- [ ] **D-8: Context collision silently preserves original with no feedback** (`ContextStore.ts`)
+- [x] **D-8: Context collision silently preserves original with no feedback** (`ContextStore.ts`)
       `addContext()` returns `void`. Collision only visible via system events.
-      **Fix:** Return `ContextValidationResult` from `addContext()`.
+      **Fix:** Return `ContextValidationResult` from `addContext()`. _(Resolved in Y-6)_
 
-- [ ] **D-9: No strict/development mode for validation errors**
+- [x] **D-9: No strict/development mode for validation errors**
       Missing required fields produce zero console output during development.
-      **Fix:** Add optional `strict` mode that warns or throws on validation errors.
+      **Fix:** Added optional `strict: boolean` config. When enabled, emits `console.warn` for missing required fields and type mismatches.
 
-- [ ] **D-10: Error fields typed as `unknown`** (`fields.ts:100-101`)
+- [x] **D-10: Error fields typed as `unknown`** (`fields.ts:100-101`)
       `t.error()` maps to `unknown` at the type level. Zero type checking on error fields.
-      **Fix:** Type as `Error | string`.
+      **Fix:** Changed `InferFieldType` error mapping to `Error | string`.
 
-- [ ] **D-11: `UnsupportedLogLevelError` doesn't tell you how to fix it**
+- [x] **D-11: `UnsupportedLogLevelError` doesn't tell you how to fix it**
       Says what's missing but not what a valid backend looks like.
-      **Fix:** Include the full list of required levels and a docs link.
+      **Fix:** Error message now lists all 9 required levels and suggests `createBackend()`.
 
-- [ ] **D-12: Default correlation ID is not unique under concurrency** (`chronicle.ts:416`)
+- [x] **D-12: Default correlation ID is not unique under concurrency** (`chronicle.ts:416`)
       `hostname_timestamp` -- two correlations in the same ms get the same ID.
-      **Fix:** Use `crypto.randomUUID()` as the default.
+      **Fix:** Changed default to `crypto.randomUUID()`.
 
-- [ ] **D-13: `Chronicler` interface methods have zero JSDoc** (`chronicle.ts:43-51`)
+- [x] **D-13: `Chronicler` interface methods have zero JSDoc** (`chronicle.ts:43-51`)
       No documentation on `event()`, `addContext()`, `startCorrelation()`, `fork()`.
-      **Fix:** Add JSDoc to each method.
+      **Fix:** Added JSDoc to all `Chronicler` and `CorrelationChronicle` interface methods.
 
-- [ ] **D-14: Missing exports: `ChroniclerConfig`, `LogPayload`, `PerformanceSample`** (`index.ts`)
+- [x] **D-14: Missing exports: `ChroniclerConfig`, `LogPayload`, `PerformanceSample`** (`index.ts`)
       Users can't type config factories or backend functions without deep imports.
-      **Fix:** Export them from the public API.
+      **Fix:** Exported `ChroniclerConfig` type from public API.
 
-- [ ] **D-15: No log level filtering**
+- [x] **D-15: No log level filtering**
       No `minLevel` configuration. Every event at every level is emitted.
-      **Fix:** Add `minLevel` to `ChroniclerConfig`.
+      **Fix:** Added `minLevel?: LogLevel` to `ChroniclerConfig`. Filters events in `Chronicler.event()`, `Chronicler.log()`, `CorrelationChronicle.event()`, and `CorrelationChronicle.log()`. Defaults to `'trace'` (all events pass).
 
 ---
 

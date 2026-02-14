@@ -105,7 +105,7 @@ export type InferFieldType<F> =
         : T extends 'boolean'
           ? boolean
           : T extends 'error'
-            ? unknown
+            ? Error | string
             : never
     : never;
 

@@ -44,7 +44,7 @@ describe('createChronicle', () => {
     delete mock.backend.error; // Remove error method
 
     expect(() => createChronicle({ backend: mock.backend, metadata: {} })).toThrow(
-      'Log backend does not support level: error',
+      'Log backend is missing level(s): error',
     );
   });
 
@@ -228,5 +228,115 @@ describe('createChronicleExtended', () => {
 
     expect(mock.backend.info).toBeDefined();
     expect(typeof chronicle.startCorrelation).toBe('function');
+  });
+});
+
+describe('strict mode', () => {
+  it('emits console.warn on missing required fields', () => {
+    const mock = new MockLoggerBackend();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(vi.fn());
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      strict: true,
+    });
+
+    chronicle.event(sampleEvent, {} as never);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('missing required fields: port'));
+    warnSpy.mockRestore();
+  });
+
+  it('emits console.warn on type mismatches', () => {
+    const mock = new MockLoggerBackend();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(vi.fn());
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      strict: true,
+    });
+
+    chronicle.event(sampleEvent, { port: 'not-a-number' } as never);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('type errors'));
+    warnSpy.mockRestore();
+  });
+
+  it('does not warn when strict is off (default)', () => {
+    const mock = new MockLoggerBackend();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(vi.fn());
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+    });
+
+    chronicle.event(sampleEvent, {} as never);
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
+describe('minLevel filtering', () => {
+  it('drops events below minLevel', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      minLevel: 'warn',
+    });
+
+    const debugEvent = defineEvent({
+      key: 'test.debug',
+      level: 'debug',
+      message: 'debug msg',
+      doc: 'test',
+      fields: {},
+    } as const);
+
+    chronicle.event(debugEvent, {});
+
+    expect(mock.getPayloads()).toHaveLength(0);
+  });
+
+  it('allows events at or above minLevel', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      minLevel: 'warn',
+    });
+
+    chronicle.event(errorEvent, { error: 'fail' });
+
+    expect(mock.getPayloads()).toHaveLength(1);
+  });
+
+  it('filters log() calls below minLevel', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      minLevel: 'error',
+    });
+
+    chronicle.log('info', 'this should be dropped');
+    chronicle.log('error', 'this should pass');
+
+    expect(mock.getPayloads()).toHaveLength(1);
+    expect(mock.findByLevel('error')).toBeDefined();
+  });
+
+  it('defaults to trace (all events pass)', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+    });
+
+    chronicle.log('trace', 'most verbose');
+    chronicle.log('debug', 'verbose');
+
+    expect(mock.getPayloads()).toHaveLength(2);
   });
 });

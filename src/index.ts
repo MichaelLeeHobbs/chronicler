@@ -7,6 +7,7 @@ export {
 } from './core/backend';
 export {
   type Chronicler,
+  type ChroniclerConfig,
   type ChroniclerLimits,
   type CorrelationChronicle,
   createChronicle,

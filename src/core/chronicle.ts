@@ -8,12 +8,12 @@ import {
   type ValidationMetadata,
 } from './backend';
 import {
-  DEFAULT_HOSTNAME,
   DEFAULT_MAX_ACTIVE_CORRELATIONS,
   DEFAULT_MAX_CONTEXT_KEYS,
   DEFAULT_MAX_FORK_DEPTH,
   DEFAULT_REQUIRED_LEVELS,
   FORK_ID_SEPARATOR,
+  LOG_LEVELS,
   ROOT_FORK_ID,
 } from './constants';
 import { type ContextRecord, ContextStore, type ContextValidationResult } from './context-store';
@@ -46,6 +46,17 @@ export interface ChroniclerConfig {
    * Prevents log injection attacks. Defaults to `false`.
    */
   sanitizeStrings?: boolean;
+  /**
+   * When `true`, emits `console.warn` for field validation errors
+   * (missing required fields, type mismatches). Defaults to `false`.
+   */
+  strict?: boolean;
+  /**
+   * Minimum log level to emit. Events below this level are silently dropped.
+   * Uses priority ordering: fatal(0) > critical(1) > ... > trace(8).
+   * Defaults to `'trace'` (all events emitted).
+   */
+  minLevel?: LogLevel;
 }
 
 interface ResolvedLimits {
@@ -54,9 +65,10 @@ interface ResolvedLimits {
   maxActiveCorrelations: number;
 }
 
-type ResolvedChroniclerConfig = Omit<ChroniclerConfig, 'backend' | 'limits'> & {
+type ResolvedChroniclerConfig = Omit<ChroniclerConfig, 'backend' | 'limits' | 'minLevel'> & {
   backend: LogBackend;
   limits: ResolvedLimits;
+  minLevel: number;
 };
 
 interface ActiveCorrelationCounter {
@@ -64,6 +76,7 @@ interface ActiveCorrelationCounter {
 }
 
 export interface Chronicler {
+  /** Emit a typed event. Fields are validated against the event definition. */
   event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
 
   /**
@@ -72,10 +85,13 @@ export interface Chronicler {
    */
   log(level: LogLevel, message: string, fields?: Record<string, unknown>): void;
 
+  /** Add key-value context that is attached to all subsequent events. */
   addContext(context: ContextRecord): ContextValidationResult;
 
+  /** Start a correlation — a logical unit of work with lifecycle events. */
   startCorrelation(group: CorrelationEventGroup, metadata?: ContextRecord): CorrelationChronicle;
 
+  /** Create an isolated child chronicle that inherits context. */
   fork(context?: ContextRecord): Chronicler;
 }
 
@@ -89,6 +105,7 @@ export interface Chronicler {
  * - Cannot start nested correlations (use fork() for parallel work within a correlation)
  */
 export interface CorrelationChronicle {
+  /** Emit a typed event within this correlation. */
   event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
 
   /**
@@ -97,14 +114,19 @@ export interface CorrelationChronicle {
    */
   log(level: LogLevel, message: string, fields?: Record<string, unknown>): void;
 
+  /** Add key-value context that is attached to all subsequent events. */
   addContext(context: ContextRecord): ContextValidationResult;
 
+  /** Create an isolated child chronicle that inherits context. */
   fork(context?: ContextRecord): Chronicler;
 
+  /** Mark the correlation as successfully completed. Emits the `.complete` event. */
   complete(fields?: ContextRecord): void;
 
+  /** Mark the correlation as failed. Emits the `.fail` event at error level. */
   fail(error?: unknown, fields?: ContextRecord): void;
 
+  /** Mark the correlation as timed out. Called automatically by the timer. */
   timeout(): void;
 }
 
@@ -134,12 +156,27 @@ const buildPayload = (
   forkId: string,
   validationOverrides?: Partial<ValidationMetadata>,
   sanitizeStrings?: boolean,
+  strict?: boolean,
 ): LogPayload => {
   const fieldValidation = validateFields(
     eventDef,
     fields,
     sanitizeStrings ? { sanitizeStrings } : {},
   );
+
+  if (strict) {
+    if (fieldValidation.missingFields.length > 0) {
+      console.warn(
+        `[chronicler] Event "${eventDef.key}" missing required fields: ${fieldValidation.missingFields.join(', ')}`,
+      );
+    }
+    if (fieldValidation.typeErrors.length > 0) {
+      console.warn(
+        `[chronicler] Event "${eventDef.key}" has type errors on fields: ${fieldValidation.typeErrors.join(', ')}`,
+      );
+    }
+  }
+
   const validationMetadata = buildValidationMetadata(fieldValidation, validationOverrides);
   const payload: LogPayload = {
     eventKey: eventDef.key,
@@ -208,6 +245,7 @@ const createChronicleInstance = (
 
   return {
     event(eventDef, fields) {
+      if (LOG_LEVELS[eventDef.level] > config.minLevel) return;
       const payload = buildPayload(
         contextStore,
         eventDef,
@@ -218,11 +256,13 @@ const createChronicleInstance = (
         forkId,
         undefined,
         config.sanitizeStrings,
+        config.strict,
       );
       callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
       hooks.onActivity?.();
     },
     log(level, message, fields = {}) {
+      if (LOG_LEVELS[level] > config.minLevel) return;
       const payload: LogPayload = {
         eventKey: '',
         fields,
@@ -317,6 +357,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   }
 
   event<E extends EventDefinition>(eventDef: E, fields: EventFields<E>): void {
+    if (LOG_LEVELS[eventDef.level] > this.config.minLevel) return;
     const payload = buildPayload(
       this.contextStore,
       eventDef,
@@ -327,12 +368,14 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.forkId,
       undefined,
       this.config.sanitizeStrings,
+      this.config.strict,
     );
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
     this.timer.touch();
   }
 
   log(level: LogLevel, message: string, fields: Record<string, unknown> = {}): void {
+    if (LOG_LEVELS[level] > this.config.minLevel) return;
     const payload: LogPayload = {
       eventKey: '',
       fields,
@@ -439,6 +482,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       this.forkId,
       overrides,
       this.config.sanitizeStrings,
+      this.config.strict,
     );
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
     if (touchTimer) {
@@ -465,7 +509,7 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
   if (missing.length > 0) {
     throw new ChroniclerError(
       'UNSUPPORTED_LOG_LEVEL',
-      `Log backend does not support level: ${missing.join(', ')}`,
+      `Log backend is missing level(s): ${missing.join(', ')}. A valid backend must implement all 9 levels: ${DEFAULT_REQUIRED_LEVELS.join(', ')}. Use createBackend() for automatic fallback handling.`,
     );
   }
 
@@ -484,14 +528,13 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
   };
 
   const baseContextStore = new ContextStore(config.metadata, resolvedLimits.maxContextKeys);
-  const correlationIdGenerator =
-    config.correlationIdGenerator ??
-    (() => `${config.metadata.hostname ?? DEFAULT_HOSTNAME}_${Date.now()}`);
+  const correlationIdGenerator = config.correlationIdGenerator ?? (() => crypto.randomUUID());
 
   const resolvedConfig: ResolvedChroniclerConfig = {
     ...config,
     backend: resolvedBackend,
     limits: resolvedLimits,
+    minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],
   };
 
   const activeCorrelations: ActiveCorrelationCounter = { count: 0 };

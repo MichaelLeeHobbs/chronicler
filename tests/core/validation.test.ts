@@ -59,7 +59,7 @@ describe('validateFields', () => {
     const result = validateFields(event, {
       requiredString: 'ok',
       errorField: plainObject,
-    });
+    } as unknown as { requiredString: string });
 
     expect(result.typeErrors).toEqual(['errorField']);
     expect(result.normalizedFields.errorField).toBeUndefined();
