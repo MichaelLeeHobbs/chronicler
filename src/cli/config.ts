@@ -27,10 +27,7 @@ export interface ChroniclerCliConfig {
   };
 }
 
-export const DEFAULT_CLI_CONFIG: Required<ChroniclerCliConfig> = {
-  eventsFile: './src/events/index.ts',
-  docs: {
-    outputPath: './docs/chronicler-events.md',
-    format: 'markdown',
-  },
+export const DEFAULT_DOCS_CONFIG: Required<NonNullable<ChroniclerCliConfig['docs']>> = {
+  outputPath: './docs/chronicler-events.md',
+  format: 'markdown',
 };

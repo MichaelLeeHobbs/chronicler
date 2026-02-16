@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { register } from 'tsx/esm/api';
 
 import type { ChroniclerCliConfig } from './config';
-import { DEFAULT_CLI_CONFIG } from './config';
+import { DEFAULT_DOCS_CONFIG } from './config';
 
 /** Dynamically import and validate a chronicler config file via tsx loader. */
 async function importConfigModule(configPath: string): Promise<ChroniclerCliConfig> {
@@ -29,7 +29,7 @@ async function importConfigModule(configPath: string): Promise<ChroniclerCliConf
 
     return {
       eventsFile: config.eventsFile,
-      docs: { ...DEFAULT_CLI_CONFIG.docs, ...config.docs },
+      docs: { ...DEFAULT_DOCS_CONFIG, ...config.docs },
     };
   } finally {
     void unregister();

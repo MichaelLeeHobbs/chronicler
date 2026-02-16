@@ -108,19 +108,4 @@ export class MockLoggerBackend {
   clear(): void {
     this.logs = [];
   }
-
-  /**
-   * Get call count for a specific level
-   */
-  getCallCount(level: string): number {
-    const method = this[level as keyof this];
-    if (typeof method === 'function' && 'mock' in method) {
-      return (
-        method.mock as {
-          calls: unknown[][];
-        }
-      ).calls.length;
-    }
-    return 0;
-  }
 }
