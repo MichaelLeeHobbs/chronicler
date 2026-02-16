@@ -395,9 +395,9 @@ describe('Integration Tests', () => {
 
       const payload = mock.getPayloads()[0]!;
       expect(payload.fields.error).toBeDefined();
-      // Error should be serialized as string by stderr-lib
+      // Error should be serialized as string (stack preferred over message)
       expect(typeof payload.fields.error).toBe('string');
-      expect(payload.fields.error).toContain('Test error');
+      expect(payload.fields.error).toBe('Stack trace here');
     });
   });
 });

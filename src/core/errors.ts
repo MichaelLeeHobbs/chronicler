@@ -18,6 +18,8 @@ export class ChroniclerError extends Error {
    */
   constructor(code: ChroniclerErrorCode, message: string) {
     super(message);
+    // Restore correct prototype chain for instanceof checks when targeting ES5
+    Object.setPrototypeOf(this, ChroniclerError.prototype);
     this.name = 'ChroniclerError';
     this.code = code;
   }

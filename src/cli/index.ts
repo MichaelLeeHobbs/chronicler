@@ -50,23 +50,26 @@ program
     }
   });
 
+/** Derive the working directory from a config file path, or undefined for process.cwd(). */
 function resolveCwd(configPath?: string): string | undefined {
   return configPath ? path.dirname(path.resolve(configPath)) : undefined;
 }
 
+/** Format validation results as JSON and exit. */
 function printValidateJson(tree: ParsedEventTree, errors: ValidationError[], elapsed: number) {
   const result = {
     success: errors.length === 0,
     eventCount: tree.events.length,
     groupCount: tree.groups.length,
     errorCount: errors.length,
-    errors: errors.map((e) => ({ type: e.type, message: e.message, location: e.location })),
+    errors: errors.map((e) => ({ type: e.type, message: e.message })),
     elapsedMs: elapsed,
   };
   console.log(JSON.stringify(result, null, 2));
   process.exit(errors.length > 0 ? 1 : 0);
 }
 
+/** Print human-readable success summary and exit. */
 function printValidateSuccess(tree: ParsedEventTree, verbose: boolean, elapsed: number) {
   console.log('\n✅ All event definitions are valid!');
   if (verbose) {
@@ -118,6 +121,7 @@ async function runValidate(options: { verbose?: boolean; json?: boolean; config?
   printValidateSuccess(tree, options.verbose ?? false, elapsed);
 }
 
+/** Merge CLI flags with config-file docs options, validating the format. */
 function resolveDocsOptions(
   config: { docs?: { format?: string; outputPath?: string } },
   options: { format?: string; output?: string },
@@ -127,6 +131,7 @@ function resolveDocsOptions(
   let outputPath = config.docs?.outputPath ?? './docs/chronicler-events.md';
 
   if (options.format) {
+    // Rule 3.2: string option narrowed via includes check against known tuple
     if (!VALID_FORMATS.includes(options.format as (typeof VALID_FORMATS)[number])) {
       console.error(
         `Error: Invalid format "${options.format}". Must be one of: ${VALID_FORMATS.join(', ')}`,
@@ -137,6 +142,7 @@ function resolveDocsOptions(
   }
   if (options.output) outputPath = options.output;
 
+  // Rule 3.2: format validated against VALID_FORMATS above; narrow from string
   return { format: format as 'markdown' | 'json', outputPath };
 }
 

@@ -26,7 +26,7 @@ export interface ParsedEventGroup {
 }
 
 /**
- * Validation error with location information
+ * Validation error from CLI event validation
  */
 export interface ValidationError {
   readonly type:
@@ -38,14 +38,4 @@ export interface ValidationError {
     | 'missing-doc'
     | 'parse-error';
   readonly message: string;
-  readonly location: ErrorLocation;
-}
-
-/**
- * Location of an error in source code
- */
-export interface ErrorLocation {
-  readonly file: string;
-  readonly line: number;
-  readonly column: number;
 }

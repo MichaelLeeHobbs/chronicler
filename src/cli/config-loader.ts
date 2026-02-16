@@ -6,15 +6,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { register } from 'tsx/esm/api';
+
 import type { ChroniclerCliConfig } from './config';
 import { DEFAULT_CLI_CONFIG } from './config';
 
+/** Dynamically import and validate a chronicler config file via tsx loader. */
 async function importConfigModule(configPath: string): Promise<ChroniclerCliConfig> {
-  const { register } = await import('tsx/esm/api');
   const unregister = register();
 
   try {
     const configUrl = pathToFileURL(configPath).href;
+    // Rule 3.4 exception: dynamic import required to load user-authored config file at runtime.
+    // The config path is constrained to 'chronicler.config.ts' within the project directory.
+    // Rule 3.2: dynamic import returns unknown module; assert expected config shape
     const configModule = (await import(configUrl)) as { default?: ChroniclerCliConfig };
     const config = configModule.default;
 
@@ -59,7 +64,7 @@ export async function loadConfig(cwd: string = process.cwd()): Promise<Chronicle
     return await importConfigModule(configPath);
   } catch (error) {
     if (error instanceof Error) {
-      throw new Error(`Failed to load config: ${error.message}`);
+      throw new Error(`Failed to load config: ${error.message}`, { cause: error });
     }
     throw error;
   }

@@ -53,6 +53,7 @@ export interface CorrelationEventGroup {
   readonly groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
 }
 
+/** Field definitions for auto-generated correlation lifecycle events. */
 const correlationAutoFields = {
   start: {},
   complete: {
@@ -72,14 +73,13 @@ export type CorrelationAutoEvents = {
   >;
 };
 
-type EmptyEventRecord = Record<
-  never,
-  EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>
->;
 type WithAutoEvents<Event extends EventRecord | undefined> = (Event extends EventRecord
   ? Event
-  : EmptyEventRecord) &
+  : Record<never, EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>>) &
   CorrelationAutoEvents;
+
+/** Maximum allowed length for event keys to prevent unbounded key sizes. */
+const MAX_EVENT_KEY_LENGTH = 256;
 
 const EVENT_KEY_RE = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/;
 
@@ -115,6 +115,11 @@ export const defineEvent = <
 >(
   event: EventDefinition<Key, Fields>,
 ): EventDefinition<Key, Fields> => {
+  if (event.key.length > MAX_EVENT_KEY_LENGTH) {
+    throw new Error(
+      `Event key "${event.key.slice(0, 50)}..." exceeds maximum length of ${MAX_EVENT_KEY_LENGTH} characters.`,
+    );
+  }
   if (!EVENT_KEY_RE.test(event.key)) {
     throw new Error(
       `Invalid event key "${event.key}". Keys must be dotted camelCase identifiers (e.g. "user.created", "http.request.started").`,
@@ -124,18 +129,13 @@ export const defineEvent = <
 };
 
 /**
- * Define a system or correlation event group for organizational purposes.
- *
- * Groups provide a namespace hierarchy for events. For correlation groups,
- * prefer {@link defineCorrelationGroup} which adds automatic lifecycle events.
- *
- * @param group - Event group definition (system or correlation)
- * @returns The same group definition, typed for compile-time inference
- */
-/**
  * Auto-prefix event keys in a group's events with `${groupKey}.${propertyName}`
  * when the event's key doesn't already start with `${groupKey}.`.
  * Existing fully-qualified keys pass through unchanged.
+ *
+ * @param groupKey - The parent group's key used as prefix
+ * @param events - Record of events to prefix (may be undefined)
+ * @returns New event record with prefixed keys, or undefined if input was undefined
  */
 const prefixEventKeys = (
   groupKey: string,
@@ -153,16 +153,37 @@ const prefixEventKeys = (
   return result;
 };
 
+/**
+ * Define a system or correlation event group for organizational purposes.
+ *
+ * Groups provide a namespace hierarchy for events. For correlation groups,
+ * prefer {@link defineCorrelationGroup} which adds automatic lifecycle events.
+ *
+ * @param group - Event group definition (system or correlation)
+ * @returns The same group definition, typed for compile-time inference
+ */
 export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEventGroup>(
   group: Group,
 ): Group => {
+  if (group.key.length > MAX_EVENT_KEY_LENGTH) {
+    throw new Error(
+      `Group key "${group.key.slice(0, 50)}..." exceeds maximum length of ${MAX_EVENT_KEY_LENGTH} characters.`,
+    );
+  }
+  if (!EVENT_KEY_RE.test(group.key)) {
+    throw new Error(
+      `Invalid group key "${group.key}". Keys must be dotted camelCase identifiers (e.g. "api.request", "http.server").`,
+    );
+  }
   const prefixed = prefixEventKeys(group.key, group.events);
   if (prefixed !== group.events) {
+    // Rule 3.2: spread preserves Group shape; TS can't infer that events substitution maintains type
     return { ...group, events: prefixed } as Group;
   }
   return group;
 };
 
+/** Build the four auto-generated lifecycle events for a correlation group. */
 const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
   start: {
     key: `${groupKey}.start`,
@@ -254,6 +275,16 @@ export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
   events: WithAutoEvents<Group['events']>;
   timeout: number;
 } => {
+  if (group.key.length > MAX_EVENT_KEY_LENGTH) {
+    throw new Error(
+      `Group key "${group.key.slice(0, 50)}..." exceeds maximum length of ${MAX_EVENT_KEY_LENGTH} characters.`,
+    );
+  }
+  if (!EVENT_KEY_RE.test(group.key)) {
+    throw new Error(
+      `Invalid group key "${group.key}". Keys must be dotted camelCase identifiers (e.g. "api.request", "http.server").`,
+    );
+  }
   const autoEvents = buildAutoEvents(group.key);
   const prefixed = prefixEventKeys(group.key, group.events) ?? {};
 
@@ -271,6 +302,7 @@ export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
     events: {
       ...prefixed,
       ...autoEvents,
+      // Rule 3.2: merged user events + auto events satisfy WithAutoEvents but TS can't verify intersection
     } as WithAutoEvents<Group['events']>,
   };
 };

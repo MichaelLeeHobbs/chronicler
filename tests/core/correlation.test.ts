@@ -112,6 +112,58 @@ describe('correlation chronicle', () => {
   });
 });
 
+describe('correlation minLevel filtering', () => {
+  it('suppresses auto-events below configured minLevel', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      minLevel: 'error',
+    });
+
+    const correlation = chronicle.startCorrelation(events);
+    correlation.complete();
+
+    // start (info) and complete (info) should be suppressed; only error+ should emit
+    const keys = mock.getPayloads().map((p) => p.eventKey);
+    expect(keys).toEqual([]);
+  });
+
+  it('emits fail auto-event at error level when minLevel is error', () => {
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      minLevel: 'error',
+    });
+
+    const correlation = chronicle.startCorrelation(events);
+    correlation.fail(new Error('oops'));
+
+    // start (info) suppressed, fail (error) emitted
+    const keys = mock.getPayloads().map((p) => p.eventKey);
+    expect(keys).toEqual(['api.request.fail']);
+  });
+
+  it('suppresses timeout auto-event (warn) when minLevel is error', () => {
+    vi.useFakeTimers();
+    const mock = new MockLoggerBackend();
+    const chronicle = createChronicle({
+      backend: mock.backend,
+      metadata: {},
+      minLevel: 'error',
+    });
+
+    chronicle.startCorrelation(events);
+    vi.advanceTimersByTime(200);
+
+    // start (info) and timeout (warn) should both be suppressed
+    const keys = mock.getPayloads().map((p) => p.eventKey);
+    expect(keys).toEqual([]);
+    vi.useRealTimers();
+  });
+});
+
 describe('correlation limits', () => {
   it('throws ChroniclerError when active limit exceeded', () => {
     const mock = new MockLoggerBackend();

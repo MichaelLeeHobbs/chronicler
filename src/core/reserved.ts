@@ -1,4 +1,5 @@
-const RESERVED_TOP_LEVEL_FIELDS = [
+/** Reserved top-level field names that cannot be used in user context or metadata. */
+export const RESERVED_TOP_LEVEL_FIELDS = [
   'eventKey', // Used in Payload
   'level', // Used in Payload
   'message', // Used in Payload
@@ -16,13 +17,8 @@ const RESERVED_TOP_LEVEL_FIELDS = [
 
 export type ReservedTopLevelField = (typeof RESERVED_TOP_LEVEL_FIELDS)[number];
 
-// Set for O(1) lookup during validation
+/** Set for O(1) lookup during validation. */
 const TOP_LEVEL_SET = new Set<string>(RESERVED_TOP_LEVEL_FIELDS);
-
-/**
- * Export RESERVED_TOP_LEVEL_FIELDS for CLI validation
- */
-export { RESERVED_TOP_LEVEL_FIELDS };
 
 /**
  * Check if a key is a reserved top-level field.
