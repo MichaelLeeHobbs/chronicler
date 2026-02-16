@@ -1,8 +1,6 @@
 import { DEFAULT_CORRELATION_TIMEOUT_MS, type LogLevel } from './constants';
 import { field, type FieldBuilder, type InferFields } from './fields';
 
-export type { LogLevel };
-
 /**
  * Event definition with compile-time type safety
  */

@@ -40,8 +40,6 @@ export interface LogPayload {
   readonly _validation?: ValidationMetadata;
 }
 
-export type { LogLevel };
-
 export type LogBackend = Record<LogLevel, (message: string, payload: LogPayload) => void>;
 
 /**

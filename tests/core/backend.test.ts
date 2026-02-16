@@ -6,9 +6,9 @@ import {
   createConsoleBackend,
   createRouterBackend,
   type LogBackend,
-  type LogLevel,
   type LogPayload,
 } from '../../src/core/backend';
+import type { LogLevel } from '../../src/core/constants';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 describe('Backend Validation', () => {

@@ -13,6 +13,7 @@ export {
   type CorrelationChronicle,
   createChronicle,
 } from './core/chronicle';
+export type { LogLevel } from './core/constants';
 export {
   type ContextCollisionDetail,
   type ContextRecord,
@@ -26,7 +27,6 @@ export {
   defineEventGroup,
   type EventDefinition,
   type EventFields,
-  type LogLevel,
   type SystemEventGroup,
 } from './core/events';
 export { field, type FieldBuilder, type InferFields, type InferFieldType } from './core/fields';

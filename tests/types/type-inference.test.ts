@@ -5,12 +5,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  defineCorrelationGroup,
-  defineEvent,
-  defineEventGroup,
-  LogLevel,
-} from '../../src/core/events';
+import type { LogLevel } from '../../src/core/constants';
+import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../src/core/events';
 import { field } from '../../src/core/fields';
 
 describe('Type Inference Tests', () => {
