@@ -14,8 +14,7 @@ import {
   LOG_LEVELS,
   ROOT_FORK_ID,
 } from './constants';
-import { type ContextRecord, ContextStore, type ContextValidationResult } from './context-store';
-import { CorrelationTimer } from './correlation-timer';
+import { type ContextRecord, ContextStore, type ContextValidationResult } from './context';
 import { ChroniclerError } from './errors';
 import {
   type CorrelationAutoEvents,
@@ -326,6 +325,39 @@ const createChronicleInstance = (args: ChronicleInstanceArgs): Chronicler => {
     },
   };
 };
+
+/**
+ * Auto-reset timeout for correlation groups.
+ * Resets on any activity; invokes callback if idle for the configured duration.
+ */
+export class CorrelationTimer {
+  private timeoutId: NodeJS.Timeout | undefined;
+
+  constructor(
+    private readonly timeout: number,
+    private readonly onTimeout: () => void,
+  ) {}
+
+  start(): void {
+    this.clear();
+    if (this.timeout > 0) {
+      this.timeoutId = setTimeout(this.onTimeout, this.timeout);
+      this.timeoutId.unref();
+    }
+  }
+
+  /** Reset the timer (keep-alive on activity). */
+  touch(): void {
+    this.start();
+  }
+
+  clear(): void {
+    if (this.timeoutId !== undefined) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = undefined;
+    }
+  }
+}
 
 interface CorrelationChronicleArgs {
   readonly config: ResolvedChroniclerConfig;

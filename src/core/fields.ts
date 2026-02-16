@@ -15,7 +15,6 @@ export interface FieldBuilder<T extends string, R extends boolean> {
  * Field builder with optional marker
  */
 export interface OptionalFieldBuilder<T extends string> extends FieldBuilder<T, false> {
-  readonly optional: () => OptionalFieldBuilder<T>;
   readonly doc: (description: string) => OptionalFieldBuilder<T>;
 }
 
@@ -32,7 +31,6 @@ function makeOptional<T extends string>(type: T, doc: string | undefined): Optio
     _type: type,
     _required: false as const,
     _doc: doc,
-    optional: () => makeOptional(type, doc),
     doc: (description: string) => makeOptional(type, description),
   };
 }

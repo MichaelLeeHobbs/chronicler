@@ -1,5 +1,6 @@
 import { DEFAULT_REQUIRED_LEVELS, LOG_LEVELS } from './constants';
 import { ChroniclerError } from './errors';
+import type { ValidationMetadata } from './validation';
 
 type ConsoleMethod = 'error' | 'warn' | 'info' | 'debug';
 
@@ -28,13 +29,6 @@ const LEVEL_FALLBACK_CHAINS: Record<LogLevel, readonly LogLevel[]> = {
   debug: ['info'],
   trace: ['debug', 'info'],
 };
-
-export interface ValidationMetadata {
-  readonly missingFields?: string[];
-  readonly typeErrors?: string[];
-  readonly invalidValues?: string[];
-  readonly unknownFields?: string[];
-}
 
 export interface LogPayload {
   readonly eventKey: string;

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { CorrelationTimer } from '../../src/core/correlation-timer';
+import { CorrelationTimer } from '../../src/core/chronicle';
 
 describe('CorrelationTimer', () => {
   afterEach(() => {

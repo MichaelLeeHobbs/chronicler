@@ -17,7 +17,7 @@ export {
   type ContextCollisionDetail,
   type ContextRecord,
   type ContextValidationResult,
-} from './core/context-store';
+} from './core/context';
 export { ChroniclerError, type ChroniclerErrorCode } from './core/errors';
 export {
   type CorrelationEventGroup,

@@ -1,6 +1,12 @@
-import type { ValidationMetadata } from './backend';
 import type { EventDefinition, EventFields } from './events';
 import type { FieldBuilder } from './fields';
+
+export interface ValidationMetadata {
+  readonly missingFields?: string[];
+  readonly typeErrors?: string[];
+  readonly invalidValues?: string[];
+  readonly unknownFields?: string[];
+}
 
 interface FieldValidationResult {
   readonly missingFields: string[];
