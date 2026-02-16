@@ -10,8 +10,9 @@
 
 - Define events once with keys, levels, fields, and docs; get type-safe logging everywhere
 - Enforce required/optional fields and flag type issues at runtime
-- Correlate related logs with auto start/complete/timeout events and durations
+- Correlate related logs with auto start/complete/fail/timeout events and durations
 - Fork work into sub-operations with hierarchical fork IDs
+- Route events to multiple backends with filter-based routing
 - Auto-generate Markdown or JSON documentation from event definitions via the CLI
 - Structured payloads ready for ingestion (e.g., CloudWatch, ELK, Datadog)
 
@@ -31,10 +32,10 @@ import {
   defineEvent,
   defineEventGroup,
   defineCorrelationGroup,
-  t,
+  field,
 } from '@ubercode/chronicler';
 
-// 1) Define events (typed, using field builders)
+// 1) Define events
 const system = defineEventGroup({
   key: 'system',
   type: 'system',
@@ -45,8 +46,8 @@ const system = defineEventGroup({
       level: 'info',
       message: 'Application started',
       doc: 'Emitted when the app boots',
-      fields: { port: t.number().doc('Listening port') },
-    } as const),
+      fields: { port: field.number().doc('Listening port') },
+    }),
   },
 });
 
@@ -54,7 +55,7 @@ const request = defineCorrelationGroup({
   key: 'api.request',
   type: 'correlation',
   doc: 'HTTP request handling',
-  timeout: 30_000, // default is 300s if omitted
+  timeout: 30_000, // default 300s if omitted
   events: {
     validated: defineEvent({
       key: 'api.request.validated',
@@ -62,17 +63,16 @@ const request = defineCorrelationGroup({
       message: 'Request validated',
       doc: 'Validation passed',
       fields: {
-        method: t.string().doc('HTTP method'),
-        path: t.string().doc('Request path'),
+        method: field.string().doc('HTTP method'),
+        path: field.string().doc('Request path'),
       },
-    } as const),
+    }),
   },
 });
 
 // 2) Create a chronicle (uses console backend by default)
 const chronicle = createChronicle({
   metadata: { service: 'api', env: 'dev' },
-  monitoring: { memory: true, cpu: true },
 });
 
 // 3) Emit typed events
@@ -90,72 +90,130 @@ forkA.event(system.events.startup, { port: 0 });
 corr.complete();
 ```
 
-### Custom backends
+## Backends
+
+### Console (default)
 
 ```ts
-import { createConsoleBackend, createBackend } from '@ubercode/chronicler';
+import { createConsoleBackend } from '@ubercode/chronicler';
 
-// Zero-config console backend (same as the default)
-const consoleBackend = createConsoleBackend();
+const backend = createConsoleBackend();
+// Maps: fatal/critical/alert/error → console.error, warn → console.warn,
+//       audit/info → console.info, debug/trace → console.debug
+```
 
-// Partial backend — only provide the levels you care about.
+### Partial backend with fallbacks
+
+```ts
+import { createBackend } from '@ubercode/chronicler';
+
+// Only provide the levels you care about.
 // Missing levels fall back through a chain (e.g. fatal → critical → error → warn → info),
 // then to console if nothing matches.
-const customBackend = createBackend({
+const backend = createBackend({
   error: (msg, payload) => myErrorTracker.capture(msg, payload),
   info: (msg, payload) => myLogger.info(msg, payload),
 });
 ```
 
+### Router backend (multiple streams)
+
+```ts
+import { createRouterBackend } from '@ubercode/chronicler';
+
+// Route events to different backends based on filters.
+// Events fan out to ALL matching routes (not first-match-wins).
+const backend = createRouterBackend([
+  { backend: auditBackend, filter: (_lvl, p) => p.eventKey.startsWith('admin.') },
+  { backend: httpBackend, filter: (_lvl, p) => p.eventKey.startsWith('http.') },
+  {
+    backend: mainBackend,
+    filter: (_lvl, p) => !p.eventKey.startsWith('admin.') && !p.eventKey.startsWith('http.'),
+  },
+]);
+
+const chronicle = createChronicle({ backend, metadata: { app: 'my-app' } });
+```
+
 ## API highlights
 
-- defineEvent({ key, level, message, doc, fields? })
-- defineEventGroup({ key, type: 'system', doc, events, groups? })
-- defineCorrelationGroup({ key, type: 'correlation', doc, timeout?, events, groups? })
-- createChronicle({ backend?, metadata?, monitoring? })
-  - chronicle.event(eventDef, fields)
-  - chronicle.addContext(context)
-  - chronicle.startCorrelation(corrGroup, context?)
-  - chronicle.fork(context?)
+### Core
+
+- `createChronicle({ backend?, metadata, strict?, minLevel?, limits?, correlationIdGenerator? })`
+  - `chronicle.event(eventDef, fields)` — emit a typed event
+  - `chronicle.log(level, message, fields?)` — untyped escape hatch
+  - `chronicle.addContext(context)` — add metadata to all subsequent events
+  - `chronicle.startCorrelation(corrGroup, context?)` — start a correlation
+  - `chronicle.fork(context?)` — create an isolated child chronicle
+
+### Definitions
+
+- `defineEvent({ key, level, message, doc?, fields? })`
+- `defineEventGroup({ key, type: 'system', doc?, events?, groups? })`
+- `defineCorrelationGroup({ key, type: 'correlation', doc?, timeout?, events?, groups? })`
+
+### Field builders
+
+```ts
+field.string(); // required string
+field.number().optional(); // optional number
+field.boolean().doc('...'); // required boolean with documentation
+field.error(); // Error | string, serialized to stack trace
+```
 
 ### Log levels
 
-Chronicler uses:
-
 ```ts
 const LOG_LEVELS = {
-  fatal: 0,
-  critical: 1,
-  alert: 2,
-  error: 3,
-  warn: 4,
-  audit: 5,
-  info: 6,
-  debug: 7,
-  trace: 8,
+  fatal: 0, // System is unusable
+  critical: 1, // Critical conditions requiring immediate attention
+  alert: 2, // Action must be taken immediately
+  error: 3, // Error conditions
+  warn: 4, // Warning conditions
+  audit: 5, // Audit trail events (compliance, security)
+  info: 6, // Informational messages
+  debug: 7, // Debug-level messages
+  trace: 8, // Trace-level messages (very verbose)
 } as const;
+```
+
+Filter events with `minLevel`:
+
+```ts
+const chronicle = createChronicle({
+  metadata: {},
+  minLevel: 'warn', // only fatal, critical, alert, error, warn are emitted
+});
+```
+
+### Strict mode
+
+When `strict: true`, Chronicler throws a `ChroniclerError` with code `FIELD_VALIDATION` if events have missing required fields, type mismatches, or invalid values. Useful for CI/CD enforcement and testing.
+
+```ts
+const chronicle = createChronicle({
+  metadata: {},
+  strict: true, // throws on field validation errors
+});
 ```
 
 ### Reserved fields
 
-Top-level in payload: `eventKey, level, message, correlationId, forkId, timestamp, hostname, environment, version, service, fields, _perf, _validation` are reserved. Attempting to place e.g. `environment` in metadata is blocked. Collisions are reported in `_validation.contextCollisions`.
-
-### Performance
-
-- Enable per-log sampling via `monitoring: { memory?: boolean, cpu?: boolean }`
-- `_perf` contains memory and CPU deltas when enabled
+These payload field names cannot be used in metadata or context: `eventKey`, `level`, `message`, `correlationId`, `forkId`, `timestamp`, `fields`, `_validation`.
 
 ### Error serialization
 
-- Fields declared as `error` are serialized via `stderr-lib` (string). Safe to ship to log sinks.
+Fields declared as `field.error()` accept `Error | string` and are serialized to the stack trace string (or message if no stack). Safe to ship to log sinks.
+
+### String sanitization
+
+All string field values are automatically sanitized — ANSI escape sequences are stripped and newlines are replaced with `\n`. This prevents log injection attacks.
 
 ## Using with Winston
 
-To integrate with Winston, create a simple backend object that maps Chronicler levels to Winston:
-
 ```ts
 import winston from 'winston';
-import { createChronicle } from '@ubercode/chronicler';
+import { createBackend, createChronicle } from '@ubercode/chronicler';
 
 const logger = winston.createLogger({
   level: 'info',
@@ -163,26 +221,29 @@ const logger = winston.createLogger({
   transports: [new winston.transports.Console()],
 });
 
-// Create backend adapter - just an object with level methods
-const winstonBackend = {
-  fatal: (msg: string, data: unknown) => logger.error(msg, data),
-  critical: (msg: string, data: unknown) => logger.error(msg, data),
-  alert: (msg: string, data: unknown) => logger.error(msg, data),
-  error: (msg: string, data: unknown) => logger.error(msg, data),
-  warn: (msg: string, data: unknown) => logger.warn(msg, data),
-  audit: (msg: string, data: unknown) => logger.info(msg, data),
-  info: (msg: string, data: unknown) => logger.info(msg, data),
-  debug: (msg: string, data: unknown) => logger.debug(msg, data),
-  trace: (msg: string, data: unknown) => logger.silly(msg, data),
-};
+// createBackend handles fallback chains automatically
+const backend = createBackend({
+  error: (msg, payload) => {
+    logger.error(msg, payload);
+  },
+  warn: (msg, payload) => {
+    logger.warn(msg, payload);
+  },
+  info: (msg, payload) => {
+    logger.info(msg, payload);
+  },
+  debug: (msg, payload) => {
+    logger.debug(msg, payload);
+  },
+});
 
 const chronicle = createChronicle({
-  backend: winstonBackend,
+  backend,
   metadata: { service: 'my-app', env: 'production' },
 });
 ```
 
-See `examples/winston-app` for a runnable setup.
+See `examples/winston-app` for a full multi-stream setup using `createRouterBackend`.
 
 ## CLI
 
