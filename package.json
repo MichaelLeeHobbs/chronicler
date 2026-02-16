@@ -57,8 +57,7 @@
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "pnpm run build && changeset publish",
-    "prepublishOnly": "pnpm run build",
-    "install": "pnpm install"
+    "prepublishOnly": "pnpm run build"
   },
   "lint-staged": {
     "src/**/*.{ts,tsx,js,jsx,cjs,mjs}": [
