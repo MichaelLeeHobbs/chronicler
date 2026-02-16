@@ -1,17 +1,13 @@
 /** Reserved top-level field names that cannot be used in user context or metadata. */
 export const RESERVED_TOP_LEVEL_FIELDS = [
-  'eventKey', // Used in Payload
-  'level', // Used in Payload
-  'message', // Used in Payload
-  'correlationId', // Used in Payload
-  'forkId', // Used in Payload
-  'timestamp', // Used in Payload
-  'hostname', // Commonly set by log infrastructure; reserved to prevent conflicts
-  'environment', // Commonly set by log infrastructure; reserved to prevent conflicts
-  'version', // Commonly set by log infrastructure; reserved to prevent conflicts
-  'service', // Commonly set by log infrastructure; reserved to prevent conflicts
-  'fields', // Used in Payload
-  '_validation', // Used in Payload
+  'eventKey',
+  'level',
+  'message',
+  'correlationId',
+  'forkId',
+  'timestamp',
+  'fields',
+  '_validation',
 ] as const;
 
 export type ReservedTopLevelField = (typeof RESERVED_TOP_LEVEL_FIELDS)[number];
