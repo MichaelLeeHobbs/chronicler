@@ -47,13 +47,9 @@ export interface ChroniclerConfig {
   readonly correlationIdGenerator?: () => string;
   readonly limits?: ChroniclerLimits;
   /**
-   * Strip ANSI escape sequences and replace newlines in string field values.
-   * Prevents log injection attacks. Defaults to `true`.
-   */
-  readonly sanitizeStrings?: boolean;
-  /**
-   * When `true`, emits `console.warn` for field validation errors
-   * (missing required fields, type mismatches). Defaults to `false`.
+   * When `true`, throws a `ChroniclerError` with code `FIELD_VALIDATION`
+   * for field validation errors (missing required fields, type mismatches).
+   * Useful for CI/CD enforcement. Defaults to `false`.
    */
   readonly strict?: boolean;
   /**
@@ -138,7 +134,6 @@ interface BuildPayloadArgs {
   readonly currentCorrelationId: () => string;
   readonly forkId: string;
   readonly validationOverrides?: Partial<ValidationMetadata> | undefined;
-  readonly sanitizeStrings?: boolean | undefined;
   readonly strict?: boolean | undefined;
 }
 
@@ -149,26 +144,23 @@ interface BuildPayloadArgs {
  * @returns Assembled log payload ready for backend emission
  */
 const buildPayload = (args: BuildPayloadArgs): LogPayload => {
-  const fieldValidation = validateFields(
-    args.eventDef,
-    args.fields,
-    args.sanitizeStrings !== undefined ? { sanitizeStrings: args.sanitizeStrings } : {},
-  );
+  const fieldValidation = validateFields(args.eventDef, args.fields);
 
   if (args.strict) {
+    const issues: string[] = [];
     if (fieldValidation.missingFields.length > 0) {
-      console.warn(
-        `[chronicler] Event "${args.eventDef.key}" missing required fields: ${fieldValidation.missingFields.join(', ')}`,
-      );
+      issues.push(`missing required fields: ${fieldValidation.missingFields.join(', ')}`);
     }
     if (fieldValidation.typeErrors.length > 0) {
-      console.warn(
-        `[chronicler] Event "${args.eventDef.key}" has type errors on fields: ${fieldValidation.typeErrors.join(', ')}`,
-      );
+      issues.push(`type errors on fields: ${fieldValidation.typeErrors.join(', ')}`);
     }
     if (fieldValidation.invalidValues.length > 0) {
-      console.warn(
-        `[chronicler] Event "${args.eventDef.key}" has invalid values on fields: ${fieldValidation.invalidValues.join(', ')}`,
+      issues.push(`invalid values on fields: ${fieldValidation.invalidValues.join(', ')}`);
+    }
+    if (issues.length > 0) {
+      throw new ChroniclerError(
+        'FIELD_VALIDATION',
+        `Event "${args.eventDef.key}" failed validation: ${issues.join('; ')}`,
       );
     }
   }
@@ -270,7 +262,6 @@ const createChronicleInstance = (args: ChronicleInstanceArgs): Chronicler => {
         fields: fields as Record<string, unknown>,
         currentCorrelationId,
         forkId,
-        sanitizeStrings: config.sanitizeStrings,
         strict: config.strict,
       });
       callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
@@ -278,10 +269,9 @@ const createChronicleInstance = (args: ChronicleInstanceArgs): Chronicler => {
     },
     log(level, message, fields = {}) {
       if (LOG_LEVELS[level] > config.minLevel) return;
-      const sanitizedFields = config.sanitizeStrings ? sanitizeLogFields(fields) : fields;
       const payload: LogPayload = {
         eventKey: '',
-        fields: sanitizedFields,
+        fields: sanitizeLogFields(fields),
         correlationId: currentCorrelationId(),
         forkId,
         metadata: contextStore.snapshot(),
@@ -390,7 +380,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       fields: fields as Record<string, unknown>,
       currentCorrelationId: this.currentCorrelationId,
       forkId: this.forkId,
-      sanitizeStrings: this.config.sanitizeStrings,
       strict: this.config.strict,
     });
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
@@ -400,10 +389,9 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   log(level: LogLevel, message: string, fields: Record<string, unknown> = {}): void {
     if (this.completed) return;
     if (LOG_LEVELS[level] > this.config.minLevel) return;
-    const sanitizedFields = this.config.sanitizeStrings ? sanitizeLogFields(fields) : fields;
     const payload: LogPayload = {
       eventKey: '',
-      fields: sanitizedFields,
+      fields: sanitizeLogFields(fields),
       correlationId: this.currentCorrelationId(),
       forkId: this.forkId,
       metadata: this.contextStore.snapshot(),
@@ -496,7 +484,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       currentCorrelationId: this.currentCorrelationId,
       forkId: this.forkId,
       validationOverrides: overrides,
-      sanitizeStrings: this.config.sanitizeStrings,
       strict: this.config.strict,
     });
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
@@ -539,7 +526,6 @@ const resolveChroniclerConfig = (
     // Spread includes unresolved config first; explicit properties below override them.
     resolved: {
       ...config,
-      sanitizeStrings: config.sanitizeStrings ?? true,
       backend: resolvedBackend,
       limits: resolvedLimits,
       minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],

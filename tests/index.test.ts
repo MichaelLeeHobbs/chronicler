@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createChronicle, defineEvent, field, t } from '../src';
+import { createChronicle, defineEvent, field } from '../src';
 import { MockLoggerBackend } from './helpers/mock-logger';
 
 describe('chronicler public API', () => {
@@ -17,7 +17,7 @@ describe('chronicler public API', () => {
       message: 'started',
       doc: 'startup event',
       fields: {
-        port: t.number().doc('port'),
+        port: field.number().doc('port'),
       },
     } as const);
 
@@ -27,9 +27,5 @@ describe('chronicler public API', () => {
     expect(payload?.eventKey).toBe('system.startup');
     expect(payload?.fields).toEqual({ port: 3000 });
     expect(payload?.timestamp).toEqual(expect.any(String));
-  });
-
-  it('exports `field` as an alias for `t`', () => {
-    expect(field).toBe(t);
   });
 });

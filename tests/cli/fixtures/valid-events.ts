@@ -3,7 +3,7 @@
  */
 
 import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../../src/core/events';
-import { t } from '../../../src/core/fields';
+import { field } from '../../../src/core/fields';
 
 export const startupEvent = defineEvent({
   key: 'system.startup',
@@ -11,8 +11,8 @@ export const startupEvent = defineEvent({
   message: 'Application started',
   doc: 'Logged when the application starts',
   fields: {
-    port: t.number().doc('Server port'),
-    mode: t.string().optional().doc('Runtime mode'),
+    port: field.number().doc('Server port'),
+    mode: field.string().optional().doc('Runtime mode'),
   },
 } as const);
 
@@ -45,8 +45,8 @@ export const queryEvents = defineCorrelationGroup({
       message: 'Query executed',
       doc: 'Logged when query completes',
       fields: {
-        duration: t.number().doc('Query duration in ms'),
-        resultCount: t.number().doc('Number of results'),
+        duration: field.number().doc('Query duration in ms'),
+        resultCount: field.number().doc('Number of results'),
       },
     } as const),
   },

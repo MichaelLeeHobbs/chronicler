@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Chronicler } from '../../src/core/chronicle';
 import { createChronicle } from '../../src/core/chronicle';
 import { defineEvent } from '../../src/core/events';
-import { t } from '../../src/core/fields';
+import { field } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 const sampleEvent = defineEvent({
@@ -12,7 +12,7 @@ const sampleEvent = defineEvent({
   message: 'started',
   doc: 'doc',
   fields: {
-    port: t.number().doc('port'),
+    port: field.number().doc('port'),
   },
 } as const);
 
@@ -22,7 +22,7 @@ const errorEvent = defineEvent({
   message: 'boom',
   doc: 'error event',
   fields: {
-    error: t.error().doc('err'),
+    error: field.error().doc('err'),
   },
 } as const);
 
@@ -113,7 +113,6 @@ describe('createChronicle', () => {
     chronicle.addContext({ userId: '123' });
     const result = chronicle.addContext({ userId: '456' }); // Collision
 
-    expect(result.collisions).toEqual(['userId']);
     expect(result.collisionDetails).toHaveLength(1);
     expect(result.collisionDetails[0]?.key).toBe('userId');
   });
@@ -143,13 +142,12 @@ describe('context limits via config', () => {
   });
 });
 
-describe('sanitizeStrings option', () => {
-  it('strips ANSI escapes and replaces newlines when enabled', () => {
+describe('string sanitization', () => {
+  it('strips ANSI escapes and replaces newlines', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({
       backend: mock.backend,
       metadata: {},
-      sanitizeStrings: true,
     });
 
     const event = defineEvent({
@@ -157,35 +155,13 @@ describe('sanitizeStrings option', () => {
       level: 'info',
       message: 'test',
       doc: 'test',
-      fields: { name: t.string() },
+      fields: { name: field.string() },
     } as const);
 
     chronicle.event(event, { name: '\x1b[31mred\x1b[0m\nline2' });
 
     const payload = mock.getLastPayload();
     expect(payload?.fields.name).toBe('red\\nline2');
-  });
-
-  it('does not sanitize when option is explicitly off', () => {
-    const mock = new MockLoggerBackend();
-    const chronicle = createChronicle({
-      backend: mock.backend,
-      metadata: {},
-      sanitizeStrings: false,
-    });
-
-    const event = defineEvent({
-      key: 'test.nosanit',
-      level: 'info',
-      message: 'test',
-      doc: 'test',
-      fields: { name: t.string() },
-    } as const);
-
-    chronicle.event(event, { name: 'hello\nworld' });
-
-    const payload = mock.getLastPayload();
-    expect(payload?.fields.name).toBe('hello\nworld');
   });
 });
 
@@ -236,48 +212,40 @@ describe('createChronicleExtended', () => {
 });
 
 describe('strict mode', () => {
-  it('emits console.warn on missing required fields', () => {
+  it('throws on missing required fields', () => {
     const mock = new MockLoggerBackend();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(vi.fn());
     const chronicle = createChronicle({
       backend: mock.backend,
       metadata: {},
       strict: true,
     });
 
-    chronicle.event(sampleEvent, {} as never);
-
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('missing required fields: port'));
-    warnSpy.mockRestore();
+    expect(() => chronicle.event(sampleEvent, {} as never)).toThrow(
+      'missing required fields: port',
+    );
   });
 
-  it('emits console.warn on type mismatches', () => {
+  it('throws on type mismatches', () => {
     const mock = new MockLoggerBackend();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(vi.fn());
     const chronicle = createChronicle({
       backend: mock.backend,
       metadata: {},
       strict: true,
     });
 
-    chronicle.event(sampleEvent, { port: 'not-a-number' } as never);
-
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('type errors'));
-    warnSpy.mockRestore();
+    expect(() => chronicle.event(sampleEvent, { port: 'not-a-number' } as never)).toThrow(
+      'type errors',
+    );
   });
 
-  it('does not warn when strict is off (default)', () => {
+  it('does not throw when strict is off (default)', () => {
     const mock = new MockLoggerBackend();
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(vi.fn());
     const chronicle = createChronicle({
       backend: mock.backend,
       metadata: {},
     });
 
-    chronicle.event(sampleEvent, {} as never);
-
-    expect(warnSpy).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
+    expect(() => chronicle.event(sampleEvent, {} as never)).not.toThrow();
   });
 });
 

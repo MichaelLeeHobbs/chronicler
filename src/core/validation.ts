@@ -72,7 +72,6 @@ export const validateFields = <
 >(
   event: E,
   payload: EventFields<E>,
-  options: { sanitizeStrings?: boolean } = {},
 ): FieldValidationResult => {
   // Rule 3.2: EventFields<E> erases to unknown at runtime; widen for iteration
   const providedFields = (payload ?? {}) as Record<string, unknown>;
@@ -122,7 +121,7 @@ export const validateFields = <
       } catch {
         normalizedFields[name] = '[unserializable error]';
       }
-    } else if (options.sanitizeStrings && fieldType === 'string' && typeof value === 'string') {
+    } else if (fieldType === 'string' && typeof value === 'string') {
       normalizedFields[name] = sanitizeString(value);
     } else {
       normalizedFields[name] = value;
@@ -136,7 +135,7 @@ export const validateFields = <
       if (typeof value === 'function' || typeof value === 'symbol') {
         continue;
       }
-      if (options.sanitizeStrings && typeof value === 'string') {
+      if (typeof value === 'string') {
         normalizedFields[name] = sanitizeString(value);
       } else {
         normalizedFields[name] = value;
@@ -159,21 +158,13 @@ export const buildValidationMetadata = (
   fieldValidation: FieldValidationResult,
   overrides?: Partial<ValidationMetadata>,
 ): ValidationMetadata | undefined => {
-  const metadata: ValidationMetadata = {
-    ...(overrides ?? {}),
-    ...(fieldValidation.missingFields.length > 0
-      ? { missingFields: [...fieldValidation.missingFields] }
-      : {}),
-    ...(fieldValidation.typeErrors.length > 0
-      ? { typeErrors: [...fieldValidation.typeErrors] }
-      : {}),
-    ...(fieldValidation.invalidValues.length > 0
-      ? { invalidValues: [...fieldValidation.invalidValues] }
-      : {}),
-    ...(fieldValidation.unknownFields.length > 0
-      ? { unknownFields: [...fieldValidation.unknownFields] }
-      : {}),
-  };
+  const entries = Object.entries({
+    ...overrides,
+    missingFields: fieldValidation.missingFields,
+    typeErrors: fieldValidation.typeErrors,
+    invalidValues: fieldValidation.invalidValues,
+    unknownFields: fieldValidation.unknownFields,
+  }).filter(([, v]) => Array.isArray(v) && v.length > 0);
 
-  return Object.keys(metadata).length > 0 ? metadata : undefined;
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 };

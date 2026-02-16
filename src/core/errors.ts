@@ -3,7 +3,8 @@ export type ChroniclerErrorCode =
   | 'RESERVED_FIELD'
   | 'BACKEND_METHOD'
   | 'FORK_DEPTH_EXCEEDED'
-  | 'CORRELATION_LIMIT_EXCEEDED';
+  | 'CORRELATION_LIMIT_EXCEEDED'
+  | 'FIELD_VALIDATION';
 
 /**
  * Typed error class for Chronicler configuration and runtime failures.
@@ -18,8 +19,6 @@ export class ChroniclerError extends Error {
    */
   constructor(code: ChroniclerErrorCode, message: string) {
     super(message);
-    // Restore correct prototype chain for instanceof checks when targeting ES5
-    Object.setPrototypeOf(this, ChroniclerError.prototype);
     this.name = 'ChroniclerError';
     this.code = code;
   }

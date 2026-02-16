@@ -19,7 +19,7 @@ describe('context sanitizer', () => {
     const next = sanitizeContextInput({ ...first.context, foo: 'override' }, first.context);
 
     expect(first.context.foo).toBe('a');
-    expect(next.validation.collisions).toEqual(['foo', 'bar']);
+    expect(next.validation.collisionDetails.map((d) => d.key)).toEqual(['foo', 'bar']);
   });
 
   it('drops unsupported values (arrays)', () => {

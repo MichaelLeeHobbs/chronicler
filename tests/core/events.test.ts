@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../src/core/events';
-import { t } from '../../src/core/fields';
+import { field } from '../../src/core/fields';
 
 describe('event helpers', () => {
   it('preserves event typing', () => {
@@ -11,8 +11,8 @@ describe('event helpers', () => {
       message: 'started',
       doc: 'doc',
       fields: {
-        port: t.number().doc('port'),
-        mode: t.string().optional().doc('mode'),
+        port: field.number().doc('port'),
+        mode: field.string().optional().doc('mode'),
       },
     } as const);
 

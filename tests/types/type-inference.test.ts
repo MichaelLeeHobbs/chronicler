@@ -11,7 +11,7 @@ import {
   defineEventGroup,
   LogLevel,
 } from '../../src/core/events';
-import { t } from '../../src/core/fields';
+import { field } from '../../src/core/fields';
 
 describe('Type Inference Tests', () => {
   describe('Field Type Inference', () => {
@@ -22,8 +22,8 @@ describe('Type Inference Tests', () => {
         message: 'Test',
         doc: 'Test event',
         fields: {
-          name: t.string().doc('Name'),
-          count: t.number().optional().doc('Count'),
+          name: field.string().doc('Name'),
+          count: field.number().optional().doc('Count'),
         },
       } as const);
 
@@ -53,7 +53,7 @@ describe('Type Inference Tests', () => {
         level: 'info',
         message: 'Test without doc',
         fields: {
-          count: t.number(),
+          count: field.number(),
         },
       });
 
@@ -100,10 +100,10 @@ describe('Type Inference Tests', () => {
         message: 'Test',
         doc: 'Test event without as const',
         fields: {
-          name: t.string().doc('Name'),
-          count: t.number().optional().doc('Count'),
-          active: t.boolean(),
-          err: t.error().optional(),
+          name: field.string().doc('Name'),
+          count: field.number().optional().doc('Count'),
+          active: field.boolean(),
+          err: field.error().optional(),
         },
       });
 
