@@ -35,7 +35,6 @@ export interface ContextCollisionDetail {
 }
 
 export interface ContextValidationResult {
-  readonly collisions: string[];
   readonly reserved: string[];
   readonly collisionDetails: ContextCollisionDetail[];
   readonly dropped: string[];
@@ -64,7 +63,7 @@ export interface ContextValidationResult {
  *
  * @see {@link ContextValidationResult} for validation result structure
  */
-/* eslint-disable max-lines-per-function, complexity -- validation logic: each check branch is a distinct concern */
+/* eslint-disable complexity -- validation branches are each a distinct concern */
 export const sanitizeContextInput = (
   context: ContextRecord,
   existingContext: ContextRecord = {},
@@ -74,7 +73,6 @@ export const sanitizeContextInput = (
   validation: ContextValidationResult;
 } => {
   const sanitized: ContextRecord = {};
-  const collisions: string[] = [];
   const reserved: string[] = [];
   const collisionDetails: ContextCollisionDetail[] = [];
   const dropped: string[] = [];
@@ -95,7 +93,6 @@ export const sanitizeContextInput = (
     if (!isSimpleValue(rawValue)) continue;
 
     if (Object.hasOwn(existingContext, key) || Object.hasOwn(sanitized, key)) {
-      collisions.push(key);
       const existingValue = (
         Object.hasOwn(sanitized, key) ? sanitized[key] : existingContext[key]
       )!;
@@ -112,9 +109,9 @@ export const sanitizeContextInput = (
     acceptedCount++;
   }
 
-  return { context: sanitized, validation: { collisions, reserved, collisionDetails, dropped } };
+  return { context: sanitized, validation: { reserved, collisionDetails, dropped } };
 };
-/* eslint-enable max-lines-per-function, complexity */
+/* eslint-enable complexity */
 
 /**
  * Immutable-snapshot context store for structured log metadata.

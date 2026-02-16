@@ -1,6 +1,6 @@
 import { LogLevel } from './backend';
 import { DEFAULT_CORRELATION_TIMEOUT_MS } from './constants';
-import { type FieldBuilder, type InferFields, t } from './fields';
+import { field, type FieldBuilder, type InferFields } from './fields';
 
 export type { LogLevel };
 
@@ -57,11 +57,11 @@ export interface CorrelationEventGroup {
 const correlationAutoFields = {
   start: {},
   complete: {
-    duration: t.number().optional().doc('Duration of the correlation in milliseconds'),
+    duration: field.number().optional().doc('Duration of the correlation in milliseconds'),
   },
   fail: {
-    duration: t.number().optional().doc('Duration of the correlation in milliseconds'),
-    error: t.error().optional().doc('Error that caused the failure'),
+    duration: field.number().optional().doc('Duration of the correlation in milliseconds'),
+    error: field.error().optional().doc('Error that caused the failure'),
   },
   timeout: {},
 };
@@ -98,9 +98,9 @@ const EVENT_KEY_RE = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/;
  *   message: 'User created',
  *   doc: 'Emitted when a new user is created',
  *   fields: {
- *     userId: t.string().doc('User ID'),
- *     email: t.string(),
- *     age: t.number().optional(),
+ *     userId: field.string().doc('User ID'),
+ *     email: field.string(),
+ *     age: field.number().optional(),
  *   },
  * });
  * ```

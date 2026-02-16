@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createChronicle } from '../../src/core/chronicle';
 import { ChroniclerError } from '../../src/core/errors';
 import { defineCorrelationGroup, defineEvent } from '../../src/core/events';
-import { t } from '../../src/core/fields';
+import { field } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 const events = defineCorrelationGroup({
@@ -18,7 +18,7 @@ const events = defineCorrelationGroup({
       message: 'payload',
       doc: 'payload',
       fields: {
-        body: t.string().doc('body'),
+        body: field.string().doc('body'),
       },
     } as const),
   },
@@ -65,7 +65,7 @@ describe('correlation chronicle', () => {
 
     const result = correlation.addContext({ userId: 'new' });
 
-    expect(result.collisions).toEqual(['userId']);
+    expect(result.collisionDetails.map((d) => d.key)).toEqual(['userId']);
   });
 
   it('emits fail event at error level with duration', () => {

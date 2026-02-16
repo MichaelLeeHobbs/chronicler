@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createChronicle } from '../../src/core/chronicle';
 import { ChroniclerError } from '../../src/core/errors';
 import { defineCorrelationGroup, defineEvent } from '../../src/core/events';
-import { t } from '../../src/core/fields';
+import { field } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 const sampleEvent = defineEvent({
@@ -12,7 +12,7 @@ const sampleEvent = defineEvent({
   message: 'task executed',
   doc: 'A task event',
   fields: {
-    taskId: t.string().doc('Task ID'),
+    taskId: field.string().doc('Task ID'),
   },
 } as const);
 
@@ -346,7 +346,6 @@ describe('Fork System', () => {
       const fork = chronicle.fork({ userId: '123' });
       const result = fork.addContext({ userId: '456' }); // Collision
 
-      expect(result.collisions).toEqual(['userId']);
       expect(result.collisionDetails).toHaveLength(1);
       expect(result.collisionDetails[0]?.key).toBe('userId');
     });

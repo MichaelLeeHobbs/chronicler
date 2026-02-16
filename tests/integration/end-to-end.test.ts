@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createRouterBackend } from '../../src/core/backend';
 import { createChronicle } from '../../src/core/chronicle';
 import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../src/core/events';
-import { t } from '../../src/core/fields';
+import { field } from '../../src/core/fields';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 describe('Integration Tests', () => {
@@ -23,8 +23,8 @@ describe('Integration Tests', () => {
         message: 'Application started',
         doc: 'Logged when application starts',
         fields: {
-          port: t.number().doc('Server port'),
-          mode: t.string().optional().doc('Runtime mode'),
+          port: field.number().doc('Server port'),
+          mode: field.string().optional().doc('Runtime mode'),
         },
       } as const),
       shutdown: defineEvent({
@@ -48,8 +48,8 @@ describe('Integration Tests', () => {
         message: 'Request validated',
         doc: 'Request passed validation',
         fields: {
-          method: t.string().doc('HTTP method'),
-          path: t.string().doc('Request path'),
+          method: field.string().doc('HTTP method'),
+          path: field.string().doc('Request path'),
         },
       } as const),
       processed: defineEvent({
@@ -58,8 +58,8 @@ describe('Integration Tests', () => {
         message: 'Request processed',
         doc: 'Request successfully processed',
         fields: {
-          statusCode: t.number().doc('HTTP status code'),
-          duration: t.number().doc('Processing time in ms'),
+          statusCode: field.number().doc('HTTP status code'),
+          duration: field.number().doc('Processing time in ms'),
         },
       } as const),
     },
@@ -228,7 +228,6 @@ describe('Integration Tests', () => {
       chronicle.addContext({ sessionId: 'abc' });
       const result = chronicle.addContext({ userId: '456' }); // Collision!
 
-      expect(result.collisions).toEqual(['userId']);
       expect(result.collisionDetails).toHaveLength(1);
       expect(result.collisionDetails[0]?.key).toBe('userId');
     });
@@ -243,7 +242,7 @@ describe('Integration Tests', () => {
 
       const result = correlation.addContext({ userId: 'attempted' }); // Collision
 
-      expect(result.collisions).toEqual(['userId']);
+      expect(result.collisionDetails.map((d) => d.key)).toEqual(['userId']);
     });
   });
 
@@ -382,8 +381,8 @@ describe('Integration Tests', () => {
           message: 'Login attempt',
           doc: 'User login attempt',
           fields: {
-            userId: t.string().doc('User ID'),
-            success: t.boolean().doc('Login success'),
+            userId: field.string().doc('User ID'),
+            success: field.boolean().doc('Login success'),
           },
         } as const),
         action: defineEvent({
@@ -392,7 +391,7 @@ describe('Integration Tests', () => {
           message: 'Admin action',
           doc: 'Administrative action',
           fields: {
-            action: t.string().doc('Action name'),
+            action: field.string().doc('Action name'),
           },
         } as const),
       },
@@ -554,8 +553,8 @@ describe('Integration Tests', () => {
         message: 'Error occurred',
         doc: 'Error event',
         fields: {
-          error: t.error().doc('The error'),
-          code: t.string().doc('Error code'),
+          error: field.error().doc('The error'),
+          code: field.string().doc('Error code'),
         },
       } as const);
 

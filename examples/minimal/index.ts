@@ -1,4 +1,4 @@
-import { createChronicle, defineEvent, t } from '@ubercode/chronicler';
+import { createChronicle, defineEvent, field } from '@ubercode/chronicler';
 
 // 1. Define a typed event
 const userSignup = defineEvent({
@@ -7,8 +7,8 @@ const userSignup = defineEvent({
   message: 'New user signed up',
   doc: 'Fired after a user completes registration',
   fields: {
-    userId: t.string().doc('Unique user ID'),
-    plan: t.string().optional().doc('Subscription plan'),
+    userId: field.string().doc('Unique user ID'),
+    plan: field.string().optional().doc('Subscription plan'),
   },
 });
 

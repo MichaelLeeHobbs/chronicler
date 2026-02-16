@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { defineEvent } from '../../src/core/events';
-import { t } from '../../src/core/fields';
+import { field } from '../../src/core/fields';
 import { validateFields } from '../../src/core/validation';
 
 describe('validateFields', () => {
@@ -11,9 +11,9 @@ describe('validateFields', () => {
     message: 'msg',
     doc: 'doc',
     fields: {
-      requiredString: t.string().doc('req'),
-      optionalNumber: t.number().optional().doc('opt'),
-      errorField: t.error().optional().doc('err'),
+      requiredString: field.string().doc('req'),
+      optionalNumber: field.number().optional().doc('opt'),
+      errorField: field.error().optional().doc('err'),
     },
   } as const);
 

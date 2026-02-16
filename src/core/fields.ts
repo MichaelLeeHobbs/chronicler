@@ -27,43 +27,6 @@ export interface RequiredFieldBuilder<T extends string> extends FieldBuilder<T, 
   readonly doc: (description: string) => RequiredFieldBuilder<T>;
 }
 
-/**
- * Field type builders - use these to define fields in events.
- *
- * Tip: if `t` collides with your i18n library, import the {@link field} alias instead.
- *
- * @example
- * ```typescript
- * const event = defineEvent({
- *   key: 'user.created',
- *   level: 'info',
- *   message: 'User created',
- *   fields: {
- *     userId: t.string().doc('User ID'),
- *     age: t.number().optional().doc('User age'),
- *     isActive: t.boolean(),
- *     error: t.error().optional(),
- *   },
- * });
- * ```
- */
-export const t = {
-  string: (): RequiredFieldBuilder<'string'> => createFieldBuilder('string'),
-  number: (): RequiredFieldBuilder<'number'> => createFieldBuilder('number'),
-  boolean: (): RequiredFieldBuilder<'boolean'> => createFieldBuilder('boolean'),
-  error: (): RequiredFieldBuilder<'error'> => createFieldBuilder('error'),
-} as const;
-
-/**
- * Alias for {@link t} — use whichever name fits your codebase.
- *
- * `field` avoids collisions with common i18n conventions that also use `t`.
- */
-export const field = t;
-
-/**
- * Internal: Create a field builder with optional/doc chaining support
- */
 function makeOptional<T extends string>(type: T, doc: string | undefined): OptionalFieldBuilder<T> {
   return {
     _type: type,
@@ -84,9 +47,30 @@ function makeRequired<T extends string>(type: T, doc: string | undefined): Requi
   };
 }
 
-function createFieldBuilder<T extends string>(type: T): RequiredFieldBuilder<T> {
-  return makeRequired(type, undefined);
-}
+/**
+ * Field type builders — use these to define fields in events.
+ *
+ * @example
+ * ```typescript
+ * const event = defineEvent({
+ *   key: 'user.created',
+ *   level: 'info',
+ *   message: 'User created',
+ *   fields: {
+ *     userId: field.string().doc('User ID'),
+ *     age: field.number().optional().doc('User age'),
+ *     isActive: field.boolean(),
+ *     error: field.error().optional(),
+ *   },
+ * });
+ * ```
+ */
+export const field = {
+  string: (): RequiredFieldBuilder<'string'> => makeRequired('string', undefined),
+  number: (): RequiredFieldBuilder<'number'> => makeRequired('number', undefined),
+  boolean: (): RequiredFieldBuilder<'boolean'> => makeRequired('boolean', undefined),
+  error: (): RequiredFieldBuilder<'error'> => makeRequired('error', undefined),
+} as const;
 
 /**
  * Utility type to simplify intersections

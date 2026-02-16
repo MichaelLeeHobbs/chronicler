@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { InferFields, InferFieldType } from '../../src/core/fields';
-import { t } from '../../src/core/fields';
+import { field } from '../../src/core/fields';
 
 describe('Field inference primitives', () => {
   it('infers scalar field types', () => {
-    const stringField = t.string();
-    const numberField = t.number();
+    const stringField = field.string();
+    const numberField = field.number();
 
     type StringType = InferFieldType<typeof stringField>;
     type NumberType = InferFieldType<typeof numberField>;
@@ -24,10 +24,10 @@ describe('Field inference primitives', () => {
 
   it('infers optional vs required fields', () => {
     const fields = {
-      id: t.string().doc('identifier'),
-      count: t.number().optional().doc('count'),
-      active: t.boolean().doc('active flag'),
-      error: t.error().optional().doc('error payload'),
+      id: field.string().doc('identifier'),
+      count: field.number().optional().doc('count'),
+      active: field.boolean().doc('active flag'),
+      error: field.error().optional().doc('error payload'),
     };
 
     // Verify builder metadata at runtime

@@ -11,7 +11,6 @@ export const RESERVED_TOP_LEVEL_FIELDS = [
   'version', // Commonly set by log infrastructure; reserved to prevent conflicts
   'service', // Commonly set by log infrastructure; reserved to prevent conflicts
   'fields', // Used in Payload
-  '_perf', // Reserved for internal performance metadata
   '_validation', // Used in Payload
 ] as const;
 
