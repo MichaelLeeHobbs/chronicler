@@ -226,13 +226,14 @@ function generateEventMarkdown(event: EventDefinition, level = 3): string[] {
  * Generate JSON documentation
  */
 function generateJSON(tree: ParsedEventTree): string {
+  const groupEventKeys = collectAllGroupEventKeys(tree.groups);
   const output = {
     generated: new Date().toISOString(),
     eventCount: tree.events.length,
     groupCount: tree.groups.length,
     groups: tree.groups.map((group) => serializeGroup(group)),
     standaloneEvents: tree.events
-      .filter((event) => !collectAllGroupEventKeys(tree.groups).has(event.key))
+      .filter((event) => !groupEventKeys.has(event.key))
       .map((event) => serializeEvent(event)),
   };
 

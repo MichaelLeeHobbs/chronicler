@@ -4,11 +4,10 @@
 
 import { DEFAULT_REQUIRED_LEVELS } from '../../core/constants';
 import type { EventDefinition } from '../../core/events';
-import { RESERVED_TOP_LEVEL_FIELDS } from '../../core/reserved';
+import { isReservedTopLevelField } from '../../core/reserved';
 import type { ParsedEventGroup, ParsedEventTree, ValidationError } from '../types';
 
 const VALID_LEVELS = new Set<string>(DEFAULT_REQUIRED_LEVELS);
-const RESERVED_FIELDS = new Set<string>(RESERVED_TOP_LEVEL_FIELDS);
 
 /**
  * Validate parsed event tree
@@ -64,7 +63,7 @@ function validateEvent(event: EventDefinition): ValidationError[] {
 
   if (event.fields) {
     for (const fieldName of Object.keys(event.fields)) {
-      if (RESERVED_FIELDS.has(fieldName)) {
+      if (isReservedTopLevelField(fieldName)) {
         errors.push(
           makeError(
             'reserved-field',

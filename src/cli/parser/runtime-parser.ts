@@ -93,9 +93,17 @@ function extractFields(
   return hasFields ? result : undefined;
 }
 
+/** Strip a raw EventDefinition down to plain data (doc defaults to empty string). */
+function cleanEvent(event: EventDefinition): EventDefinition {
+  const fields = event.fields ? extractFields(event.fields as Record<string, unknown>) : undefined;
+  return fields
+    ? { ...event, doc: event.doc ?? '', fields }
+    : { key: event.key, level: event.level, message: event.message, doc: event.doc ?? '' };
+}
+
 /**
  * Convert a runtime event group to a ParsedEventGroup (iterative).
- * Filters out auto-generated correlation events (start, complete, timeout, metadataWarning).
+ * Filters out auto-generated correlation events (start, complete, fail, timeout).
  */
 /* eslint-disable max-lines-per-function, complexity, max-depth -- Accepted deviation: iterative two-pass traversal */
 function convertGroup(rootGroup: EventGroupLike): ParsedEventGroup {
@@ -111,12 +119,7 @@ function convertGroup(rootGroup: EventGroupLike): ParsedEventGroup {
       for (const [name, value] of Object.entries(group.events)) {
         if (group.type === 'correlation' && CORRELATION_AUTO_EVENTS.has(name)) continue;
         if (isEventDefinition(value)) {
-          const fields = value.fields
-            ? extractFields(value.fields as Record<string, unknown>)
-            : undefined;
-          events[name] = fields
-            ? { ...value, doc: value.doc ?? '', fields }
-            : { key: value.key, level: value.level, message: value.message, doc: value.doc ?? '' };
+          events[name] = cleanEvent(value);
         }
       }
     }
@@ -193,7 +196,7 @@ function collectEventsFromGroup(rootGroup: ParsedEventGroup, seen: Set<string>):
  * @param filePath - Path to the TypeScript events file to parse
  * @returns Parsed event tree containing extracted events, groups, and any parse errors
  */
-/* eslint-disable max-lines-per-function, max-depth -- Accepted deviation: event file parsing with nested group detection */
+/* eslint-disable max-depth -- Accepted deviation: event file parsing with nested group detection */
 export async function parseEventsFile(filePath: string): Promise<ParsedEventTree> {
   const absolutePath = path.resolve(filePath);
   const events: EventDefinition[] = [];
@@ -215,19 +218,7 @@ export async function parseEventsFile(filePath: string): Promise<ParsedEventTree
       } else if (isEventDefinition(value)) {
         if (!seen.has(value.key)) {
           seen.add(value.key);
-          const fields = value.fields
-            ? extractFields(value.fields as Record<string, unknown>)
-            : undefined;
-          events.push(
-            fields
-              ? { ...value, doc: value.doc ?? '', fields }
-              : {
-                  key: value.key,
-                  level: value.level,
-                  message: value.message,
-                  doc: value.doc ?? '',
-                },
-          );
+          events.push(cleanEvent(value));
         }
       } else if (looksLikeEvent(value)) {
         errors.push({
@@ -242,4 +233,4 @@ export async function parseEventsFile(filePath: string): Promise<ParsedEventTree
 
   return { events, groups, errors };
 }
-/* eslint-enable max-lines-per-function, max-depth */
+/* eslint-enable max-depth */
