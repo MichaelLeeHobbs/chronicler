@@ -17,9 +17,6 @@ async function importConfigModule(configPath: string): Promise<ChroniclerCliConf
 
   try {
     const configUrl = pathToFileURL(configPath).href;
-    // Rule 3.4 exception: dynamic import required to load user-authored config file at runtime.
-    // The config path is constrained to 'chronicler.config.ts' within the project directory.
-    // Rule 3.2: dynamic import returns unknown module; assert expected config shape
     const configModule = (await import(configUrl)) as { default?: ChroniclerCliConfig };
     const config = configModule.default;
 

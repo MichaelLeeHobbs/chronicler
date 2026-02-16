@@ -92,7 +92,6 @@ export const callBackendMethod = (
  * @returns A fully populated LogBackend using console methods for all levels
  */
 export const createConsoleBackend = (): LogBackend => {
-  // Rule 3.2: iteratively populated in the loop below over all required levels
   const backend = {} as LogBackend;
   for (const level of DEFAULT_REQUIRED_LEVELS) {
     const method = CONSOLE_LEVEL_MAP[level];
@@ -113,7 +112,6 @@ export const createConsoleBackend = (): LogBackend => {
  * @returns A fully populated LogBackend with fallbacks applied for missing levels
  */
 export const createBackend = (partial: Partial<LogBackend>): LogBackend => {
-  // Rule 3.2: iteratively populated in the loop below over all required levels
   const backend = {} as LogBackend;
   for (const level of DEFAULT_REQUIRED_LEVELS) {
     if (typeof partial[level] === 'function') {
@@ -169,7 +167,6 @@ export const createRouterBackend = (routes: BackendRoute[]): LogBackend => {
   if (routes.length === 0) {
     throw new Error('createRouterBackend requires at least one route.');
   }
-  // Rule 3.2: iteratively populated in the loop below over all required levels
   const backend = {} as LogBackend;
   for (const level of DEFAULT_REQUIRED_LEVELS) {
     backend[level] = (message: string, payload: LogPayload) => {

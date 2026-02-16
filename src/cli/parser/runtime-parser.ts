@@ -20,7 +20,6 @@ const CORRELATION_AUTO_EVENTS = new Set(['start', 'complete', 'fail', 'timeout']
  */
 function isEventDefinition(value: unknown): value is EventDefinition {
   if (typeof value !== 'object' || value === null) return false;
-  // Rule 3.2: non-null object narrowed above; indexing for property checks
   const v = value as Record<string, unknown>;
   return (
     typeof v.key === 'string' &&
@@ -35,7 +34,6 @@ function isEventDefinition(value: unknown): value is EventDefinition {
  */
 function isFieldBuilder(value: unknown): value is FieldBuilder<string, boolean> {
   if (typeof value !== 'object' || value === null) return false;
-  // Rule 3.2: non-null object narrowed above; indexing for property checks
   const v = value as Record<string, unknown>;
   return typeof v._type === 'string' && typeof v._required === 'boolean';
 }
@@ -54,7 +52,6 @@ interface EventGroupLike {
  */
 function isEventGroup(value: unknown): value is EventGroupLike {
   if (typeof value !== 'object' || value === null) return false;
-  // Rule 3.2: non-null object narrowed above; indexing for property checks
   const v = value as Record<string, unknown>;
   return (
     typeof v.key === 'string' &&
@@ -84,7 +81,6 @@ function extractFields(
 
   for (const [name, value] of Object.entries(fields)) {
     if (isFieldBuilder(value)) {
-      // Rule 3.2: isFieldBuilder guard ensures _type, _required, _doc exist
       result[name] = {
         _type: value._type,
         _required: value._required,
@@ -116,8 +112,7 @@ function convertGroup(rootGroup: EventGroupLike): ParsedEventGroup {
         if (group.type === 'correlation' && CORRELATION_AUTO_EVENTS.has(name)) continue;
         if (isEventDefinition(value)) {
           const fields = value.fields
-            ? // Rule 3.2: EventDefinition.fields is typed as FieldBuilder record; widen for runtime inspection
-              extractFields(value.fields as Record<string, unknown>)
+            ? extractFields(value.fields as Record<string, unknown>)
             : undefined;
           events[name] = fields
             ? { ...value, doc: value.doc ?? '', fields }
@@ -210,8 +205,6 @@ export async function parseEventsFile(filePath: string): Promise<ParsedEventTree
 
   try {
     const fileUrl = pathToFileURL(absolutePath).href;
-    // Rule 3.4 exception: dynamic import required to load user-authored events file at runtime.
-    // The file path is provided by the CLI user who invokes this tool locally.
     const mod = (await import(fileUrl)) as Record<string, unknown>;
 
     for (const [exportName, value] of Object.entries(mod)) {
@@ -223,8 +216,7 @@ export async function parseEventsFile(filePath: string): Promise<ParsedEventTree
         if (!seen.has(value.key)) {
           seen.add(value.key);
           const fields = value.fields
-            ? // Rule 3.2: EventDefinition.fields is typed as FieldBuilder record; widen for runtime inspection
-              extractFields(value.fields as Record<string, unknown>)
+            ? extractFields(value.fields as Record<string, unknown>)
             : undefined;
           events.push(
             fields

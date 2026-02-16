@@ -177,7 +177,6 @@ export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEve
   }
   const prefixed = prefixEventKeys(group.key, group.events);
   if (prefixed !== group.events) {
-    // Rule 3.2: spread preserves Group shape; TS can't infer that events substitution maintains type
     return { ...group, events: prefixed } as Group;
   }
   return group;
@@ -302,7 +301,6 @@ export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
     events: {
       ...prefixed,
       ...autoEvents,
-      // Rule 3.2: merged user events + auto events satisfy WithAutoEvents but TS can't verify intersection
     } as WithAutoEvents<Group['events']>,
   };
 };

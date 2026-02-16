@@ -4,7 +4,6 @@ import {
   type LogBackend,
   type LogLevel,
   type LogPayload,
-  type ValidationMetadata,
 } from './backend';
 import {
   DEFAULT_MAX_ACTIVE_CORRELATIONS,
@@ -132,7 +131,6 @@ interface BuildPayloadArgs {
   readonly fields: Record<string, unknown>;
   readonly currentCorrelationId: () => string;
   readonly forkId: string;
-  readonly validationOverrides?: Partial<ValidationMetadata> | undefined;
   readonly strict?: boolean | undefined;
 }
 
@@ -164,7 +162,7 @@ const buildPayload = (args: BuildPayloadArgs): LogPayload => {
     }
   }
 
-  const validationMetadata = buildValidationMetadata(fieldValidation, args.validationOverrides);
+  const validationMetadata = buildValidationMetadata(fieldValidation);
 
   return {
     eventKey: args.eventDef.key,
@@ -222,8 +220,7 @@ const isAlreadyNormalized = (group: CorrelationEventGroup): group is NormalizedC
 const resolveCorrelationGroup = (group: CorrelationEventGroup): NormalizedCorrelationGroup =>
   isAlreadyNormalized(group)
     ? group
-    : // Rule 3.2: defineCorrelationGroup returns the same shape but TS can't infer the intersection
-      (defineCorrelationGroup(group) as NormalizedCorrelationGroup);
+    : (defineCorrelationGroup(group) as NormalizedCorrelationGroup);
 
 interface ChronicleInstanceArgs {
   readonly config: ResolvedChroniclerConfig;
@@ -363,7 +360,6 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     this.forkId = args.forkId;
     this.activeCorrelations = args.activeCorrelations ?? { count: 0 };
     this.timer = new CorrelationTimer(this.group.timeout, () => this.timeout());
-    // Rule 3.2: NormalizedCorrelationGroup guarantees auto-event keys exist
     this.autoEvents = this.group.events as CorrelationAutoEvents;
     this.timer.start();
     this.emitAutoEvent(this.autoEvents.start, {});
@@ -430,51 +426,37 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   }
 
   complete(fields: Record<string, unknown> = {}): void {
-    if (this.completed) {
-      return;
-    }
-    this.activeCorrelations.count--;
-    this.completed = true;
-    this.timer.clear();
-    this.emitAutoEvent(
-      this.autoEvents.complete,
-      { duration: Date.now() - this.startedAt, ...fields },
-      undefined,
-      false,
-    );
+    if (!this.finalize()) return;
+    this.emitAutoEvent(this.autoEvents.complete, {
+      duration: Date.now() - this.startedAt,
+      ...fields,
+    });
   }
 
   fail(error?: unknown, fields: Record<string, unknown> = {}): void {
-    if (this.completed) {
-      return;
-    }
-    this.activeCorrelations.count--;
-    this.completed = true;
-    this.timer.clear();
-    this.emitAutoEvent(
-      this.autoEvents.fail,
-      { duration: Date.now() - this.startedAt, error, ...fields },
-      undefined,
-      false,
-    );
+    if (!this.finalize()) return;
+    this.emitAutoEvent(this.autoEvents.fail, {
+      duration: Date.now() - this.startedAt,
+      error,
+      ...fields,
+    });
   }
 
   timeout(): void {
-    if (this.completed) {
-      return;
-    }
+    if (!this.finalize()) return;
+    this.emitAutoEvent(this.autoEvents.timeout, {});
+  }
+
+  /** Mark correlation as done: decrement counter, clear timer. Returns false if already completed. */
+  private finalize(): boolean {
+    if (this.completed) return false;
     this.activeCorrelations.count--;
     this.completed = true;
     this.timer.clear();
-    this.emitAutoEvent(this.autoEvents.timeout, {}, undefined, false);
+    return true;
   }
 
-  private emitAutoEvent(
-    eventDef: EventDefinition,
-    fields: Record<string, unknown>,
-    overrides?: Partial<ValidationMetadata>,
-    touchTimer = true,
-  ): void {
+  private emitAutoEvent(eventDef: EventDefinition, fields: Record<string, unknown>): void {
     if (LOG_LEVELS[eventDef.level] > this.config.minLevel) return;
     const payload = buildPayload({
       contextStore: this.contextStore,
@@ -482,13 +464,9 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       fields,
       currentCorrelationId: this.currentCorrelationId,
       forkId: this.forkId,
-      validationOverrides: overrides,
       strict: this.config.strict,
     });
     callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
-    if (touchTimer) {
-      this.timer.touch();
-    }
   }
 }
 

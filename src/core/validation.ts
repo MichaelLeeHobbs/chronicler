@@ -73,7 +73,6 @@ export const validateFields = <
   event: E,
   payload: EventFields<E>,
 ): FieldValidationResult => {
-  // Rule 3.2: EventFields<E> erases to unknown at runtime; widen for iteration
   const providedFields = (payload ?? {}) as Record<string, unknown>;
   const normalizedFields: Record<string, unknown> = {};
   const missingFields: string[] = [];
@@ -81,7 +80,6 @@ export const validateFields = <
   const invalidValues: string[] = [];
   const unknownFields: string[] = [];
 
-  // Rule 3.2: event.fields may be undefined; fallback to empty record for uniform iteration
   const fieldBuilders = event.fields ?? ({} as Record<string, FieldBuilder<string, boolean>>);
   const definedFieldNames = new Set(Object.keys(fieldBuilders));
 
@@ -151,15 +149,12 @@ export const validateFields = <
  * Build validation metadata from field validation results, omitting empty arrays.
  *
  * @param fieldValidation - Result from {@link validateFields} containing validation issues
- * @param overrides - Additional metadata entries to merge into the result
- * @returns Validation metadata object, or undefined if there are no issues or overrides
+ * @returns Validation metadata object, or undefined if there are no issues
  */
 export const buildValidationMetadata = (
   fieldValidation: FieldValidationResult,
-  overrides?: Partial<ValidationMetadata>,
 ): ValidationMetadata | undefined => {
   const entries = Object.entries({
-    ...overrides,
     missingFields: fieldValidation.missingFields,
     typeErrors: fieldValidation.typeErrors,
     invalidValues: fieldValidation.invalidValues,

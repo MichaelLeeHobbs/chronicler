@@ -22,7 +22,6 @@ export const LOG_LEVELS = {
  * All required log levels that backends must implement.
  * Derived from LOG_LEVELS keys to prevent drift.
  */
-// Rule 3.2: Object.keys returns string[]; cast narrows to known literal union
 export const DEFAULT_REQUIRED_LEVELS = Object.keys(
   LOG_LEVELS,
 ) as readonly (keyof typeof LOG_LEVELS)[];

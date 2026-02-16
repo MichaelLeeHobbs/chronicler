@@ -131,7 +131,6 @@ function resolveDocsOptions(
   let outputPath = config.docs?.outputPath ?? './docs/chronicler-events.md';
 
   if (options.format) {
-    // Rule 3.2: string option narrowed via includes check against known tuple
     if (!VALID_FORMATS.includes(options.format as (typeof VALID_FORMATS)[number])) {
       console.error(
         `Error: Invalid format "${options.format}". Must be one of: ${VALID_FORMATS.join(', ')}`,
@@ -142,7 +141,6 @@ function resolveDocsOptions(
   }
   if (options.output) outputPath = options.output;
 
-  // Rule 3.2: format validated against VALID_FORMATS above; narrow from string
   return { format: format as 'markdown' | 'json', outputPath };
 }
 
