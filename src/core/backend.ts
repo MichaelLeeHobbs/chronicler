@@ -181,7 +181,7 @@ export interface BackendRoute {
  *   { backend: auditBackend,   filter: (level, payload) => payload.eventKey.startsWith('audit.') },
  * ]);
  *
- * const chronicle = createChronicle({ backend: router, metadata: { service: 'app' } });
+ * const chronicle = createChronicle({ backend: router, metadata: { appName: 'my-app' } });
  * ```
  */
 export const createRouterBackend = (routes: BackendRoute[]): LogBackend => {

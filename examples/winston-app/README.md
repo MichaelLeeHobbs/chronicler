@@ -36,7 +36,7 @@ export const chronicle = createChronicle({
     { backend: httpBackend,  filter: (_lvl, p) => p.eventKey.startsWith('http.request.') },
     { backend: mainBackend,  filter: (_lvl, p) => /* everything else */ },
   ]),
-  metadata: { service: 'winston-app', version: '1.0.0', env: 'production' },
+  metadata: { serviceName: 'winston-app', appVersion: '1.0.0', env: 'production' },
 });
 ```
 
@@ -206,7 +206,7 @@ export const chronicle = createChronicle({
         !p.eventKey.startsWith('admin.') && !p.eventKey.startsWith('http.request.'),
     },
   ]),
-  metadata: { service: 'winston-app', version: '1.0.0', env: 'production' },
+  metadata: { serviceName: 'winston-app', appVersion: '1.0.0', env: 'production' },
 });
 ```
 
