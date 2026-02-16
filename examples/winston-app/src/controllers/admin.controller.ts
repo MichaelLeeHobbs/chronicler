@@ -5,7 +5,7 @@
 import type { Request, Response } from 'express';
 
 import { admin } from '../events.js';
-import { chronicleAudit } from '../services/chronicler.js';
+import { chronicle } from '../services/chronicler.js';
 
 export const performAdminAction = (req: Request, res: Response) => {
   const { action, resource } = req.body;
@@ -19,7 +19,7 @@ export const performAdminAction = (req: Request, res: Response) => {
   const success = Math.random() > 0.1; // 90% success rate
 
   // Log audit event
-  chronicleAudit.event(admin.events.action, {
+  chronicle.event(admin.events.action, {
     action,
     userId,
     resource: resource || 'unknown',
@@ -49,7 +49,7 @@ export const loginAttempt = (req: Request, res: Response) => {
   const success = password === 'demo123';
 
   // Log audit event
-  chronicleAudit.event(admin.events.login, {
+  chronicle.event(admin.events.login, {
     userId,
     success,
     ip,

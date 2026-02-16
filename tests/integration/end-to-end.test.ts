@@ -5,6 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { createRouterBackend } from '../../src/core/backend';
 import { createChronicle } from '../../src/core/chronicle';
 import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../src/core/events';
 import { t } from '../../src/core/fields';
@@ -366,6 +367,182 @@ describe('Integration Tests', () => {
       const completes = mock.findAllByKey('api.request.complete');
       expect(completes.length).toBe(1);
       expect(completes[0]!.fields.duration).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('Router Backend — Multi-Stream Routing', () => {
+    const auditEvents = defineEventGroup({
+      key: 'admin',
+      type: 'system',
+      doc: 'Audit events',
+      events: {
+        login: defineEvent({
+          key: 'admin.login',
+          level: 'audit',
+          message: 'Login attempt',
+          doc: 'User login attempt',
+          fields: {
+            userId: t.string().doc('User ID'),
+            success: t.boolean().doc('Login success'),
+          },
+        } as const),
+        action: defineEvent({
+          key: 'admin.action',
+          level: 'audit',
+          message: 'Admin action',
+          doc: 'Administrative action',
+          fields: {
+            action: t.string().doc('Action name'),
+          },
+        } as const),
+      },
+    } as const);
+
+    it('routes events to separate backends by event key prefix', () => {
+      const mainMock = new MockLoggerBackend();
+      const auditMock = new MockLoggerBackend();
+      const httpMock = new MockLoggerBackend();
+
+      const router = createRouterBackend([
+        { backend: auditMock.backend, filter: (_lvl, p) => p.eventKey.startsWith('admin.') },
+        {
+          backend: httpMock.backend,
+          filter: (_lvl, p) => p.eventKey.startsWith('api.request.'),
+        },
+        {
+          backend: mainMock.backend,
+          filter: (_lvl, p) =>
+            !p.eventKey.startsWith('admin.') && !p.eventKey.startsWith('api.request.'),
+        },
+      ]);
+
+      const chronicle = createChronicle({ backend: router, metadata: { app: 'test' } });
+
+      // System event → main
+      chronicle.event(systemEvents.events.startup, { port: 3000, mode: 'test' });
+
+      // Audit event → audit
+      chronicle.event(auditEvents.events.login, { userId: 'admin', success: true });
+
+      // Correlation → http
+      const req = chronicle.startCorrelation(requestCorrelation);
+      req.event(requestCorrelation.events.validated, { method: 'GET', path: '/' });
+      req.complete();
+
+      // Main got system event only
+      expect(mainMock.findByKey('system.startup')).toBeDefined();
+      expect(mainMock.findByKey('admin.login')).toBeUndefined();
+      expect(mainMock.findByKey('api.request.start')).toBeUndefined();
+
+      // Audit got admin event only
+      expect(auditMock.findByKey('admin.login')).toBeDefined();
+      expect(auditMock.findByKey('system.startup')).toBeUndefined();
+      expect(auditMock.findByKey('api.request.start')).toBeUndefined();
+
+      // HTTP got correlation events only
+      expect(httpMock.findByKey('api.request.start')).toBeDefined();
+      expect(httpMock.findByKey('api.request.validated')).toBeDefined();
+      expect(httpMock.findByKey('api.request.complete')).toBeDefined();
+      expect(httpMock.findByKey('system.startup')).toBeUndefined();
+      expect(httpMock.findByKey('admin.login')).toBeUndefined();
+    });
+
+    it('supports fan-out where one event matches multiple routes', () => {
+      const primaryMock = new MockLoggerBackend();
+      const errorMock = new MockLoggerBackend();
+
+      const router = createRouterBackend([
+        { backend: primaryMock.backend },
+        { backend: errorMock.backend, filter: (lvl) => lvl === 'error' || lvl === 'fatal' },
+      ]);
+
+      const chronicle = createChronicle({ backend: router, metadata: {} });
+
+      chronicle.event(systemEvents.events.startup, { port: 3000 });
+      chronicle.log('error', 'Something broke');
+
+      // Primary gets everything
+      expect(primaryMock.getPayloads()).toHaveLength(2);
+
+      // Error backend only gets error-level
+      expect(errorMock.getPayloads()).toHaveLength(1);
+      expect(errorMock.findAllByLevel('error')).toHaveLength(1);
+    });
+
+    it('preserves shared context and correlation IDs across routed backends', () => {
+      const mainMock = new MockLoggerBackend();
+      const httpMock = new MockLoggerBackend();
+
+      const router = createRouterBackend([
+        {
+          backend: httpMock.backend,
+          filter: (_lvl, p) => p.eventKey.startsWith('api.request.'),
+        },
+        {
+          backend: mainMock.backend,
+          filter: (_lvl, p) => !p.eventKey.startsWith('api.request.'),
+        },
+      ]);
+
+      const chronicle = createChronicle({
+        backend: router,
+        metadata: { app: 'my-api' },
+      });
+
+      chronicle.addContext({ deploymentId: 'deploy-abc' });
+
+      const req = chronicle.startCorrelation(requestCorrelation, { requestId: 'req-1' });
+      req.event(requestCorrelation.events.validated, { method: 'POST', path: '/users' });
+      req.complete();
+
+      // HTTP backend got correlation events with full inherited context
+      const validated = httpMock.findByKey('api.request.validated');
+      expect(validated).toBeDefined();
+      expect(validated?.metadata.app).toBe('my-api');
+      expect(validated?.metadata.deploymentId).toBe('deploy-abc');
+      expect(validated?.metadata.requestId).toBe('req-1');
+      expect(validated?.correlationId).toBeDefined();
+
+      // Correlation ID is consistent across all events in the same correlation
+      const start = httpMock.findByKey('api.request.start');
+      const complete = httpMock.findByKey('api.request.complete');
+      expect(start?.correlationId).toBe(validated?.correlationId);
+      expect(complete?.correlationId).toBe(validated?.correlationId);
+    });
+
+    it('routes correlation lifecycle events (fail, timeout) to the correct backend', () => {
+      vi.useFakeTimers();
+      const httpMock = new MockLoggerBackend();
+      const mainMock = new MockLoggerBackend();
+
+      const router = createRouterBackend([
+        {
+          backend: httpMock.backend,
+          filter: (_lvl, p) => p.eventKey.startsWith('api.request.'),
+        },
+        {
+          backend: mainMock.backend,
+          filter: (_lvl, p) => !p.eventKey.startsWith('api.request.'),
+        },
+      ]);
+
+      const chronicle = createChronicle({ backend: router, metadata: {} });
+
+      // Test fail
+      const failReq = chronicle.startCorrelation(requestCorrelation);
+      failReq.fail(new Error('DB down'));
+
+      expect(httpMock.findByKey('api.request.fail')).toBeDefined();
+      expect(mainMock.findByKey('api.request.fail')).toBeUndefined();
+
+      // Test timeout
+      chronicle.startCorrelation(requestCorrelation);
+      vi.advanceTimersByTime(6000);
+
+      expect(httpMock.findByKey('api.request.timeout')).toBeDefined();
+      expect(mainMock.findByKey('api.request.timeout')).toBeUndefined();
+
+      vi.useRealTimers();
     });
   });
 

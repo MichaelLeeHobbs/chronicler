@@ -5,7 +5,7 @@
 import type { NextFunction, Request, Response } from 'express';
 
 import { system } from '../events.js';
-import { chronicleMain } from '../services/chronicler.js';
+import { chronicle } from '../services/chronicler.js';
 
 /**
  * Global error handler
@@ -13,7 +13,7 @@ import { chronicleMain } from '../services/chronicler.js';
  */
 export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction) {
   // Log system error
-  chronicleMain.event(system.events.error, {
+  chronicle.event(system.events.error, {
     error: err,
     context: `${req.method} ${req.path}`,
   });

@@ -187,10 +187,10 @@ async function runDemo() {
 ║                                                            ║
 ║   Chronicler + Winston + Express Demo                      ║
 ║                                                            ║
-║   Demonstrates multi-stream logging with:                  ║
-║   • Main stream (application logs)                         ║
-║   • Audit stream (security/compliance)                     ║
-║   • HTTP stream (request tracking)                         ║
+║   Single chronicle with router-based multi-stream:         ║
+║   • admin.*        → audit stream (security/compliance)    ║
+║   • http.request.* → http stream  (request tracking)       ║
+║   • everything else → main stream (application logs)       ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
 \n`);
@@ -302,7 +302,9 @@ async function runDemo() {
       `  ${colors.dim}• Audit events (login, admin actions) in audit stream${colors.reset}`,
     );
     console.log(`  ${colors.dim}• Error handling with context${colors.reset}`);
-    console.log(`  ${colors.dim}• Performance monitoring (_perf fields)${colors.reset}`);
+    console.log(
+      `  ${colors.dim}• Single chronicle with router-based stream separation${colors.reset}`,
+    );
   } catch (error) {
     log.error(`Demo failed: ${error.message}`);
     console.error(error);

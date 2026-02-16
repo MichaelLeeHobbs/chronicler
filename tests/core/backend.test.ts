@@ -4,6 +4,7 @@ import {
   callBackendMethod,
   createBackend,
   createConsoleBackend,
+  createRouterBackend,
   type LogBackend,
   LogLevel,
   type LogPayload,
@@ -258,5 +259,110 @@ describe('createBackend', () => {
     const backend = createBackend({});
     const missing = validateBackendMethods(backend, ALL_LEVELS);
     expect(missing).toEqual([]);
+  });
+});
+
+describe('createRouterBackend', () => {
+  it('throws when given zero routes', () => {
+    expect(() => createRouterBackend([])).toThrow('at least one route');
+  });
+
+  it('dispatches to all backends when no filters are provided', () => {
+    const mockA = new MockLoggerBackend();
+    const mockB = new MockLoggerBackend();
+    const router = createRouterBackend([{ backend: mockA.backend }, { backend: mockB.backend }]);
+
+    router.info('hello', testPayload);
+
+    expect(mockA.backend.info).toHaveBeenCalledWith('hello', testPayload);
+    expect(mockB.backend.info).toHaveBeenCalledWith('hello', testPayload);
+  });
+
+  it('dispatches only to backends whose filter returns true', () => {
+    const maintenance = new MockLoggerBackend();
+    const audit = new MockLoggerBackend();
+
+    const router = createRouterBackend([
+      { backend: maintenance.backend, filter: (_lvl, p) => !p.eventKey.startsWith('audit.') },
+      { backend: audit.backend, filter: (_lvl, p) => p.eventKey.startsWith('audit.') },
+    ]);
+
+    const maintenancePayload: LogPayload = { ...testPayload, eventKey: 'system.startup' };
+    const auditPayload: LogPayload = { ...testPayload, eventKey: 'audit.login' };
+
+    router.info('startup', maintenancePayload);
+    router.info('login', auditPayload);
+
+    expect(maintenance.getPayloads()).toEqual([maintenancePayload]);
+    expect(audit.getPayloads()).toEqual([auditPayload]);
+  });
+
+  it('filter receives the correct log level', () => {
+    const mock = new MockLoggerBackend();
+    const filterSpy = vi.fn(() => true);
+    const router = createRouterBackend([{ backend: mock.backend, filter: filterSpy }]);
+
+    router.warn('oops', testPayload);
+
+    expect(filterSpy).toHaveBeenCalledWith('warn', testPayload);
+  });
+
+  it('supports all 9 log levels', () => {
+    const mock = new MockLoggerBackend();
+    const router = createRouterBackend([{ backend: mock.backend }]);
+
+    for (const level of ALL_LEVELS) {
+      router[level](`${level} msg`, testPayload);
+    }
+
+    expect(mock.getPayloads()).toHaveLength(ALL_LEVELS.length);
+  });
+
+  it('passes backend validation', () => {
+    const mock = new MockLoggerBackend();
+    const router = createRouterBackend([{ backend: mock.backend }]);
+    const missing = validateBackendMethods(router, ALL_LEVELS);
+    expect(missing).toEqual([]);
+  });
+
+  it('sends to multiple backends when multiple filters match', () => {
+    const mockA = new MockLoggerBackend();
+    const mockB = new MockLoggerBackend();
+    const mockC = new MockLoggerBackend();
+
+    const router = createRouterBackend([
+      { backend: mockA.backend, filter: () => true },
+      { backend: mockB.backend, filter: () => true },
+      { backend: mockC.backend, filter: () => false },
+    ]);
+
+    router.error('err', testPayload);
+
+    expect(mockA.getPayloads()).toHaveLength(1);
+    expect(mockB.getPayloads()).toHaveLength(1);
+    expect(mockC.getPayloads()).toHaveLength(0);
+  });
+
+  it('swallows backend errors without affecting other routes', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+    const throwingBackend = createConsoleBackend();
+    throwingBackend.info = () => {
+      throw new Error('backend exploded');
+    };
+
+    const healthy = new MockLoggerBackend();
+    const router = createRouterBackend([
+      { backend: throwingBackend },
+      { backend: healthy.backend },
+    ]);
+
+    router.info('msg', testPayload);
+
+    // The throwing backend's error is caught by callBackendMethod
+    expect(errorSpy).toHaveBeenCalled();
+    // The healthy backend still received the event
+    expect(healthy.getPayloads()).toHaveLength(1);
+
+    errorSpy.mockRestore();
   });
 });

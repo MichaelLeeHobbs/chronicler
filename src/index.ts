@@ -1,7 +1,9 @@
 export type { ChroniclerCliConfig } from './cli/config';
 export {
+  type BackendRoute,
   createBackend,
   createConsoleBackend,
+  createRouterBackend,
   type LogBackend,
   type LogPayload,
 } from './core/backend';
