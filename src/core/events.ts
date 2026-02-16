@@ -82,6 +82,20 @@ const MAX_EVENT_KEY_LENGTH = 256;
 
 const EVENT_KEY_RE = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/;
 
+/** Validate an event or group key against length and format constraints. */
+const validateEventKey = (key: string, label: string): void => {
+  if (key.length > MAX_EVENT_KEY_LENGTH) {
+    throw new Error(
+      `${label} key "${key.slice(0, 50)}..." exceeds maximum length of ${MAX_EVENT_KEY_LENGTH} characters.`,
+    );
+  }
+  if (!EVENT_KEY_RE.test(key)) {
+    throw new Error(
+      `Invalid ${label} key "${key}". Keys must be dotted camelCase identifiers (e.g. "user.created", "http.request.started").`,
+    );
+  }
+};
+
 /**
  * Define an event with compile-time type safety.
  *
@@ -114,16 +128,7 @@ export const defineEvent = <
 >(
   event: EventDefinition<Key, Fields>,
 ): EventDefinition<Key, Fields> => {
-  if (event.key.length > MAX_EVENT_KEY_LENGTH) {
-    throw new Error(
-      `Event key "${event.key.slice(0, 50)}..." exceeds maximum length of ${MAX_EVENT_KEY_LENGTH} characters.`,
-    );
-  }
-  if (!EVENT_KEY_RE.test(event.key)) {
-    throw new Error(
-      `Invalid event key "${event.key}". Keys must be dotted camelCase identifiers (e.g. "user.created", "http.request.started").`,
-    );
-  }
+  validateEventKey(event.key, 'Event');
   return event;
 };
 
@@ -164,16 +169,7 @@ const prefixEventKeys = (
 export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEventGroup>(
   group: Group,
 ): Group => {
-  if (group.key.length > MAX_EVENT_KEY_LENGTH) {
-    throw new Error(
-      `Group key "${group.key.slice(0, 50)}..." exceeds maximum length of ${MAX_EVENT_KEY_LENGTH} characters.`,
-    );
-  }
-  if (!EVENT_KEY_RE.test(group.key)) {
-    throw new Error(
-      `Invalid group key "${group.key}". Keys must be dotted camelCase identifiers (e.g. "api.request", "http.server").`,
-    );
-  }
+  validateEventKey(group.key, 'Group');
   const prefixed = prefixEventKeys(group.key, group.events);
   if (prefixed !== group.events) {
     return { ...group, events: prefixed } as Group;
@@ -273,16 +269,7 @@ export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
   events: WithAutoEvents<Group['events']>;
   timeout: number;
 } => {
-  if (group.key.length > MAX_EVENT_KEY_LENGTH) {
-    throw new Error(
-      `Group key "${group.key.slice(0, 50)}..." exceeds maximum length of ${MAX_EVENT_KEY_LENGTH} characters.`,
-    );
-  }
-  if (!EVENT_KEY_RE.test(group.key)) {
-    throw new Error(
-      `Invalid group key "${group.key}". Keys must be dotted camelCase identifiers (e.g. "api.request", "http.server").`,
-    );
-  }
+  validateEventKey(group.key, 'Group');
   const autoEvents = buildAutoEvents(group.key);
   const prefixed = prefixEventKeys(group.key, group.events) ?? {};
 

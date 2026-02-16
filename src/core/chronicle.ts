@@ -366,7 +366,6 @@ interface CorrelationChronicleArgs {
 
 class CorrelationChronicleImpl implements CorrelationChronicle {
   private readonly config: ResolvedChroniclerConfig;
-  private readonly group: NormalizedCorrelationGroup;
   private readonly contextStore: ContextStore;
   private readonly currentCorrelationId: () => string;
   private readonly correlationIdGenerator: () => string;
@@ -380,14 +379,13 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
 
   constructor(args: CorrelationChronicleArgs) {
     this.config = args.config;
-    this.group = args.group;
     this.contextStore = args.contextStore;
     this.currentCorrelationId = args.currentCorrelationId;
     this.correlationIdGenerator = args.correlationIdGenerator;
     this.forkId = args.forkId;
     this.activeCorrelations = args.activeCorrelations ?? { count: 0 };
-    this.timer = new CorrelationTimer(this.group.timeout, () => this.timeout());
-    this.autoEvents = this.group.events as CorrelationAutoEvents;
+    this.timer = new CorrelationTimer(args.group.timeout, () => this.timeout());
+    this.autoEvents = args.group.events as CorrelationAutoEvents;
     this.timer.start();
     this.emitAutoEvent(this.autoEvents.start, {});
   }
