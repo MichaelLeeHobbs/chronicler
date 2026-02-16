@@ -1,21 +1,44 @@
 import { isReservedTopLevelField } from './reserved';
-import { isSimpleValue } from './utils';
 
-type SimpleValue = string | number | boolean | null;
-export type ContextValue = SimpleValue | SimpleValue[];
+/** Type guard for context-safe primitive values. */
+const isSimpleValue = (value: unknown): value is string | number | boolean | null =>
+  value === null ||
+  typeof value === 'string' ||
+  typeof value === 'number' ||
+  typeof value === 'boolean';
+
+/** Object prototype keys blocked to prevent prototype pollution. */
+const DANGEROUS_KEYS = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+  'toString',
+  'valueOf',
+  'hasOwnProperty',
+  'isPrototypeOf',
+  'propertyIsEnumerable',
+  'toLocaleString',
+  '__defineGetter__',
+  '__defineSetter__',
+  '__lookupGetter__',
+  '__lookupSetter__',
+]);
+
+export type ContextValue = string | number | boolean | null;
 
 export type ContextRecord = Record<string, ContextValue>;
 
 export interface ContextCollisionDetail {
-  key: string;
-  existingValue: ContextValue;
-  attemptedValue: ContextValue;
+  readonly key: string;
+  readonly existingValue: ContextValue;
+  readonly attemptedValue: ContextValue;
 }
 
 export interface ContextValidationResult {
-  collisions: string[];
-  reserved: string[];
-  collisionDetails: ContextCollisionDetail[];
+  readonly collisions: string[];
+  readonly reserved: string[];
+  readonly collisionDetails: ContextCollisionDetail[];
+  readonly dropped: string[];
 }
 
 /**
@@ -40,11 +63,12 @@ export interface ContextValidationResult {
  * @returns Sanitized context and validation results
  *
  * @see {@link ContextValidationResult} for validation result structure
- * @see {@link chroniclerSystemEvents} for system events emitted on violations
  */
+/* eslint-disable max-lines-per-function, complexity -- validation logic: each check branch is a distinct concern */
 export const sanitizeContextInput = (
   context: ContextRecord,
   existingContext: ContextRecord = {},
+  maxNewKeys = Infinity,
 ): {
   context: ContextRecord;
   validation: ContextValidationResult;
@@ -53,6 +77,8 @@ export const sanitizeContextInput = (
   const collisions: string[] = [];
   const reserved: string[] = [];
   const collisionDetails: ContextCollisionDetail[] = [];
+  const dropped: string[] = [];
+  let acceptedCount = 0;
 
   for (const [key, rawValue] of Object.entries(context)) {
     if (isReservedTopLevelField(key)) {
@@ -60,22 +86,35 @@ export const sanitizeContextInput = (
       continue;
     }
 
-    // TODO: We should likely warn/log about complex types being skipped or support them properly
-    // Invalid type - skip this key - runtime type checking only for simple values
+    if (DANGEROUS_KEYS.has(key)) {
+      reserved.push(key);
+      continue;
+    }
+
+    // Invalid type (object, array, undefined, etc.) - skip this key
     if (!isSimpleValue(rawValue)) continue;
 
-    if (key in existingContext || key in sanitized) {
+    if (Object.hasOwn(existingContext, key) || Object.hasOwn(sanitized, key)) {
       collisions.push(key);
-      const existingValue = (key in sanitized ? sanitized[key] : existingContext[key])!;
+      const existingValue = (
+        Object.hasOwn(sanitized, key) ? sanitized[key] : existingContext[key]
+      )!;
       collisionDetails.push({ key, existingValue, attemptedValue: rawValue });
       continue;
     }
 
+    if (acceptedCount >= maxNewKeys) {
+      dropped.push(key);
+      continue;
+    }
+
     sanitized[key] = rawValue;
+    acceptedCount++;
   }
 
-  return { context: sanitized, validation: { collisions, reserved, collisionDetails } };
+  return { context: sanitized, validation: { collisions, reserved, collisionDetails, dropped } };
 };
+/* eslint-enable max-lines-per-function, complexity */
 
 /**
  * Immutable-snapshot context store for structured log metadata.
@@ -87,9 +126,11 @@ export const sanitizeContextInput = (
  */
 export class ContextStore {
   private readonly context: ContextRecord = {};
+  private readonly maxKeys: number;
 
-  constructor(initial: ContextRecord = {}) {
-    const { context } = sanitizeContextInput(initial);
+  constructor(initial: ContextRecord = {}, maxKeys = Infinity) {
+    this.maxKeys = maxKeys;
+    const { context } = sanitizeContextInput(initial, {}, maxKeys);
     this.context = { ...context };
   }
 
@@ -100,7 +141,9 @@ export class ContextStore {
    * @returns Validation result with any collisions or reserved field attempts
    */
   add(raw: ContextRecord): ContextValidationResult {
-    const { context, validation } = sanitizeContextInput(raw, this.context);
+    const remaining = Math.max(0, this.maxKeys - Object.keys(this.context).length);
+    const { context, validation } = sanitizeContextInput(raw, this.context, remaining);
+    // Intentional mutation: `readonly` prevents reassignment but allows property addition
     Object.assign(this.context, context);
     return validation;
   }

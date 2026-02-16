@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * Chronicler CLI
  */
@@ -8,10 +6,12 @@ import path from 'node:path';
 
 import { Command } from 'commander';
 
+import type { ChroniclerCliConfig } from './config';
 import { loadConfig, validateEventsFile } from './config-loader';
 import { generateDocs } from './generator/docs-generator';
-import { parseEventsFile } from './parser/ast-parser';
+import { parseEventsFile } from './parser/runtime-parser';
 import { formatErrors, validateEventTree } from './parser/validator';
+import type { ParsedEventTree, ValidationError } from './types';
 
 const program = new Command();
 
@@ -50,76 +50,29 @@ program
     }
   });
 
-/**
- * Run validation command
- */
-async function runValidate(options: { verbose?: boolean; json?: boolean; config?: string }) {
-  const startTime = Date.now();
+/** Derive the working directory from a config file path, or undefined for process.cwd(). */
+function resolveCwd(configPath?: string): string | undefined {
+  return configPath ? path.dirname(path.resolve(configPath)) : undefined;
+}
 
-  if (!options.json) {
-    console.log('🔍 Loading configuration...');
-  }
+/** Format validation results as JSON and exit. */
+function printValidateJson(tree: ParsedEventTree, errors: ValidationError[], elapsed: number) {
+  const result = {
+    success: errors.length === 0,
+    eventCount: tree.events.length,
+    groupCount: tree.groups.length,
+    errorCount: errors.length,
+    errors: errors.map((e) => ({ type: e.type, message: e.message })),
+    elapsedMs: elapsed,
+  };
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(errors.length > 0 ? 1 : 0);
+}
 
-  const config = await loadConfig(
-    options.config ? path.dirname(path.resolve(options.config)) : undefined,
-  );
-
-  if (options.verbose && !options.json) {
-    console.log(`   Events file: ${config.eventsFile}`);
-    console.log(`   Enforce key paths: ${config.validation?.enforceKeyPaths ?? true}`);
-    console.log(`   Check reserved fields: ${config.validation?.checkReservedFields ?? true}`);
-  }
-
-  if (!options.json) {
-    console.log('📂 Validating events file exists...');
-  }
-  validateEventsFile(config);
-
-  if (!options.json) {
-    console.log(`📖 Parsing ${config.eventsFile}...`);
-  }
-
-  const tree = parseEventsFile(config.eventsFile);
-
-  if (options.verbose && !options.json) {
-    console.log(`   Found ${tree.events.length} event definition(s)`);
-    console.log(`   Found ${tree.groups.length} group(s)`);
-  } else if (!options.json) {
-    console.log(`   Found ${tree.events.length} event(s)`);
-  }
-
-  // Run validation
-  const errors = validateEventTree(tree);
-
-  const elapsed = Date.now() - startTime;
-
-  if (options.json) {
-    // JSON output for tooling
-    const result = {
-      success: errors.length === 0,
-      eventCount: tree.events.length,
-      groupCount: tree.groups.length,
-      errorCount: errors.length,
-      errors: errors.map((e) => ({
-        type: e.type,
-        message: e.message,
-        location: e.location,
-      })),
-      elapsedMs: elapsed,
-    };
-    console.log(JSON.stringify(result, null, 2));
-    process.exit(errors.length > 0 ? 1 : 0);
-  }
-
-  if (errors.length > 0) {
-    console.error('\n❌ Validation failed:\n');
-    console.error(formatErrors(errors));
-    console.error(`\n⏱️  Completed in ${elapsed}ms`);
-    process.exit(1);
-  }
-
+/** Print human-readable success summary and exit. */
+function printValidateSuccess(tree: ParsedEventTree, verbose: boolean, elapsed: number) {
   console.log('\n✅ All event definitions are valid!');
-  if (options.verbose) {
+  if (verbose) {
     console.log(`\n📊 Summary:`);
     console.log(`   Events: ${tree.events.length}`);
     console.log(`   Groups: ${tree.groups.length}`);
@@ -129,39 +82,85 @@ async function runValidate(options: { verbose?: boolean; json?: boolean; config?
   process.exit(0);
 }
 
-/**
- * Run docs generation command
- */
+async function runValidate(options: { verbose?: boolean; json?: boolean; config?: string }) {
+  const startTime = Date.now();
+  const log = (msg: string) => !options.json && console.log(msg);
+
+  log('🔍 Loading configuration...');
+  const config = await loadConfig(resolveCwd(options.config));
+
+  if (options.verbose && !options.json) {
+    console.log(`   Events file: ${config.eventsFile}`);
+  }
+
+  log('📂 Validating events file exists...');
+  validateEventsFile(config);
+
+  log(`📖 Parsing ${config.eventsFile}...`);
+  const tree = await parseEventsFile(config.eventsFile);
+
+  if (options.verbose && !options.json) {
+    console.log(`   Found ${tree.events.length} event definition(s)`);
+    console.log(`   Found ${tree.groups.length} group(s)`);
+  } else {
+    log(`   Found ${tree.events.length} event(s)`);
+  }
+
+  const errors = validateEventTree(tree);
+  const elapsed = Date.now() - startTime;
+
+  if (options.json) return printValidateJson(tree, errors, elapsed);
+
+  if (errors.length > 0) {
+    console.error('\n❌ Validation failed:\n');
+    console.error(formatErrors(errors));
+    console.error(`\n⏱️  Completed in ${elapsed}ms`);
+    process.exit(1);
+  }
+
+  printValidateSuccess(tree, options.verbose ?? false, elapsed);
+}
+
+/** Merge CLI flags with config-file docs options, validating the format. */
+function resolveDocsOptions(
+  config: { docs?: { format?: string; outputPath?: string } },
+  options: { format?: string; output?: string },
+): { format: 'markdown' | 'json'; outputPath: string } {
+  const VALID_FORMATS = ['markdown', 'json'] as const;
+  let format = config.docs?.format ?? 'markdown';
+  let outputPath = config.docs?.outputPath ?? './docs/chronicler-events.md';
+
+  if (options.format) {
+    // Rule 3.2: string option narrowed via includes check against known tuple
+    if (!VALID_FORMATS.includes(options.format as (typeof VALID_FORMATS)[number])) {
+      console.error(
+        `Error: Invalid format "${options.format}". Must be one of: ${VALID_FORMATS.join(', ')}`,
+      );
+      process.exit(1);
+    }
+    format = options.format;
+  }
+  if (options.output) outputPath = options.output;
+
+  // Rule 3.2: format validated against VALID_FORMATS above; narrow from string
+  return { format: format as 'markdown' | 'json', outputPath };
+}
+
 async function runDocs(options: { format?: string; output?: string; config?: string }) {
   const startTime = Date.now();
 
   console.log('🔍 Loading configuration...');
-  const config = await loadConfig(
-    options.config ? path.dirname(path.resolve(options.config)) : undefined,
-  );
-
-  // Override config with CLI options
-  if (options.format) {
-    config.docs = config.docs ?? {};
-    config.docs.format = options.format as 'markdown' | 'json';
-  }
-  if (options.output) {
-    config.docs = config.docs ?? {};
-    config.docs.outputPath = options.output;
-  }
-
-  const outputPath = config.docs?.outputPath ?? './docs/chronicler-events.md';
-  const format = config.docs?.format ?? 'markdown';
+  const loadedConfig = await loadConfig(resolveCwd(options.config));
+  const { format, outputPath } = resolveDocsOptions(loadedConfig, options);
+  const config: ChroniclerCliConfig = { ...loadedConfig, docs: { format, outputPath } };
 
   console.log(`📂 Validating events file exists...`);
   validateEventsFile(config);
 
   console.log(`📖 Parsing ${config.eventsFile}...`);
-  const tree = parseEventsFile(config.eventsFile);
-
+  const tree = await parseEventsFile(config.eventsFile);
   console.log(`   Found ${tree.events.length} event(s)`);
 
-  // Validate before generating docs
   const errors = validateEventTree(tree);
   if (errors.length > 0) {
     console.error('\n⚠️  Validation warnings found:\n');
@@ -173,13 +172,11 @@ async function runDocs(options: { format?: string; output?: string; config?: str
   generateDocs(tree, config);
 
   const elapsed = Date.now() - startTime;
-
   console.log(`✅ Documentation generated successfully!`);
   console.log(`   Output: ${outputPath}`);
   console.log(`   Format: ${format}`);
   console.log(`   Events documented: ${tree.events.length}`);
   console.log(`⏱️  Completed in ${elapsed}ms`);
-
   process.exit(0);
 }
 

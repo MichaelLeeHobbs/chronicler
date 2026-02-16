@@ -1,27 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  assertNoReservedKeys,
-  isReservedFieldPath,
-  isReservedTopLevelField,
-} from '../../src/core/reserved';
+import { assertNoReservedKeys, isReservedTopLevelField } from '../../src/core/reserved';
 
 describe('reserved fields', () => {
   it('detects top-level reserved fields', () => {
     expect(isReservedTopLevelField('eventKey')).toBe(true);
     expect(isReservedTopLevelField('fields')).toBe(true);
+    expect(isReservedTopLevelField('_validation')).toBe(true);
     expect(isReservedTopLevelField('customField')).toBe(false);
   });
 
-  it('detects nested reserved paths', () => {
-    expect(isReservedFieldPath('_validation.missingFields')).toBe(true);
-    expect(isReservedFieldPath('_perf.heapUsed')).toBe(true);
-    expect(isReservedFieldPath('fields.port')).toBe(false);
-  });
-
   it('finds reserved keys within objects', () => {
-    const invalid = assertNoReservedKeys({ eventKey: 'x', custom: 1, _perf: 'bad' });
+    const invalid = assertNoReservedKeys({ eventKey: 'x', custom: 1 });
 
-    expect(invalid).toEqual(['eventKey', '_perf']);
+    expect(invalid).toEqual(['eventKey']);
   });
 });

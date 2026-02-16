@@ -36,17 +36,15 @@ Package manager is **pnpm 10.18.0**. Lint enforces zero warnings (`--max-warning
 The central API flow: `createChronicle(config)` → `Chronicler` interface → `event()` / `startCorrelation()` / `fork()`.
 
 - **chronicle.ts** — Factory (`createChronicle`) and main `Chronicler`/`CorrelationChronicle` implementations. `buildPayload()` orchestrates validation, sampling, and payload assembly before calling the backend.
-- **events.ts** — `defineEvent()` creates type-safe event schemas. `defineCorrelationGroup()` auto-generates lifecycle events (`.start`, `.complete`, `.timeout`, `.metadataWarning`). Event groups are discriminated by `type: 'system' | 'correlation'`.
+- **events.ts** — `defineEvent()` creates type-safe event schemas. `defineCorrelationGroup()` auto-generates lifecycle events (`.start`, `.complete`, `.fail`, `.timeout`). Event groups are discriminated by `type: 'system' | 'correlation'`.
 - **fields.ts** — Field builder system via `t` object (`t.string()`, `t.number()`, `t.boolean()`, `t.error()`). Builders chain `.optional()` and `.doc()`. `InferFields<F>` derives TypeScript types from field definitions at compile time.
 - **validation.ts** — Validates required fields and types at runtime. Errors are captured in `_validation` metadata, never thrown.
-- **ContextStore.ts** — Immutable context snapshots. Context collisions preserve original values; reserved field attempts are silently dropped. Both emit system events.
+- **context-store.ts** — Immutable context snapshots. Context collisions preserve original values; reserved field attempts are silently dropped. `addContext()` returns `ContextValidationResult`.
 - **backend.ts** — `LogBackend` is a simple `Record<LogLevel, (message, payload) => void>`. Nine log levels: fatal(0) through trace(8).
-- **constants.ts** — Global constants: log level priority map, default timeout (5min), fork ID separator (`.`), reserved field prefix (`chronicler.`).
-- **system-events.ts** — Internal `contextCollision` and `reservedFieldAttempt` system events.
-- **reserved.ts** — Reserved top-level fields (eventKey, level, message, correlationId, forkId, timestamp, hostname, fields, \_perf, \_validation). O(1) lookups via Set.
-- **perf.ts** — Optional memory/CPU sampling. CPU uses delta tracking via `PerfContext`.
-- **CorrelationTimer.ts** — Auto-reset timeout management for correlations.
-- **errors.ts** — Custom error classes: `UnsupportedLogLevelError`, `ReservedFieldError`, `InvalidConfigError`, `BackendMethodError`.
+- **constants.ts** — Global constants: log level priority map, default timeout (5min), fork ID separator (`.`).
+- **reserved.ts** — Reserved top-level fields (eventKey, level, message, correlationId, forkId, timestamp, hostname, fields, \_validation). O(1) lookups via Set.
+- **correlation-timer.ts** — Auto-reset timeout management for correlations.
+- **errors.ts** — Single `ChroniclerError` class with `code` discriminator (`UNSUPPORTED_LOG_LEVEL`, `RESERVED_FIELD`, `BACKEND_METHOD`, `FORK_DEPTH_EXCEEDED`, `CORRELATION_LIMIT_EXCEEDED`).
 
 ### CLI (`src/cli/`)
 
@@ -61,8 +59,7 @@ Clean re-export surface. All public types and functions are exported from here.
 - **Non-throwing validation**: Field/context validation failures are captured in `_validation` payload metadata, not thrown as exceptions. Only configuration errors (missing backend, reserved fields in metadata) throw.
 - **Immutable context**: `ContextStore` returns copies, not references. Collisions preserve original values.
 - **Fork hierarchy**: Dotted IDs (`0`, `1`, `1.1`, `1.2.1`) represent parent-child fork relationships. Root is always `0`.
-- **`as const` required**: Event definitions must use `as const` for full type inference through the field builder system.
-- **Path alias**: `@chronicler/*` maps to `src/*` in tsconfig.
+- **`as const` not required**: `defineEvent` uses const generic parameters (TS 5.0+), so literal types narrow automatically.
 
 ## Testing
 
@@ -77,4 +74,4 @@ Test directories mirror source: `tests/core/`, `tests/cli/`, `tests/types/` (com
 - Constants: `UPPER_SNAKE_CASE`
 - Types/interfaces: `PascalCase`
 - Functions: `camelCase`
-- Event keys: dotted lowercase (`system.startup`, `api.request.validated`)
+- Event keys: dotted camelCase — each segment starts lowercase (`system.startup`, `api.request.validated`, `http.requestStarted`)

@@ -1,5 +1,3 @@
-import * as os from 'node:os';
-
 /**
  * Global constants used throughout Chronicler
  */
@@ -21,20 +19,13 @@ export const LOG_LEVELS = {
 } as const;
 
 /**
- * All required log levels that backends must implement
- * This is a readonly array to prevent accidental modification
+ * All required log levels that backends must implement.
+ * Derived from LOG_LEVELS keys to prevent drift.
  */
-export const DEFAULT_REQUIRED_LEVELS = [
-  'fatal',
-  'critical',
-  'alert',
-  'error',
-  'warn',
-  'audit',
-  'info',
-  'debug',
-  'trace',
-] as const;
+// Rule 3.2: Object.keys returns string[]; cast narrows to known literal union
+export const DEFAULT_REQUIRED_LEVELS = Object.keys(
+  LOG_LEVELS,
+) as readonly (keyof typeof LOG_LEVELS)[];
 
 /**
  * Default correlation timeout in milliseconds (5 minutes)
@@ -53,18 +44,16 @@ export const ROOT_FORK_ID = '0';
 export const FORK_ID_SEPARATOR = '.';
 
 /**
- * Default hostname for correlation ID generation
+ * Default maximum number of context keys per ContextStore
  */
-export const DEFAULT_HOSTNAME = process.env.HOSTNAME ?? os.hostname() ?? 'unknown-host';
+export const DEFAULT_MAX_CONTEXT_KEYS = 100;
 
 /**
- * Reserved prefix for Chronicler system events
- * User events cannot start with this prefix
+ * Default maximum fork nesting depth
  */
-export const SYSTEM_EVENT_PREFIX = 'chronicler.';
+export const DEFAULT_MAX_FORK_DEPTH = 10;
 
 /**
- * Conversion factor from microseconds to milliseconds
- * Used for CPU usage calculations
+ * Default maximum number of active (uncompleted) correlations
  */
-export const MICROSECONDS_TO_MS = 1000;
+export const DEFAULT_MAX_ACTIVE_CORRELATIONS = 1000;

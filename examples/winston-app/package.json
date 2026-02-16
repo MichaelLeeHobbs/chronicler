@@ -10,7 +10,7 @@
     "docs": "tsx ../../src/cli/index.ts docs"
   },
   "dependencies": {
-    "chronicler": "workspace:*",
+    "@ubercode/chronicler": "workspace:*",
     "express": "^5.1.0",
     "flatted": "^3.3.3",
     "winston": "^3",

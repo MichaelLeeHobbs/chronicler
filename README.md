@@ -69,30 +69,16 @@ const request = defineCorrelationGroup({
   },
 });
 
-// 2) Create a backend — any object with methods for each log level
-const consoleBackend = {
-  fatal: (msg: string, data: unknown) => console.error(msg, data),
-  critical: (msg: string, data: unknown) => console.error(msg, data),
-  alert: (msg: string, data: unknown) => console.error(msg, data),
-  error: (msg: string, data: unknown) => console.error(msg, data),
-  warn: (msg: string, data: unknown) => console.warn(msg, data),
-  audit: (msg: string, data: unknown) => console.info(msg, data),
-  info: (msg: string, data: unknown) => console.info(msg, data),
-  debug: (msg: string, data: unknown) => console.debug(msg, data),
-  trace: (msg: string, data: unknown) => console.debug(msg, data),
-};
-
-// 3) Create a chronicle
+// 2) Create a chronicle (uses console backend by default)
 const chronicle = createChronicle({
-  backend: consoleBackend,
   metadata: { service: 'api', env: 'dev' },
   monitoring: { memory: true, cpu: true },
 });
 
-// 4) Emit typed events
+// 3) Emit typed events
 chronicle.event(system.events.startup, { port: 3000 });
 
-// 5) Correlate work
+// 4) Correlate work
 const corr = chronicle.startCorrelation(request, { requestId: 'r-123' });
 corr.event(request.events.validated, { method: 'GET', path: '/' });
 
@@ -102,6 +88,23 @@ forkA.event(system.events.startup, { port: 0 });
 
 // Complete the correlation (emits api.request.complete with duration)
 corr.complete();
+```
+
+### Custom backends
+
+```ts
+import { createConsoleBackend, createBackend } from '@ubercode/chronicler';
+
+// Zero-config console backend (same as the default)
+const consoleBackend = createConsoleBackend();
+
+// Partial backend — only provide the levels you care about.
+// Missing levels fall back through a chain (e.g. fatal → critical → error → warn → info),
+// then to console if nothing matches.
+const customBackend = createBackend({
+  error: (msg, payload) => myErrorTracker.capture(msg, payload),
+  info: (msg, payload) => myLogger.info(msg, payload),
+});
 ```
 
 ## API highlights

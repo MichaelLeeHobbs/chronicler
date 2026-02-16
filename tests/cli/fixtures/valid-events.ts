@@ -1,10 +1,9 @@
 /**
  * Valid event definitions for testing CLI parser.
- * Uses raw FieldBuilder-shaped objects (not t.* builders) because the AST parser
- * extracts object literals from source — it cannot evaluate call expressions.
  */
 
 import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../../src/core/events';
+import { t } from '../../../src/core/fields';
 
 export const startupEvent = defineEvent({
   key: 'system.startup',
@@ -12,8 +11,8 @@ export const startupEvent = defineEvent({
   message: 'Application started',
   doc: 'Logged when the application starts',
   fields: {
-    port: { _type: 'number', _required: true, _doc: 'Server port' },
-    mode: { _type: 'string', _required: false, _doc: 'Runtime mode' },
+    port: t.number().doc('Server port'),
+    mode: t.string().optional().doc('Runtime mode'),
   },
 } as const);
 
@@ -46,8 +45,8 @@ export const queryEvents = defineCorrelationGroup({
       message: 'Query executed',
       doc: 'Logged when query completes',
       fields: {
-        duration: { _type: 'number', _required: true, _doc: 'Query duration in ms' },
-        resultCount: { _type: 'number', _required: true, _doc: 'Number of results' },
+        duration: t.number().doc('Query duration in ms'),
+        resultCount: t.number().doc('Number of results'),
       },
     } as const),
   },

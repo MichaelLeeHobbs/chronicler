@@ -20,6 +20,7 @@ export class CorrelationTimer {
     this.clear();
     if (this.timeout > 0) {
       this.timeoutId = setTimeout(this.onTimeout, this.timeout);
+      this.timeoutId.unref();
     }
   }
 

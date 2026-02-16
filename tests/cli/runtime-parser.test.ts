@@ -2,16 +2,16 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { parseEventsFile } from '../../src/cli/parser/ast-parser';
+import { parseEventsFile } from '../../src/cli/parser/runtime-parser';
 import { validateEventTree } from '../../src/cli/parser/validator';
 
-describe('AST Parser', () => {
+describe('Runtime Parser', () => {
   const fixturesPath = path.join(__dirname, 'fixtures');
 
   describe('parseEventsFile', () => {
-    it('parses valid event definitions', () => {
+    it('parses valid event definitions', async () => {
       const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = parseEventsFile(filePath);
+      const tree = await parseEventsFile(filePath);
 
       expect(tree.events.length).toBeGreaterThan(0);
       expect(tree.errors.length).toBe(0);
@@ -27,9 +27,9 @@ describe('AST Parser', () => {
       expect(startupEvent!.fields!.port!._required).toBe(true);
     });
 
-    it('extracts all event properties correctly', () => {
+    it('extracts all event properties correctly', async () => {
       const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = parseEventsFile(filePath);
+      const tree = await parseEventsFile(filePath);
 
       const queryEvent = tree.events.find((e) => e.key === 'api.query.executed');
       expect(queryEvent).toBeDefined();
@@ -41,9 +41,9 @@ describe('AST Parser', () => {
       expect(Object.keys(queryEvent?.fields ?? {})).toHaveLength(2);
     });
 
-    it('extracts event groups', () => {
+    it('extracts event groups', async () => {
       const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = parseEventsFile(filePath);
+      const tree = await parseEventsFile(filePath);
 
       expect(tree.groups.length).toBeGreaterThanOrEqual(2);
 
@@ -53,9 +53,9 @@ describe('AST Parser', () => {
       expect(systemGroup?.doc).toBe('System-level events');
     });
 
-    it('extracts correlation groups with timeout', () => {
+    it('extracts correlation groups with timeout', async () => {
       const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = parseEventsFile(filePath);
+      const tree = await parseEventsFile(filePath);
 
       const queryGroup = tree.groups.find((g) => g.key === 'api.query');
       expect(queryGroup).toBeDefined();
@@ -64,9 +64,9 @@ describe('AST Parser', () => {
       expect(queryGroup?.timeout).toBe(30000);
     });
 
-    it('extracts inline events within groups', () => {
+    it('extracts inline events within groups', async () => {
       const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = parseEventsFile(filePath);
+      const tree = await parseEventsFile(filePath);
 
       const queryGroup = tree.groups.find((g) => g.key === 'api.query');
       expect(queryGroup).toBeDefined();
@@ -80,22 +80,23 @@ describe('AST Parser', () => {
       expect(Object.keys(executed?.fields ?? {})).toHaveLength(2);
     });
 
-    it('handles variable reference events gracefully', () => {
+    it('resolves variable reference events', async () => {
       const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = parseEventsFile(filePath);
+      const tree = await parseEventsFile(filePath);
 
-      // systemEvents group uses variable references (startup: startupEvent)
-      // which can't be resolved statically — events record should be empty
+      // Runtime import resolves variable references (startup: startupEvent)
       const systemGroup = tree.groups.find((g) => g.key === 'system');
       expect(systemGroup).toBeDefined();
-      expect(Object.keys(systemGroup!.events)).toHaveLength(0);
+      expect(Object.keys(systemGroup!.events)).toHaveLength(2);
+      expect(Object.keys(systemGroup!.events)).toContain('startup');
+      expect(Object.keys(systemGroup!.events)).toContain('shutdown');
     });
   });
 
   describe('validator', () => {
-    it('passes validation for valid events', () => {
+    it('passes validation for valid events', async () => {
       const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = parseEventsFile(filePath);
+      const tree = await parseEventsFile(filePath);
       const errors = validateEventTree(tree);
 
       expect(errors).toHaveLength(0);

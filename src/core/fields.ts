@@ -28,7 +28,9 @@ export interface RequiredFieldBuilder<T extends string> extends FieldBuilder<T, 
 }
 
 /**
- * Field type builders - use these to define fields in events
+ * Field type builders - use these to define fields in events.
+ *
+ * Tip: if `t` collides with your i18n library, import the {@link field} alias instead.
  *
  * @example
  * ```typescript
@@ -41,8 +43,8 @@ export interface RequiredFieldBuilder<T extends string> extends FieldBuilder<T, 
  *     age: t.number().optional().doc('User age'),
  *     isActive: t.boolean(),
  *     error: t.error().optional(),
- *   }
- * } as const);
+ *   },
+ * });
  * ```
  */
 export const t = {
@@ -53,32 +55,37 @@ export const t = {
 } as const;
 
 /**
+ * Alias for {@link t} — use whichever name fits your codebase.
+ *
+ * `field` avoids collisions with common i18n conventions that also use `t`.
+ */
+export const field = t;
+
+/**
  * Internal: Create a field builder with optional/doc chaining support
  */
-function createFieldBuilder<T extends string>(type: T): RequiredFieldBuilder<T> {
-  const builder: RequiredFieldBuilder<T> = {
+function makeOptional<T extends string>(type: T, doc: string | undefined): OptionalFieldBuilder<T> {
+  return {
+    _type: type,
+    _required: false as const,
+    _doc: doc,
+    optional: () => makeOptional(type, doc),
+    doc: (description: string) => makeOptional(type, description),
+  };
+}
+
+function makeRequired<T extends string>(type: T, doc: string | undefined): RequiredFieldBuilder<T> {
+  return {
     _type: type,
     _required: true as const,
-    _doc: undefined,
-    optional: () => {
-      const optional: OptionalFieldBuilder<T> = {
-        _type: type,
-        _required: false as const,
-        _doc: builder._doc,
-        optional: () => optional,
-        doc: (description: string) => {
-          (optional as { _doc: string | undefined })._doc = description;
-          return optional;
-        },
-      };
-      return optional;
-    },
-    doc: (description: string) => {
-      (builder as { _doc: string | undefined })._doc = description;
-      return builder;
-    },
+    _doc: doc,
+    optional: () => makeOptional(type, doc),
+    doc: (description: string) => makeRequired(type, description),
   };
-  return builder;
+}
+
+function createFieldBuilder<T extends string>(type: T): RequiredFieldBuilder<T> {
+  return makeRequired(type, undefined);
 }
 
 /**
@@ -98,7 +105,7 @@ export type InferFieldType<F> =
         : T extends 'boolean'
           ? boolean
           : T extends 'error'
-            ? unknown
+            ? Error | string
             : never
     : never;
 
@@ -123,46 +130,3 @@ type BuildOptional<F extends Record<string, FieldBuilder<string, boolean>>> = {
 export type InferFields<F extends Record<string, FieldBuilder<string, boolean>>> = Simplify<
   BuildRequired<F> & BuildOptional<F>
 >;
-
-/**
- * Extract runtime metadata from field builder for validation and docs
- */
-export interface FieldMetadata {
-  type: 'string' | 'number' | 'boolean' | 'error';
-  required: boolean;
-  doc: string;
-}
-
-/**
- * Extract runtime metadata from a field builder for validation and documentation.
- *
- * @param field - A field builder created via the `t` helpers
- * @returns An object with the field's `type`, `required` flag, and `doc` string
- */
-export function extractFieldMetadata(field: FieldBuilder<string, boolean>): FieldMetadata {
-  return {
-    type: field._type as 'string' | 'number' | 'boolean' | 'error',
-    required: field._required,
-    doc: field._doc ?? '',
-  };
-}
-
-/**
- * Legacy types for backward compatibility during migration
- * @deprecated Use FieldBuilder instead
- */
-export type FieldType = 'string' | 'number' | 'boolean' | 'error';
-
-/**
- * @deprecated Use FieldBuilder instead
- */
-export interface FieldDefinition<FType extends FieldType = FieldType> {
-  type: FType;
-  required: boolean;
-  doc: string;
-}
-
-/**
- * @deprecated Use Record<string, FieldBuilder<any, any>> instead
- */
-export type FieldDefinitions = Record<string, FieldDefinition>;
