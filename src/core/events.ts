@@ -1,5 +1,4 @@
-import { LogLevel } from './backend';
-import { DEFAULT_CORRELATION_TIMEOUT_MS } from './constants';
+import { DEFAULT_CORRELATION_TIMEOUT_MS, type LogLevel } from './constants';
 import { field, type FieldBuilder, type InferFields } from './fields';
 
 export type { LogLevel };

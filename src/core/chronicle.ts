@@ -2,7 +2,6 @@ import {
   callBackendMethod,
   createConsoleBackend,
   type LogBackend,
-  type LogLevel,
   type LogPayload,
 } from './backend';
 import {
@@ -12,6 +11,7 @@ import {
   DEFAULT_REQUIRED_LEVELS,
   FORK_ID_SEPARATOR,
   LOG_LEVELS,
+  type LogLevel,
   ROOT_FORK_ID,
 } from './constants';
 import { type ContextRecord, ContextStore, type ContextValidationResult } from './context';
@@ -40,7 +40,7 @@ export interface ChroniclerLimits {
 
 export interface ChroniclerConfig {
   readonly backend?: LogBackend;
-  readonly metadata: Record<string, string | number | boolean | null>;
+  readonly metadata: ContextRecord;
   readonly correlationIdGenerator?: () => string;
   readonly limits?: ChroniclerLimits;
   /**
@@ -208,12 +208,7 @@ type NormalizedCorrelationGroup = Omit<CorrelationEventGroup, 'events' | 'timeou
 
 /** Guard: returns true if the group has already been processed by defineCorrelationGroup. */
 const isAlreadyNormalized = (group: CorrelationEventGroup): group is NormalizedCorrelationGroup =>
-  typeof group.timeout === 'number' &&
-  group.events !== undefined &&
-  'start' in group.events &&
-  'complete' in group.events &&
-  'fail' in group.events &&
-  'timeout' in group.events;
+  typeof group.timeout === 'number' && group.events !== undefined && 'start' in group.events;
 
 /** Normalize a correlation group, skipping if already processed to avoid collision false-positives. */
 const resolveCorrelationGroup = (group: CorrelationEventGroup): NormalizedCorrelationGroup =>
@@ -450,7 +445,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
       activeCorrelations: this.activeCorrelations,
     });
 
-    if (extraContext && Object.keys(extraContext).length > 0) {
+    if (Object.keys(extraContext).length > 0) {
       forkChronicle.addContext(extraContext);
     }
 

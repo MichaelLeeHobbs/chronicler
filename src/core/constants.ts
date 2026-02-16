@@ -19,6 +19,11 @@ export const LOG_LEVELS = {
 } as const;
 
 /**
+ * Union of all valid log level names, derived from {@link LOG_LEVELS}.
+ */
+export type LogLevel = keyof typeof LOG_LEVELS;
+
+/**
  * All required log levels that backends must implement.
  * Derived from LOG_LEVELS keys to prevent drift.
  */

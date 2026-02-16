@@ -1,4 +1,4 @@
-import { DEFAULT_REQUIRED_LEVELS, LOG_LEVELS } from './constants';
+import { DEFAULT_REQUIRED_LEVELS, type LogLevel } from './constants';
 import { ChroniclerError } from './errors';
 import type { ValidationMetadata } from './validation';
 
@@ -40,7 +40,7 @@ export interface LogPayload {
   readonly _validation?: ValidationMetadata;
 }
 
-export type LogLevel = keyof typeof LOG_LEVELS;
+export type { LogLevel };
 
 export type LogBackend = Record<LogLevel, (message: string, payload: LogPayload) => void>;
 

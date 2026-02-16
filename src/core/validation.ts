@@ -69,7 +69,6 @@ const checkFieldType = (value: unknown, type: string): TypeCheckResult => {
  *
  * @param event - Event definition containing field schemas to validate against
  * @param payload - User-provided field values to validate
- * @param options - Validation options (e.g. whether to sanitize string values)
  * @returns Validation result with missing fields, type errors, unknown fields, and normalized values
  */
 /* eslint-disable max-lines-per-function, complexity -- field validation checks missing/type/unknown/sanitization in one pass */
@@ -115,7 +114,7 @@ export const validateFields = <
 
     if (fieldType === 'error') {
       try {
-        // isSimpleTypeMatch('error') guarantees value is Error | string
+        // checkFieldType('error') guarantees value is Error | string
         normalizedFields[name] =
           value instanceof Error
             ? (value.stack ?? value.message)
