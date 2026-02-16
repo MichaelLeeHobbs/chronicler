@@ -98,8 +98,8 @@ const EVENT_KEY_RE = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/;
  *   message: 'User created',
  *   doc: 'Emitted when a new user is created',
  *   fields: {
- *     userId: t.string().doc('User ID'),
- *     email: t.string(),
+ *     userId: field.string().doc('User ID'),
+ *     email: field.string(),
  *     age: field.number().optional(),
  *   },
  * });
