@@ -301,6 +301,16 @@ export async function tryCatch<T, E = unknown>(
     return { ok: false, error: mapError ? mapError(error) : (error as E) };
   }
 }
+
+// Helper for chaining
+export function mapResult<T, U, E>(result: Result<T, E>, fn: (value: T) => U): Result<U, E> {
+  return result.ok ? { ok: true, value: fn(result.value) } : result;
+}
+
+// Helper for extracting values with fallback
+export function unwrapOr<T, E>(result: Result<T, E>, defaultValue: T): T {
+  return result.ok ? result.value : defaultValue;
+}
 ```
 
 - Always check `if (!result.ok) { /* handle error */ }` before accessing`value`.
@@ -499,9 +509,9 @@ function handleState(state: AppState): string {
 }
 
 // Can also use string literals directly (both are type-safe)
-const currentState: AppState = { kind: State.SUCCESS, value: 'result' };
+const currentState: AppState = { kind: State.SUCCESS, data: 'result' };
 // OR
-const currentState2: AppState = { kind: 'SUCCESS', value: 'result' }; // Also valid
+const currentState2: AppState = { kind: 'SUCCESS', data: 'result' }; // Also valid
 ```
 
 **Alternative Pattern for Iteration:**

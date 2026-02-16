@@ -1,0 +1,161 @@
+---
+name: deep-review
+description: Comprehensive multi-agent code review with security, standards, architecture, YAGNI, and goal analysis
+disable-model-invocation: true
+arguments:
+  - name: scope
+    description: "Scope to review: a directory path, file glob, or 'all' for the entire src/ directory. Defaults to 'all'."
+    required: false
+---
+
+# Deep Code Review — Multi-Agent Analysis
+
+You are orchestrating a comprehensive code review using 5 specialized reviewer agents running in parallel. This produces a detailed review document with severity-tagged findings.
+
+## Scope
+
+The review scope is: **$ARGUMENTS** (default: `all` — review the entire `src/` directory)
+
+## Instructions
+
+### 1. Prepare the review
+
+- **Generate a real timestamp** by running `date -u +%Y-%m-%dT%H-%M-%S` via the Bash tool. Use the actual output — do NOT hardcode or guess a timestamp.
+- Determine files to review:
+  - If scope is `all` or empty: all `.ts` files under `src/`
+  - If scope is a directory: all `.ts` files under that directory
+  - If scope is a glob: matching files
+- Read the reference checklists:
+  - `.claude/skills/deep-review/references/review-checklist.md`
+  - `.claude/skills/deep-review/references/security-checklist.md`
+- Check if `docs/reviews/accepted-deviations.md` exists. If it does, read it — these are items that have been reviewed and accepted in prior reviews. **Agents MUST skip these items.**
+- Check if a coding standard exists at `.claude/docs/` (e.g., a TypeScript coding standard) and load it if present
+
+### 2. Launch 5 parallel reviewer agents
+
+Use the **Task tool** to launch these 5 agents in parallel. Each agent should receive:
+
+- The list of files to review
+- The relevant checklist/standard sections
+- If the accepted deviations file exists, its full contents — agents MUST NOT re-flag any accepted deviation
+- Instructions to output findings in the structured format below
+
+Read the agent definitions from `.claude/agents/` for each reviewer's specific instructions:
+
+#### Agent 1: Security Reviewer
+
+- **Agent definition**: `.claude/agents/security-reviewer.md`
+- **Focus**: OWASP Top 10, input validation (Rules 7.2, 7.4), secrets, injection, crypto
+
+#### Agent 2: Standards Reviewer
+
+- **Agent definition**: `.claude/agents/standards-reviewer.md`
+- **Focus**: All shall-level rules from the coding standard
+
+#### Agent 3: YAGNI Reviewer
+
+- **Agent definition**: `.claude/agents/yagni-reviewer.md`
+- **Focus**: Over-engineering, dead code, unnecessary abstractions, premature optimization
+
+#### Agent 4: Architecture Reviewer
+
+- **Agent definition**: `.claude/agents/architecture-reviewer.md`
+- **Focus**: Modularity (Rule 10.3), dependency direction, SOLID principles, circular deps
+
+#### Agent 5: Goal Reviewer
+
+- **Agent definition**: `.claude/agents/goal-reviewer.md`
+- **Focus**: Does the code achieve its stated goals? Edge cases? Completeness?
+
+### 3. Consolidate findings
+
+After all 5 agents complete, merge their findings into a single review document.
+
+Each finding should be tagged with a severity:
+
+- **CRITICAL** — Must fix. Security vulnerability, data loss risk, or standard violation that could cause runtime failure
+- **HIGH** — Should fix. Significant standard violation or architectural concern
+- **MEDIUM** — Consider fixing. Minor standard deviation or improvement opportunity
+- **LOW** — Nice to have. Style suggestion or minor optimization
+
+De-duplicate findings that appear in multiple reviewers' output (keep the highest severity).
+
+### 4. Write the review document
+
+Create the directory `docs/reviews/` if it doesn't exist, then write the consolidated review to `docs/reviews/review-${TIMESTAMP}.md`.
+
+Use this template — note the distinction between open findings `- [ ]` and the two resolution states `[x] Fixed` vs `[~] Accepted`:
+
+```markdown
+# Deep Code Review — ${TIMESTAMP}
+
+**Scope**: ${SCOPE}
+**Files reviewed**: N
+**Reviewers**: Security, Standards, YAGNI, Architecture, Goal
+
+## Executive Summary
+
+<2-4 sentences summarizing overall code quality and top concerns>
+
+**Findings**: N total (X critical, Y high, Z medium, W low)
+
+## Critical Findings
+
+- [ ] C-1: `file.ts:42` — **[Security]** Description of the finding
+
+## High Findings
+
+- [ ] H-1: `file.ts:88` — **[Architecture]** Description of the finding
+
+## Medium Findings
+
+- [ ] M-1: `file.ts:22` — **[YAGNI]** Description of the finding
+
+## Low Findings
+
+- [ ] L-1: `file.ts:5` — **[Goal]** Description of the finding
+
+## Per-Reviewer Details
+
+### Security Review
+
+<Security reviewer's detailed findings>
+
+### Standards Compliance Review
+
+<Standards reviewer's detailed findings>
+
+### YAGNI Review
+
+<YAGNI reviewer's detailed findings>
+
+### Architecture Review
+
+<Architecture reviewer's detailed findings>
+
+### Goal Alignment Review
+
+<Goal reviewer's detailed findings>
+
+## Recommendations
+
+1. Prioritized list of actions
+2. ...
+
+---
+
+_Generated by /deep-review on ${TIMESTAMP}_
+```
+
+**Resolution marking** (for when findings are addressed later — NOT during the review itself):
+
+- `- [x] H-1: ... **Fixed:** <brief description of the code change>`
+- `- [~] H-1: ... **Accepted:** <rationale for why this is not being fixed>`
+
+When a finding is accepted, it should also be added to `docs/reviews/accepted-deviations.md` so future reviews skip it.
+
+### 5. Report to user
+
+- Show the file path of the generated review
+- Display the executive summary and finding counts by severity
+- If there are critical findings, emphasize they must be addressed before deployment

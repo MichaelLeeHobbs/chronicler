@@ -51,25 +51,6 @@ export type LogLevel = keyof typeof LOG_LEVELS;
 export type LogBackend = Record<LogLevel, (message: string, payload: LogPayload) => void>;
 
 /**
- * Validate that backend has all required log level methods
- * @param backend - Logger object to validate
- * @param levels - Required log levels
- * @returns Array of missing log levels
- */
-export const validateBackendMethods = (
-  backend: LogBackend,
-  levels: readonly LogLevel[],
-): string[] => {
-  const missing: LogLevel[] = [];
-  for (const level of levels) {
-    if (typeof backend[level] !== 'function') {
-      missing.push(level);
-    }
-  }
-  return missing;
-};
-
-/**
  * Call a backend logger method.
  *
  * Backend exceptions are caught and reported to `console.error` so that

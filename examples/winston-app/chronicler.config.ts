@@ -1,6 +1,4 @@
-import type { ChroniclerCliConfig } from '@ubercode/chronicler';
-
-const config: ChroniclerCliConfig = {
+const config = {
   eventsFile: './src/events.ts',
   docs: {
     // Example overrides for documentation generation output

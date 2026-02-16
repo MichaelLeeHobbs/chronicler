@@ -1,4 +1,3 @@
-export type { ChroniclerCliConfig } from './cli/config';
 export {
   type BackendRoute,
   createBackend,
@@ -14,7 +13,11 @@ export {
   type CorrelationChronicle,
   createChronicle,
 } from './core/chronicle';
-export { type ContextRecord, type ContextValidationResult } from './core/context-store';
+export {
+  type ContextCollisionDetail,
+  type ContextRecord,
+  type ContextValidationResult,
+} from './core/context-store';
 export { ChroniclerError, type ChroniclerErrorCode } from './core/errors';
 export {
   type CorrelationEventGroup,

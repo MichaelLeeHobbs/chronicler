@@ -8,7 +8,6 @@ These queries assume Chronicler emits structured JSON logs with top-level fields
 - metadata (object)
 - fields (object)
 - \_validation (object, optional)
-- \_perf (object, optional)
 
 If your ingestion flattens objects, adapt field paths accordingly.
 
@@ -78,34 +77,6 @@ fields @timestamp, eventKey, _validation.typeErrors, fields
 | sort @timestamp desc
 ```
 
-Metadata collisions:
-
-```
-fields @timestamp, eventKey, _validation.contextCollisions
-| filter ispresent(_validation.contextCollisions)
-| sort @timestamp desc
-```
-
-## Performance Metrics
-
-Memory high-water emitters (requires monitoring.memory):
-
-```
-fields @timestamp, eventKey, _perf.heapUsed, _perf.rss
-| filter ispresent(_perf.heapUsed)
-| sort _perf.heapUsed desc
-| limit 100
-```
-
-CPU heavy events (requires monitoring.cpu):
-
-```
-fields @timestamp, eventKey, _perf.cpuUser, _perf.cpuSystem
-| filter ispresent(_perf.cpuUser)
-| sort _perf.cpuUser desc
-| limit 100
-```
-
 ## Audit & Levels
 
 Audits in the last day:
@@ -133,16 +104,4 @@ Find logs from a specific fork:
 fields @timestamp, eventKey, forkId
 | filter correlationId = 'abc-123' and forkId like /^1(\.|$)/
 | sort @timestamp asc
-```
-
-## Reserved-Field Mistakes
-
-Detect attempted use of reserved top-level names in metadata (blocked):
-
-- Not logged directly. Instead, look for `api.request.metadataWarning` auto-events with attemptedKey, existingValue, attemptedValue in fields.
-
-```
-fields @timestamp, eventKey, fields.attemptedKey, fields.existingValue, fields.attemptedValue
-| filter eventKey like /\.metadataWarning$/
-| sort @timestamp desc
 ```

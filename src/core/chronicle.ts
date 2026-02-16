@@ -4,7 +4,6 @@ import {
   type LogBackend,
   type LogLevel,
   type LogPayload,
-  validateBackendMethods,
   type ValidationMetadata,
 } from './backend';
 import {
@@ -500,11 +499,13 @@ const resolveChroniclerConfig = (
 ): { resolved: ResolvedChroniclerConfig; correlationIdGenerator: () => string } => {
   const resolvedBackend = config.backend ?? createConsoleBackend();
 
-  const missing = validateBackendMethods(resolvedBackend, DEFAULT_REQUIRED_LEVELS);
-  if (missing.length > 0) {
+  const missingLevels = DEFAULT_REQUIRED_LEVELS.filter(
+    (level) => typeof resolvedBackend[level] !== 'function',
+  );
+  if (missingLevels.length > 0) {
     throw new ChroniclerError(
       'UNSUPPORTED_LOG_LEVEL',
-      `Log backend is missing level(s): ${missing.join(', ')}. A valid backend must implement all 9 levels: ${DEFAULT_REQUIRED_LEVELS.join(', ')}. Use createBackend() for automatic fallback handling.`,
+      `Log backend is missing level(s): ${missingLevels.join(', ')}. A valid backend must implement all 9 levels: ${DEFAULT_REQUIRED_LEVELS.join(', ')}. Use createBackend() for automatic fallback handling.`,
     );
   }
 

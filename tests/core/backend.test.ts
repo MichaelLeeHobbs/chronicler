@@ -6,84 +6,12 @@ import {
   createConsoleBackend,
   createRouterBackend,
   type LogBackend,
-  LogLevel,
+  type LogLevel,
   type LogPayload,
-  validateBackendMethods,
 } from '../../src/core/backend';
 import { MockLoggerBackend } from '../helpers/mock-logger';
 
 describe('Backend Validation', () => {
-  describe('validateBackendMethods', () => {
-    it('returns empty array when all required methods exist', () => {
-      // @ts-expect-error Testing partial backend
-      const backend: LogBackend = {
-        info: () => void 0,
-        error: () => void 0,
-        warn: () => void 0,
-      };
-
-      const missing = validateBackendMethods(backend, ['info', 'error', 'warn']);
-      expect(missing).toEqual([]);
-    });
-
-    it('returns missing levels when methods do not exist', () => {
-      // @ts-expect-error Testing partial backend
-      const backend: LogBackend = {
-        info: () => void 0,
-      };
-
-      const missing = validateBackendMethods(backend, ['info', 'error', 'warn']);
-      expect(missing).toEqual(['error', 'warn']);
-    });
-
-    it('detects non-function properties as missing', () => {
-      const backend: LogBackend = {
-        info: () => void 0,
-        // @ts-expect-error Testing invalid backend
-        error: 'not a function',
-      };
-
-      const missing = validateBackendMethods(backend, ['info', 'error']);
-      expect(missing).toEqual(['error']);
-    });
-
-    it('handles empty backend object', () => {
-      // @ts-expect-error Testing partial backend
-      const backend: LogBackend = {};
-
-      const missing = validateBackendMethods(backend, ['info', 'error', 'warn']);
-      expect(missing).toEqual(['info', 'error', 'warn']);
-    });
-
-    it('validates all Chronicler log levels', () => {
-      const backend: LogBackend = {
-        fatal: () => void 0,
-        critical: () => void 0,
-        alert: () => void 0,
-        error: () => void 0,
-        warn: () => void 0,
-        audit: () => void 0,
-        info: () => void 0,
-        debug: () => void 0,
-        trace: () => void 0,
-      };
-
-      const allLevels: LogLevel[] = [
-        'fatal',
-        'critical',
-        'alert',
-        'error',
-        'warn',
-        'audit',
-        'info',
-        'debug',
-        'trace',
-      ];
-      const missing = validateBackendMethods(backend, allLevels);
-      expect(missing).toEqual([]);
-    });
-  });
-
   describe('callBackendMethod', () => {
     it('calls the backend method with message and payload', () => {
       const mock = new MockLoggerBackend();
@@ -195,12 +123,6 @@ describe('createConsoleBackend', () => {
     }
   });
 
-  it('passes backend validation', () => {
-    const backend = createConsoleBackend();
-    const missing = validateBackendMethods(backend, ALL_LEVELS);
-    expect(missing).toEqual([]);
-  });
-
   it('calls the correct console methods', () => {
     const backend = createConsoleBackend();
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(vi.fn());
@@ -253,12 +175,6 @@ describe('createBackend', () => {
     expect(infoSpy).toHaveBeenCalledWith('msg', testPayload);
 
     infoSpy.mockRestore();
-  });
-
-  it('passes backend validation', () => {
-    const backend = createBackend({});
-    const missing = validateBackendMethods(backend, ALL_LEVELS);
-    expect(missing).toEqual([]);
   });
 });
 
@@ -316,13 +232,6 @@ describe('createRouterBackend', () => {
     }
 
     expect(mock.getPayloads()).toHaveLength(ALL_LEVELS.length);
-  });
-
-  it('passes backend validation', () => {
-    const mock = new MockLoggerBackend();
-    const router = createRouterBackend([{ backend: mock.backend }]);
-    const missing = validateBackendMethods(router, ALL_LEVELS);
-    expect(missing).toEqual([]);
   });
 
   it('sends to multiple backends when multiple filters match', () => {
