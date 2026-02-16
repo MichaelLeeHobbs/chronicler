@@ -71,9 +71,9 @@ interface ResolvedLimits {
 }
 
 type ResolvedChroniclerConfig = Omit<ChroniclerConfig, 'backend' | 'limits' | 'minLevel'> & {
-  backend: LogBackend;
-  limits: ResolvedLimits;
-  minLevel: number;
+  readonly backend: LogBackend;
+  readonly limits: ResolvedLimits;
+  readonly minLevel: number;
 };
 
 export interface Chronicler {
@@ -122,10 +122,10 @@ export interface CorrelationChronicle {
   fork(context?: ContextRecord): Chronicler;
 
   /** Mark the correlation as successfully completed. Emits the `.complete` event. */
-  complete(fields?: ContextRecord): void;
+  complete(fields?: Record<string, unknown>): void;
 
   /** Mark the correlation as failed. Emits the `.fail` event at error level. */
-  fail(error?: unknown, fields?: ContextRecord): void;
+  fail(error?: unknown, fields?: Record<string, unknown>): void;
 
   /** Mark the correlation as timed out. Called automatically by the timer. */
   timeout(): void;
@@ -142,12 +142,17 @@ interface BuildPayloadArgs {
   readonly strict?: boolean | undefined;
 }
 
-/** @internal Build a complete log payload from event definition and runtime data. */
+/**
+ * Build a complete log payload from event definition and runtime data.
+ * @internal
+ * @param args - Payload construction arguments including context, event, and fields
+ * @returns Assembled log payload ready for backend emission
+ */
 const buildPayload = (args: BuildPayloadArgs): LogPayload => {
   const fieldValidation = validateFields(
     args.eventDef,
     args.fields,
-    args.sanitizeStrings ? { sanitizeStrings: args.sanitizeStrings } : {},
+    args.sanitizeStrings !== undefined ? { sanitizeStrings: args.sanitizeStrings } : {},
   );
 
   if (args.strict) {
@@ -159,6 +164,11 @@ const buildPayload = (args: BuildPayloadArgs): LogPayload => {
     if (fieldValidation.typeErrors.length > 0) {
       console.warn(
         `[chronicler] Event "${args.eventDef.key}" has type errors on fields: ${fieldValidation.typeErrors.join(', ')}`,
+      );
+    }
+    if (fieldValidation.invalidValues.length > 0) {
+      console.warn(
+        `[chronicler] Event "${args.eventDef.key}" has invalid values on fields: ${fieldValidation.invalidValues.join(', ')}`,
       );
     }
   }
@@ -176,9 +186,14 @@ const buildPayload = (args: BuildPayloadArgs): LogPayload => {
   };
 };
 
+/** Compute fork nesting depth from a dotted fork ID. */
 const forkDepthFromId = (forkId: string): number =>
   forkId === ROOT_FORK_ID ? 0 : forkId.split(FORK_ID_SEPARATOR).length;
 
+/**
+ * Derive the next child fork ID and enforce depth limits.
+ * @throws {ChroniclerError} `FORK_DEPTH_EXCEEDED` if the new depth exceeds maxDepth
+ */
 const nextForkId = (parentForkId: string, counter: number, maxDepth: number): string => {
   const childForkId =
     parentForkId === ROOT_FORK_ID
@@ -195,14 +210,15 @@ const nextForkId = (parentForkId: string, counter: number, maxDepth: number): st
 };
 
 interface ChronicleHooks {
-  onActivity?: () => void;
+  readonly onActivity?: () => void;
 }
 
 type NormalizedCorrelationGroup = Omit<CorrelationEventGroup, 'events' | 'timeout'> & {
-  timeout: number;
-  events: EventRecord & CorrelationAutoEvents;
+  readonly timeout: number;
+  readonly events: EventRecord & CorrelationAutoEvents;
 };
 
+/** Guard: returns true if the group has already been processed by defineCorrelationGroup. */
 const isAlreadyNormalized = (group: CorrelationEventGroup): group is NormalizedCorrelationGroup =>
   typeof group.timeout === 'number' &&
   group.events !== undefined &&
@@ -211,10 +227,12 @@ const isAlreadyNormalized = (group: CorrelationEventGroup): group is NormalizedC
   'fail' in group.events &&
   'timeout' in group.events;
 
+/** Normalize a correlation group, skipping if already processed to avoid collision false-positives. */
 const resolveCorrelationGroup = (group: CorrelationEventGroup): NormalizedCorrelationGroup =>
   isAlreadyNormalized(group)
     ? group
-    : (defineCorrelationGroup(group) as NormalizedCorrelationGroup);
+    : // Rule 3.2: defineCorrelationGroup returns the same shape but TS can't infer the intersection
+      (defineCorrelationGroup(group) as NormalizedCorrelationGroup);
 
 interface ChronicleInstanceArgs {
   readonly config: ResolvedChroniclerConfig;
@@ -228,6 +246,7 @@ interface ChronicleInstanceArgs {
   readonly activeCorrelations?: { count: number };
 }
 
+// eslint-disable-next-line max-lines-per-function -- Accepted deviation: object-literal constructor, splitting reduces readability
 const createChronicleInstance = (args: ChronicleInstanceArgs): Chronicler => {
   const {
     config,
@@ -238,6 +257,7 @@ const createChronicleInstance = (args: ChronicleInstanceArgs): Chronicler => {
     hooks = {},
     activeCorrelations = { count: 0 },
   } = args;
+  /** Monotonically increasing counter for generating unique child fork IDs. */
   let forkCounter = 0;
 
   return {
@@ -298,8 +318,8 @@ const createChronicleInstance = (args: ChronicleInstanceArgs): Chronicler => {
           `Active correlation limit of ${config.limits.maxActiveCorrelations} exceeded`,
         );
       }
-      activeCorrelations.count++;
       const definedGroup = resolveCorrelationGroup(group);
+      activeCorrelations.count++;
       const correlationStore = new ContextStore(
         contextStore.snapshot(),
         config.limits.maxContextKeys,
@@ -354,12 +374,14 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     this.forkId = args.forkId;
     this.activeCorrelations = args.activeCorrelations ?? { count: 0 };
     this.timer = new CorrelationTimer(this.group.timeout, () => this.timeout());
+    // Rule 3.2: NormalizedCorrelationGroup guarantees auto-event keys exist
     this.autoEvents = this.group.events as CorrelationAutoEvents;
     this.timer.start();
     this.emitAutoEvent(this.autoEvents.start, {});
   }
 
   event<E extends EventDefinition>(eventDef: E, fields: EventFields<E>): void {
+    if (this.completed) return;
     if (LOG_LEVELS[eventDef.level] > this.config.minLevel) return;
     const payload = buildPayload({
       contextStore: this.contextStore,
@@ -376,6 +398,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   }
 
   log(level: LogLevel, message: string, fields: Record<string, unknown> = {}): void {
+    if (this.completed) return;
     if (LOG_LEVELS[level] > this.config.minLevel) return;
     const sanitizedFields = this.config.sanitizeStrings ? sanitizeLogFields(fields) : fields;
     const payload: LogPayload = {
@@ -419,7 +442,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     return forkChronicle;
   }
 
-  complete(fields: ContextRecord = {}): void {
+  complete(fields: Record<string, unknown> = {}): void {
     if (this.completed) {
       return;
     }
@@ -434,7 +457,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     );
   }
 
-  fail(error?: unknown, fields: ContextRecord = {}): void {
+  fail(error?: unknown, fields: Record<string, unknown> = {}): void {
     if (this.completed) {
       return;
     }
@@ -465,6 +488,7 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
     overrides?: Partial<ValidationMetadata>,
     touchTimer = true,
   ): void {
+    if (LOG_LEVELS[eventDef.level] > this.config.minLevel) return;
     const payload = buildPayload({
       contextStore: this.contextStore,
       eventDef,
@@ -482,18 +506,11 @@ class CorrelationChronicleImpl implements CorrelationChronicle {
   }
 }
 
-/**
- * Create a root Chronicler instance.
- *
- * This is the main entry point for the library. The returned `Chronicler`
- * can log events, add context, start correlations, and create forks.
- *
- * @param config - Chronicler configuration with optional backend, metadata, and optional correlation settings
- * @returns A configured `Chronicler` instance
- * @throws {ChroniclerError} `UNSUPPORTED_LOG_LEVEL` if the backend is missing required methods
- * @throws {ChroniclerError} `RESERVED_FIELD` if `config.metadata` contains reserved field names
- */
-export const createChronicle = (config: ChroniclerConfig): Chronicler => {
+/** Validate and resolve user-provided config into fully-resolved internal config. */
+const resolveChroniclerConfig = (
+  config: ChroniclerConfig,
+  // eslint-disable-next-line complexity -- config resolution requires checking all option paths
+): { resolved: ResolvedChroniclerConfig; correlationIdGenerator: () => string } => {
   const resolvedBackend = config.backend ?? createConsoleBackend();
 
   const missing = validateBackendMethods(resolvedBackend, DEFAULT_REQUIRED_LEVELS);
@@ -518,25 +535,41 @@ export const createChronicle = (config: ChroniclerConfig): Chronicler => {
     maxActiveCorrelations: config.limits?.maxActiveCorrelations ?? DEFAULT_MAX_ACTIVE_CORRELATIONS,
   };
 
-  const baseContextStore = new ContextStore(config.metadata, resolvedLimits.maxContextKeys);
-  const correlationIdGenerator = config.correlationIdGenerator ?? (() => crypto.randomUUID());
-
-  const resolvedConfig: ResolvedChroniclerConfig = {
-    ...config,
-    sanitizeStrings: config.sanitizeStrings ?? true,
-    backend: resolvedBackend,
-    limits: resolvedLimits,
-    minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],
+  return {
+    // Spread includes unresolved config first; explicit properties below override them.
+    resolved: {
+      ...config,
+      sanitizeStrings: config.sanitizeStrings ?? true,
+      backend: resolvedBackend,
+      limits: resolvedLimits,
+      minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],
+    },
+    correlationIdGenerator: config.correlationIdGenerator ?? (() => crypto.randomUUID()),
   };
+};
 
-  const activeCorrelations: { count: number } = { count: 0 };
+/**
+ * Create a root Chronicler instance.
+ *
+ * This is the main entry point for the library. The returned `Chronicler`
+ * can log events, add context, start correlations, and create forks.
+ *
+ * @param config - Chronicler configuration with optional backend, metadata, and optional correlation settings
+ * @returns A configured `Chronicler` instance
+ * @throws {ChroniclerError} `UNSUPPORTED_LOG_LEVEL` if the backend is missing required methods
+ * @throws {ChroniclerError} `RESERVED_FIELD` if `config.metadata` contains reserved field names
+ */
+export const createChronicle = (config: ChroniclerConfig): Chronicler => {
+  const { resolved, correlationIdGenerator } = resolveChroniclerConfig(config);
+  const baseContextStore = new ContextStore(config.metadata, resolved.limits.maxContextKeys);
 
   return createChronicleInstance({
-    config: resolvedConfig,
+    config: resolved,
     contextStore: baseContextStore,
     currentCorrelationId: () => '',
     correlationIdGenerator,
     forkId: ROOT_FORK_ID,
-    activeCorrelations,
+    /** Shared mutable counter tracking uncompleted correlations for limit enforcement. */
+    activeCorrelations: { count: 0 },
   });
 };

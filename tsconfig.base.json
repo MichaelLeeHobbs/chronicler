@@ -16,6 +16,8 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
+    "useUnknownInCatchVariables": true,
+    "isolatedModules": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": true,

@@ -7,6 +7,9 @@ import type { EventDefinition } from '../../core/events';
 import { RESERVED_TOP_LEVEL_FIELDS } from '../../core/reserved';
 import type { ParsedEventGroup, ParsedEventTree, ValidationError } from '../types';
 
+const VALID_LEVELS = new Set<string>(DEFAULT_REQUIRED_LEVELS);
+const RESERVED_FIELDS = new Set<string>(RESERVED_TOP_LEVEL_FIELDS);
+
 /**
  * Validate parsed event tree
  */
@@ -26,12 +29,9 @@ export function validateEventTree(tree: ParsedEventTree): ValidationError[] {
   return errors;
 }
 
-const UNKNOWN_LOCATION = { file: '<unknown>', line: 0, column: 0 } as const;
-
 const makeError = (type: ValidationError['type'], message: string): ValidationError => ({
   type,
   message,
-  location: UNKNOWN_LOCATION,
 });
 
 /**
@@ -49,8 +49,7 @@ function validateEvent(event: EventDefinition): ValidationError[] {
     );
   }
 
-  const levelString = event.level as string;
-  if (!DEFAULT_REQUIRED_LEVELS.includes(levelString as (typeof DEFAULT_REQUIRED_LEVELS)[number])) {
+  if (!VALID_LEVELS.has(event.level)) {
     errors.push(
       makeError(
         'invalid-level',
@@ -65,9 +64,7 @@ function validateEvent(event: EventDefinition): ValidationError[] {
 
   if (event.fields) {
     for (const fieldName of Object.keys(event.fields)) {
-      if (
-        RESERVED_TOP_LEVEL_FIELDS.includes(fieldName as (typeof RESERVED_TOP_LEVEL_FIELDS)[number])
-      ) {
+      if (RESERVED_FIELDS.has(fieldName)) {
         errors.push(
           makeError(
             'reserved-field',
@@ -84,6 +81,7 @@ function validateEvent(event: EventDefinition): ValidationError[] {
 /**
  * Validate event group and its hierarchy (iterative)
  */
+// eslint-disable-next-line complexity -- Accepted deviation: iterative group traversal with multiple validation checks
 function validateGroup(rootGroup: ParsedEventGroup, parentKey = ''): ValidationError[] {
   const errors: ValidationError[] = [];
   const stack: { group: ParsedEventGroup; parentKey: string }[] = [{ group: rootGroup, parentKey }];
@@ -137,11 +135,7 @@ export function formatErrors(errors: ValidationError[]): string {
   }
 
   const lines = errors.map((error) => {
-    const location =
-      error.location.line > 0
-        ? `${error.location.file}:${error.location.line}:${error.location.column}`
-        : error.location.file;
-    return `  ${location}\n    ${error.type}: ${error.message}`;
+    return `  ${error.type}: ${error.message}`;
   });
 
   return `Found ${errors.length} error(s):\n${lines.join('\n')}`;

@@ -3,6 +3,7 @@ import { ChroniclerError } from './errors';
 
 type ConsoleMethod = 'error' | 'warn' | 'info' | 'debug';
 
+/** Maps each Chronicler log level to its corresponding console method. */
 const CONSOLE_LEVEL_MAP: Record<LogLevel, ConsoleMethod> = {
   fatal: 'error',
   critical: 'error',
@@ -15,6 +16,7 @@ const CONSOLE_LEVEL_MAP: Record<LogLevel, ConsoleMethod> = {
   trace: 'debug',
 };
 
+/** Ordered fallback chains for backend levels — tried sequentially when a level handler is missing. */
 const LEVEL_FALLBACK_CHAINS: Record<LogLevel, readonly LogLevel[]> = {
   fatal: ['critical', 'error', 'warn', 'info'],
   critical: ['error', 'warn', 'info'],
@@ -30,6 +32,7 @@ const LEVEL_FALLBACK_CHAINS: Record<LogLevel, readonly LogLevel[]> = {
 export interface ValidationMetadata {
   readonly missingFields?: string[];
   readonly typeErrors?: string[];
+  readonly invalidValues?: string[];
   readonly unknownFields?: string[];
 }
 
@@ -91,7 +94,10 @@ export const callBackendMethod = (
   try {
     backend[level](message, payload);
   } catch (err: unknown) {
-    console.error('[chronicler] Backend error during log emission:', err);
+    console.error(
+      '[chronicler] Backend error during log emission:',
+      err instanceof Error ? err.message : 'Unknown error',
+    );
   }
 };
 
@@ -105,9 +111,11 @@ export const callBackendMethod = (
  * @returns A fully populated LogBackend using console methods for all levels
  */
 export const createConsoleBackend = (): LogBackend => {
+  // Rule 3.2: iteratively populated in the loop below over all required levels
   const backend = {} as LogBackend;
   for (const level of DEFAULT_REQUIRED_LEVELS) {
     const method = CONSOLE_LEVEL_MAP[level];
+    // eslint-disable-next-line no-console -- createConsoleBackend: console IS the backend
     backend[level] = (message: string, payload: LogPayload) => console[method](message, payload);
   }
   return backend;
@@ -124,6 +132,7 @@ export const createConsoleBackend = (): LogBackend => {
  * @returns A fully populated LogBackend with fallbacks applied for missing levels
  */
 export const createBackend = (partial: Partial<LogBackend>): LogBackend => {
+  // Rule 3.2: iteratively populated in the loop below over all required levels
   const backend = {} as LogBackend;
   for (const level of DEFAULT_REQUIRED_LEVELS) {
     if (typeof partial[level] === 'function') {
@@ -135,6 +144,7 @@ export const createBackend = (partial: Partial<LogBackend>): LogBackend => {
       backend[level] = partial[fallback]!;
     } else {
       const method = CONSOLE_LEVEL_MAP[level];
+      // eslint-disable-next-line no-console -- createBackend fallback: console IS the fallback backend
       backend[level] = (message: string, payload: LogPayload) => console[method](message, payload);
     }
   }

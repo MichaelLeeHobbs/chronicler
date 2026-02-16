@@ -6,11 +6,13 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { register } from 'tsx/esm/api';
+
 import type { EventDefinition } from '../../core/events';
 import type { FieldBuilder } from '../../core/fields';
-import type { ParsedEventGroup, ParsedEventTree } from '../types';
+import type { ParsedEventGroup, ParsedEventTree, ValidationError } from '../types';
 
-/** Auto-generated event property names added by defineCorrelationGroup */
+/** Auto-generated event property names added by defineCorrelationGroup. Excluded from docs output. */
 const CORRELATION_AUTO_EVENTS = new Set(['start', 'complete', 'fail', 'timeout']);
 
 /**
@@ -18,6 +20,7 @@ const CORRELATION_AUTO_EVENTS = new Set(['start', 'complete', 'fail', 'timeout']
  */
 function isEventDefinition(value: unknown): value is EventDefinition {
   if (typeof value !== 'object' || value === null) return false;
+  // Rule 3.2: non-null object narrowed above; indexing for property checks
   const v = value as Record<string, unknown>;
   return (
     typeof v.key === 'string' &&
@@ -32,17 +35,18 @@ function isEventDefinition(value: unknown): value is EventDefinition {
  */
 function isFieldBuilder(value: unknown): value is FieldBuilder<string, boolean> {
   if (typeof value !== 'object' || value === null) return false;
+  // Rule 3.2: non-null object narrowed above; indexing for property checks
   const v = value as Record<string, unknown>;
   return typeof v._type === 'string' && typeof v._required === 'boolean';
 }
 
 interface EventGroupLike {
-  key: string;
-  type: 'system' | 'correlation';
-  doc?: string;
-  timeout?: number;
-  events?: Record<string, unknown>;
-  groups?: Record<string, unknown>;
+  readonly key: string;
+  readonly type: 'system' | 'correlation';
+  readonly doc?: string;
+  readonly timeout?: number;
+  readonly events?: Record<string, unknown>;
+  readonly groups?: Record<string, unknown>;
 }
 
 /**
@@ -50,12 +54,23 @@ interface EventGroupLike {
  */
 function isEventGroup(value: unknown): value is EventGroupLike {
   if (typeof value !== 'object' || value === null) return false;
+  // Rule 3.2: non-null object narrowed above; indexing for property checks
   const v = value as Record<string, unknown>;
   return (
     typeof v.key === 'string' &&
     (v.type === 'system' || v.type === 'correlation') &&
     (v.doc === undefined || typeof v.doc === 'string')
   );
+}
+
+/**
+ * Heuristic: does the value look like a partial event definition?
+ * Used to report helpful parse errors for exports that are close but invalid.
+ */
+function looksLikeEvent(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.key === 'string' || typeof v.level === 'string' || typeof v.message === 'string';
 }
 
 /**
@@ -69,6 +84,7 @@ function extractFields(
 
   for (const [name, value] of Object.entries(fields)) {
     if (isFieldBuilder(value)) {
+      // Rule 3.2: isFieldBuilder guard ensures _type, _required, _doc exist
       result[name] = {
         _type: value._type,
         _required: value._required,
@@ -85,6 +101,7 @@ function extractFields(
  * Convert a runtime event group to a ParsedEventGroup (iterative).
  * Filters out auto-generated correlation events (start, complete, timeout, metadataWarning).
  */
+/* eslint-disable max-lines-per-function, complexity, max-depth -- Accepted deviation: iterative two-pass traversal */
 function convertGroup(rootGroup: EventGroupLike): ParsedEventGroup {
   // First pass: create ParsedEventGroup shells for all groups
   const groupMap = new Map<EventGroupLike, ParsedEventGroup>();
@@ -99,7 +116,8 @@ function convertGroup(rootGroup: EventGroupLike): ParsedEventGroup {
         if (group.type === 'correlation' && CORRELATION_AUTO_EVENTS.has(name)) continue;
         if (isEventDefinition(value)) {
           const fields = value.fields
-            ? extractFields(value.fields as Record<string, unknown>)
+            ? // Rule 3.2: EventDefinition.fields is typed as FieldBuilder record; widen for runtime inspection
+              extractFields(value.fields as Record<string, unknown>)
             : undefined;
           events[name] = fields
             ? { ...value, doc: value.doc ?? '', fields }
@@ -144,6 +162,7 @@ function convertGroup(rootGroup: EventGroupLike): ParsedEventGroup {
 
   return groupMap.get(rootGroup)!;
 }
+/* eslint-enable max-lines-per-function, complexity, max-depth */
 
 /**
  * Iteratively collect all events from a group (including nested groups) into a flat list.
@@ -179,30 +198,33 @@ function collectEventsFromGroup(rootGroup: ParsedEventGroup, seen: Set<string>):
  * @param filePath - Path to the TypeScript events file to parse
  * @returns Parsed event tree containing extracted events, groups, and any parse errors
  */
+/* eslint-disable max-lines-per-function, max-depth -- Accepted deviation: event file parsing with nested group detection */
 export async function parseEventsFile(filePath: string): Promise<ParsedEventTree> {
   const absolutePath = path.resolve(filePath);
   const events: EventDefinition[] = [];
   const groups: ParsedEventGroup[] = [];
+  const errors: ValidationError[] = [];
   const seen = new Set<string>();
 
-  const { register } = await import('tsx/esm/api');
   const unregister = register();
 
   try {
     const fileUrl = pathToFileURL(absolutePath).href;
+    // Rule 3.4 exception: dynamic import required to load user-authored events file at runtime.
+    // The file path is provided by the CLI user who invokes this tool locally.
     const mod = (await import(fileUrl)) as Record<string, unknown>;
 
-    for (const value of Object.values(mod)) {
+    for (const [exportName, value] of Object.entries(mod)) {
       if (isEventGroup(value)) {
         const parsed = convertGroup(value);
         groups.push(parsed);
-        // Collect events from this group into the flat list
         events.push(...collectEventsFromGroup(parsed, seen));
       } else if (isEventDefinition(value)) {
         if (!seen.has(value.key)) {
           seen.add(value.key);
           const fields = value.fields
-            ? extractFields(value.fields as Record<string, unknown>)
+            ? // Rule 3.2: EventDefinition.fields is typed as FieldBuilder record; widen for runtime inspection
+              extractFields(value.fields as Record<string, unknown>)
             : undefined;
           events.push(
             fields
@@ -215,11 +237,17 @@ export async function parseEventsFile(filePath: string): Promise<ParsedEventTree
                 },
           );
         }
+      } else if (looksLikeEvent(value)) {
+        errors.push({
+          type: 'parse-error',
+          message: `Export "${exportName}" looks like an event definition but is missing required properties (key, level, message).`,
+        });
       }
     }
   } finally {
     void unregister();
   }
 
-  return { events, groups, errors: [] };
+  return { events, groups, errors };
 }
+/* eslint-enable max-lines-per-function, max-depth */

@@ -1,4 +1,4 @@
-export { ChroniclerCliConfig } from './cli/config';
+export type { ChroniclerCliConfig } from './cli/config';
 export {
   createBackend,
   createConsoleBackend,

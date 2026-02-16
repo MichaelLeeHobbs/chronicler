@@ -1,11 +1,13 @@
 import { isReservedTopLevelField } from './reserved';
 
+/** Type guard for context-safe primitive values. */
 const isSimpleValue = (value: unknown): value is string | number | boolean | null =>
   value === null ||
   typeof value === 'string' ||
   typeof value === 'number' ||
   typeof value === 'boolean';
 
+/** Object prototype keys blocked to prevent prototype pollution. */
 const DANGEROUS_KEYS = new Set([
   '__proto__',
   'constructor',
@@ -62,6 +64,7 @@ export interface ContextValidationResult {
  *
  * @see {@link ContextValidationResult} for validation result structure
  */
+/* eslint-disable max-lines-per-function, complexity -- validation logic: each check branch is a distinct concern */
 export const sanitizeContextInput = (
   context: ContextRecord,
   existingContext: ContextRecord = {},
@@ -111,6 +114,7 @@ export const sanitizeContextInput = (
 
   return { context: sanitized, validation: { collisions, reserved, collisionDetails, dropped } };
 };
+/* eslint-enable max-lines-per-function, complexity */
 
 /**
  * Immutable-snapshot context store for structured log metadata.
@@ -139,6 +143,7 @@ export class ContextStore {
   add(raw: ContextRecord): ContextValidationResult {
     const remaining = Math.max(0, this.maxKeys - Object.keys(this.context).length);
     const { context, validation } = sanitizeContextInput(raw, this.context, remaining);
+    // Intentional mutation: `readonly` prevents reassignment but allows property addition
     Object.assign(this.context, context);
     return validation;
   }

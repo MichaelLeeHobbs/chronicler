@@ -1,9 +1,13 @@
+import eslintConfigPrettier from 'eslint-config-prettier';
 import eslintPluginImport from 'eslint-plugin-import';
 import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 
 export default [
+  {
+    ignores: ['dist', 'node_modules', 'coverage', 'examples/**'],
+  },
   {
     files: ['**/*.{ts,tsx,js,jsx}'],
     languageOptions: {
@@ -17,16 +21,80 @@ export default [
       import: eslintPluginImport,
       'simple-import-sort': simpleImportSort,
     },
+    settings: {
+      'import/resolver': {
+        typescript: {
+          project: './tsconfig.json',
+        },
+      },
+    },
     rules: {
+      // --- Base typescript-eslint recommended + stylistic ---
       ...tseslint.configs['recommended-type-checked'].rules,
       ...tseslint.configs['stylistic-type-checked'].rules,
+
+      // --- Import sorting (override import/order) ---
       'import/order': 'off',
       'simple-import-sort/imports': 'error',
       'simple-import-sort/exports': 'error',
+
+      // --- Project overrides ---
       '@typescript-eslint/consistent-type-definitions': 'off',
+
+      // --- Rule 3.5: No traditional enums ---
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'TSEnumDeclaration',
+          message: 'Use `as const` objects or string literal unions instead of enums (Rule 3.5).',
+        },
+      ],
+
+      // --- Rule 5.2: No var, prefer const ---
+      'no-var': 'error',
+      'prefer-const': 'error',
+
+      // --- Rule 7.1: Prefer readonly class fields ---
+      '@typescript-eslint/prefer-readonly': 'warn',
+
+      // --- Rule 8.3: Exhaustive switch ---
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
+
+      // --- Rule 8.4: Function complexity limits ---
+      'max-lines-per-function': ['warn', { max: 40, skipBlankLines: true, skipComments: true }],
+      'max-params': ['warn', { max: 4 }],
+      'max-depth': ['warn', { max: 3 }],
+      complexity: ['warn', { max: 10 }],
+
+      // --- Rule 6.3: No console (allow warn, error) ---
+      'no-console': ['warn', { allow: ['warn', 'error'] }],
+
+      // --- Security: No eval ---
+      'no-eval': 'error',
+
+      // --- Rule 10.3: No circular dependencies ---
+      'import/no-cycle': ['error', { maxDepth: 5 }],
+
+      // --- Rule 3.4: No dynamic require ---
+      'import/no-dynamic-require': 'error',
+
+      // --- Prettier compatibility (must be last) ---
+      ...eslintConfigPrettier.rules,
     },
   },
+  // --- Test file overrides: relax function-size and complexity rules ---
   {
-    ignores: ['dist', 'node_modules', 'coverage', 'examples/**'],
+    files: ['tests/**/*.{ts,tsx}'],
+    rules: {
+      'max-lines-per-function': 'off',
+      complexity: 'off',
+    },
+  },
+  // --- CLI entry point: console.log IS the output mechanism ---
+  {
+    files: ['src/cli/index.ts'],
+    rules: {
+      'no-console': 'off',
+    },
   },
 ];

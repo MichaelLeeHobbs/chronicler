@@ -16,6 +16,7 @@ import type { ParsedEventGroup, ParsedEventTree } from '../types';
  * @param config - CLI configuration specifying output format and file path
  * @throws {Error} If the output path resolves outside the project directory or the format is unknown
  */
+// eslint-disable-next-line complexity -- multiple output format branches and path-safety checks
 export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig): void {
   const format = config.docs?.format ?? 'markdown';
   const outputPath = config.docs?.outputPath ?? './docs/chronicler-events.md';
@@ -48,6 +49,15 @@ export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig)
   const dir = path.dirname(resolved);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+
+  // Re-validate after mkdir to catch symlinks that resolve outside cwd
+  const realDir = fs.realpathSync(dir);
+  if (
+    !realDir.toLowerCase().startsWith(normalizedCwd + path.sep) &&
+    realDir.toLowerCase() !== normalizedCwd
+  ) {
+    throw new Error('Output directory resolves outside the project directory via symlink.');
   }
 
   // Write output
@@ -86,7 +96,7 @@ function generateMarkdown(tree: ParsedEventTree): string {
     lines.push('## Table of Contents');
     lines.push('');
     tree.groups.forEach((group) => {
-      lines.push(`- [${group.key}](#${group.key.replace(/\./g, '').toLowerCase()})`);
+      lines.push(`- [${group.key}](#${group.key.replace(/\./g, '-').toLowerCase()})`);
     });
     lines.push('');
     lines.push('---');
@@ -116,6 +126,7 @@ function generateMarkdown(tree: ParsedEventTree): string {
 /**
  * Generate Markdown for an event group and its nested groups (iterative)
  */
+// eslint-disable-next-line max-lines-per-function -- Accepted deviation: iterative traversal with markdown assembly
 function generateGroupMarkdown(rootGroup: ParsedEventGroup, rootLevel = 2): string[] {
   const lines: string[] = [];
   const stack: { group: ParsedEventGroup; level: number }[] = [
@@ -131,8 +142,12 @@ function generateGroupMarkdown(rootGroup: ParsedEventGroup, rootLevel = 2): stri
 
     if (group.type === 'correlation') {
       lines.push('**Type:** Correlation Group');
-      if (group.timeout) {
-        lines.push(`**Timeout:** ${group.timeout}ms (activity-based)`);
+      if (group.timeout !== undefined) {
+        lines.push(
+          group.timeout === 0
+            ? '**Timeout:** Disabled'
+            : `**Timeout:** ${group.timeout}ms (activity-based)`,
+        );
       }
       lines.push('');
     }
