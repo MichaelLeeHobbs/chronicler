@@ -3,6 +3,7 @@
  * Supports development (console) and production (CloudWatch) modes
  */
 
+import type { LogBackend, LogLevel as ChroniclerLogLevel, LogPayload } from '@ubercode/chronicler';
 import winston, { type LeveledLogMethod } from 'winston';
 import { stringify } from 'flatted';
 
@@ -128,3 +129,35 @@ export const loggerHttp = createLogger('http');
 
 // Default export: main logger
 export default loggerMain;
+
+/**
+ * Chronicler log levels to iterate over when building a backend adapter.
+ */
+const CHRONICLER_LEVELS: ChroniclerLogLevel[] = [
+  'fatal',
+  'critical',
+  'alert',
+  'error',
+  'warn',
+  'audit',
+  'info',
+  'debug',
+  'trace',
+];
+
+/**
+ * Adapt a Winston custom logger to Chronicler's LogBackend interface.
+ *
+ * Winston's level methods return the logger instance for chaining, while
+ * Chronicler expects `(message, payload) => void`. This wrapper normalises
+ * the signature so any Winston logger can be used as a Chronicler backend.
+ */
+export function toBackend(logger: CustomLogger): LogBackend {
+  const backend = {} as LogBackend;
+  for (const level of CHRONICLER_LEVELS) {
+    backend[level] = (message: string, payload: LogPayload) => {
+      logger[level](message, payload);
+    };
+  }
+  return backend;
+}

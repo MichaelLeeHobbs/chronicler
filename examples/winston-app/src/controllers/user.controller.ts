@@ -5,7 +5,7 @@
 import type { Request, Response } from 'express';
 
 import { business } from '../events.js';
-import { chronicleMain } from '../services/chronicler.js';
+import { chronicle } from '../services/chronicler.js';
 
 // Mock user data store
 const users = new Map<string, { id: string; email: string; name: string }>();
@@ -43,7 +43,7 @@ export const createUser = (req: Request, res: Response) => {
   users.set(id, user);
 
   // Log business event
-  chronicleMain.event(business.events.userCreated, {
+  chronicle.event(business.events.userCreated, {
     userId: id,
     email,
   });

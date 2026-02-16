@@ -6,7 +6,7 @@
 import type { NextFunction, Request, Response } from 'express';
 
 import { httpRequest } from '../events.js';
-import { chronicleHttp } from '../services/chronicler.js';
+import { chronicle } from '../services/chronicler.js';
 
 /**
  * Request logger middleware
@@ -19,7 +19,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
     `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   // Start correlation
-  const correlation = chronicleHttp.startCorrelation(httpRequest, {
+  const correlation = chronicle.startCorrelation(httpRequest, {
     requestId,
   });
 

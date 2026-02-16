@@ -1,6 +1,6 @@
 # Winston Express Example App
 
-This example demonstrates a complete Express.js application using **Chronicler** with **Winston** as the logging backend, featuring multiple log streams and CloudWatch integration patterns.
+This example demonstrates a complete Express.js application using **Chronicler** with **Winston** as the logging backend, featuring **router-based multi-stream logging** where a single chronicle instance routes events to different backends by event key.
 
 ## Architecture
 
@@ -18,22 +18,34 @@ src/
 └── index.ts         # Application entry point
 ```
 
-### Log Streams
+### Log Streams via Router Backend
 
-The app uses **three separate log streams**, each with its own Winston logger and Chronicler instance:
+The app uses a **single `chronicle` instance** with `createRouterBackend` to route events to three separate Winston loggers based on event key prefix:
 
-| Stream    | Purpose                             | Chronicle        | CloudWatch Stream |
-| --------- | ----------------------------------- | ---------------- | ----------------- |
-| **main**  | Application logs, business logic    | `chronicleMain`  | `/main`           |
-| **audit** | Security, compliance, admin actions | `chronicleAudit` | `/audit`          |
-| **http**  | HTTP request/response tracking      | `chronicleHttp`  | `/http`           |
+| Event Prefix     | Winston Stream | Purpose                             |
+| ---------------- | -------------- | ----------------------------------- |
+| `admin.*`        | `audit`        | Security, compliance, admin actions |
+| `http.request.*` | `http`         | HTTP request/response tracking      |
+| everything else  | `main`         | Application logs, business logic    |
 
-This separation allows you to:
+```typescript
+// src/services/chronicler.ts
+export const chronicle = createChronicle({
+  backend: createRouterBackend([
+    { backend: auditBackend, filter: (_lvl, p) => p.eventKey.startsWith('admin.') },
+    { backend: httpBackend,  filter: (_lvl, p) => p.eventKey.startsWith('http.request.') },
+    { backend: mainBackend,  filter: (_lvl, p) => /* everything else */ },
+  ]),
+  metadata: { serviceName: 'winston-app', appVersion: '1.0.0', env: 'production' },
+});
+```
 
-- Query specific log types independently in CloudWatch
-- Apply different retention policies per stream
-- Control access to sensitive audit logs separately
-- Reduce noise when troubleshooting specific issues
+This approach gives you:
+
+- **One chronicle** — shared context, metadata, and correlation IDs across all streams
+- **Event-key routing** — controllers just call `chronicle.event()` without knowing which stream receives it
+- **Stream isolation** — query specific log types independently in CloudWatch
+- **Different retention** — apply different retention policies per stream
 
 ## Prerequisites
 
@@ -83,10 +95,9 @@ Watch the output to see:
 
 - Colorized server logs in real-time
 - HTTP request correlations with duration tracking
-- Business events logged to main stream
-- Audit events logged to audit stream
+- Business events routed to the main stream
+- Audit events routed to the audit stream
 - Error handling with full context
-- Performance monitoring metrics
 
 ## API Endpoints
 
@@ -125,7 +136,7 @@ DELETE http://localhost:3000/api/users/:id
 ### Admin (Audit Logging)
 
 ```bash
-# Admin login (logs to audit stream)
+# Admin login (routed to audit stream)
 POST http://localhost:3000/api/admin/login
 Content-Type: application/json
 
@@ -134,7 +145,7 @@ Content-Type: application/json
   "password": "demo123"
 }
 
-# Perform admin action (logs to audit stream)
+# Perform admin action (routed to audit stream)
 POST http://localhost:3000/api/admin/action
 Content-Type: application/json
 X-User-Id: admin
@@ -159,7 +170,7 @@ Set via environment variables:
 | `AWS_LOG_GROUP` | `/aws/nodejs/chronicler-app` | CloudWatch log group                |
 | `DEBUG_CW`      | unset                        | Enable CloudWatch mock debug output |
 
-## Multi-Logger Setup
+## Multi-Stream Setup
 
 ### Winston Logger Factory
 
@@ -172,21 +183,34 @@ export const loggerAudit = createLogger('audit'); // Audit trail
 export const loggerHttp = createLogger('http'); // HTTP requests
 ```
 
-**Development mode**: Logs to console with colors  
+**Development mode**: Logs to console with colors
 **Production mode**: Sends to CloudWatch (or mock in this example)
 
-### Chronicler Instances
+### Router Backend
 
-Each Winston logger is wrapped by a Chronicler instance:
+All three Winston loggers are adapted to `LogBackend` and combined into a single router:
 
 ```typescript
 // src/services/chronicler.ts
-export const chronicleMain = createChronicle({
-  backend: createBackend(loggerMain),
-  metadata: { service: 'winston-app', version: '1.0.0', env: 'production' },
-  monitoring: { memory: true, cpu: true },
+const mainBackend = toBackend(loggerMain);
+const auditBackend = toBackend(loggerAudit);
+const httpBackend = toBackend(loggerHttp);
+
+export const chronicle = createChronicle({
+  backend: createRouterBackend([
+    { backend: auditBackend, filter: (_lvl, p) => p.eventKey.startsWith('admin.') },
+    { backend: httpBackend, filter: (_lvl, p) => p.eventKey.startsWith('http.request.') },
+    {
+      backend: mainBackend,
+      filter: (_lvl, p) =>
+        !p.eventKey.startsWith('admin.') && !p.eventKey.startsWith('http.request.'),
+    },
+  ]),
+  metadata: { serviceName: 'winston-app', appVersion: '1.0.0', env: 'production' },
 });
 ```
+
+Controllers simply import the single `chronicle` — no need to know which stream receives their events.
 
 ## Event Documentation
 
@@ -200,14 +224,13 @@ This creates `logs.md` with all event definitions, fields, and auto-events.
 
 ## Key Features
 
-✅ **Multiple Log Streams** - Separate logs by purpose  
-✅ **Correlation Tracking** - HTTP requests tracked end-to-end  
-✅ **Structured Events** - Type-safe event definitions  
-✅ **Performance Monitoring** - Automatic memory/CPU tracking  
-✅ **Error Handling** - Centralized error logging  
-✅ **Audit Trail** - Security actions in separate stream  
-✅ **CloudWatch Ready** - Drop-in mock for easy migration  
-✅ **Auto Documentation** - Generate docs from code
+- **Router Backend** — Single chronicle routes events to multiple Winston streams
+- **Correlation Tracking** — HTTP requests tracked end-to-end with shared correlation IDs
+- **Structured Events** — Type-safe event definitions with field validation
+- **Error Handling** — Centralized error logging with full context
+- **Audit Trail** — Security actions automatically routed to audit stream
+- **CloudWatch Ready** — Drop-in mock for easy migration
+- **Auto Documentation** — Generate docs from code
 
 ---
 

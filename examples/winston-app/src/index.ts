@@ -5,7 +5,7 @@
 import { createApp } from './app.js';
 import { config } from './config/index.js';
 import { system } from './events.js';
-import { chronicleMain } from './services/chronicler.js';
+import { chronicle } from './services/chronicler.js';
 
 // Create Express app
 const app = createApp();
@@ -13,14 +13,14 @@ const port = config.port;
 
 // Start server
 const server = app.listen(port, () => {
-  chronicleMain.event(system.events.startup, {
+  chronicle.event(system.events.startup, {
     port,
     env: config.environment,
   });
 
-  console.log(`🚀 Server running on port ${port}`);
-  console.log(`📊 Environment: ${config.environment}`);
-  console.log(`📝 Log level: ${config.logger.level}`);
+  console.log(`Server running on port ${port}`);
+  console.log(`Environment: ${config.environment}`);
+  console.log(`Log level: ${config.logger.level}`);
   console.log('\nAvailable endpoints:');
   console.log(`  GET  http://localhost:${port}/api/health`);
   console.log(`  GET  http://localhost:${port}/api/users`);
@@ -31,7 +31,7 @@ const server = app.listen(port, () => {
 
 // Graceful shutdown
 const shutdown = (signal: string) => {
-  chronicleMain.event(system.events.shutdown, {
+  chronicle.event(system.events.shutdown, {
     reason: signal,
   });
 
@@ -54,7 +54,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 
 // Handle uncaught errors
 process.on('uncaughtException', (error) => {
-  chronicleMain.event(system.events.error, {
+  chronicle.event(system.events.error, {
     error,
     context: 'uncaughtException',
   });
@@ -63,7 +63,7 @@ process.on('uncaughtException', (error) => {
 });
 
 process.on('unhandledRejection', (reason) => {
-  chronicleMain.event(system.events.error, {
+  chronicle.event(system.events.error, {
     error: reason instanceof Error ? reason : new Error(String(reason)),
     context: 'unhandledRejection',
   });

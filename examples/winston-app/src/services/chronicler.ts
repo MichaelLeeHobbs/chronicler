@@ -1,59 +1,37 @@
 /**
- * Chronicler instances for different log streams
+ * Single Chronicler instance with event-based routing to multiple backends.
+ *
+ * Instead of creating separate chronicle instances per stream, we use
+ * `createRouterBackend` to direct events to the appropriate Winston logger
+ * based on event key prefix:
+ *
+ *   admin.*          → audit stream  (security / compliance)
+ *   http.request.*   → http stream   (request lifecycle)
+ *   everything else  → main stream   (application / business)
  */
 
-import { createChronicle } from '@ubercode/chronicler';
+import { createChronicle, createRouterBackend } from '@ubercode/chronicler';
 
 import { config } from '../config/index.js';
-import { loggerAudit, loggerHttp, loggerMain } from './logger.js';
+import { loggerAudit, loggerHttp, loggerMain, toBackend } from './logger.js';
 
-/**
- * Main chronicle for application logs
- * Uses the 'main' CloudWatch stream
- */
-export const chronicleMain = createChronicle({
-  backend: loggerMain,
-  metadata: {
-    service: config.app.name,
-    version: config.app.version,
-    env: config.environment,
-  },
-  monitoring: {
-    memory: true,
-    cpu: true,
-  },
-});
+const mainBackend = toBackend(loggerMain);
+const auditBackend = toBackend(loggerAudit);
+const httpBackend = toBackend(loggerHttp);
 
-/**
- * Audit chronicle for compliance/security logs
- * Uses the 'audit' CloudWatch stream
- */
-export const chronicleAudit = createChronicle({
-  backend: loggerAudit,
+export const chronicle = createChronicle({
+  backend: createRouterBackend([
+    { backend: auditBackend, filter: (_lvl, p) => p.eventKey.startsWith('admin.') },
+    { backend: httpBackend, filter: (_lvl, p) => p.eventKey.startsWith('http.request.') },
+    {
+      backend: mainBackend,
+      filter: (_lvl, p) =>
+        !p.eventKey.startsWith('admin.') && !p.eventKey.startsWith('http.request.'),
+    },
+  ]),
   metadata: {
-    service: config.app.name,
-    version: config.app.version,
+    serviceName: config.app.name,
+    appVersion: config.app.version,
     env: config.environment,
-  },
-  monitoring: {
-    memory: false,
-    cpu: false,
-  },
-});
-
-/**
- * HTTP chronicle for request/response logs
- * Uses the 'http' CloudWatch stream
- */
-export const chronicleHttp = createChronicle({
-  backend: loggerHttp,
-  metadata: {
-    service: config.app.name,
-    version: config.app.version,
-    env: config.environment,
-  },
-  monitoring: {
-    memory: false,
-    cpu: false,
   },
 });

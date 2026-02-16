@@ -150,3 +150,54 @@ export const createBackend = (partial: Partial<LogBackend>): LogBackend => {
   }
   return backend;
 };
+
+/**
+ * A routing rule that pairs a backend with an optional filter.
+ *
+ * When `filter` is omitted the backend receives all events.
+ * When provided, the backend only receives events for which `filter` returns `true`.
+ */
+export interface BackendRoute {
+  readonly backend: LogBackend;
+  readonly filter?: (level: LogLevel, payload: LogPayload) => boolean;
+}
+
+/**
+ * Create a backend that routes events to multiple backends based on filter rules.
+ *
+ * Each route pairs a backend with an optional filter function. Events are
+ * dispatched to every route whose filter matches (or to all routes without a
+ * filter). This enables splitting logs into separate streams — for example,
+ * maintenance/debug logs to stdout and audit events to a dedicated store.
+ *
+ * @param routes - One or more backend routes with optional filters
+ * @returns A single LogBackend that fans out to the matching routes
+ * @throws {Error} If no routes are provided
+ *
+ * @example
+ * ```typescript
+ * const router = createRouterBackend([
+ *   { backend: consoleBackend, filter: (level, payload) => !payload.eventKey.startsWith('audit.') },
+ *   { backend: auditBackend,   filter: (level, payload) => payload.eventKey.startsWith('audit.') },
+ * ]);
+ *
+ * const chronicle = createChronicle({ backend: router, metadata: { appName: 'my-app' } });
+ * ```
+ */
+export const createRouterBackend = (routes: BackendRoute[]): LogBackend => {
+  if (routes.length === 0) {
+    throw new Error('createRouterBackend requires at least one route.');
+  }
+  // Rule 3.2: iteratively populated in the loop below over all required levels
+  const backend = {} as LogBackend;
+  for (const level of DEFAULT_REQUIRED_LEVELS) {
+    backend[level] = (message: string, payload: LogPayload) => {
+      for (const route of routes) {
+        if (!route.filter || route.filter(level, payload)) {
+          callBackendMethod(route.backend, level, message, payload);
+        }
+      }
+    };
+  }
+  return backend;
+};
