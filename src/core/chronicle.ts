@@ -63,11 +63,12 @@ interface ResolvedLimits {
   readonly maxActiveCorrelations: number;
 }
 
-type ResolvedChroniclerConfig = Omit<ChroniclerConfig, 'backend' | 'limits' | 'minLevel'> & {
+interface ResolvedChroniclerConfig {
   readonly backend: LogBackend;
   readonly limits: ResolvedLimits;
   readonly minLevel: number;
-};
+  readonly strict?: boolean | undefined;
+}
 
 export interface Chronicler {
   /** Emit a typed event. Fields are validated against the event definition. */
@@ -527,12 +528,11 @@ const resolveChroniclerConfig = (
   };
 
   return {
-    // Spread includes unresolved config first; explicit properties below override them.
     resolved: {
-      ...config,
       backend: resolvedBackend,
       limits: resolvedLimits,
       minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],
+      strict: config.strict,
     },
     correlationIdGenerator: config.correlationIdGenerator ?? (() => crypto.randomUUID()),
   };

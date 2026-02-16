@@ -27,9 +27,7 @@ export type LogLevel = keyof typeof LOG_LEVELS;
  * All required log levels that backends must implement.
  * Derived from LOG_LEVELS keys to prevent drift.
  */
-export const DEFAULT_REQUIRED_LEVELS = Object.keys(
-  LOG_LEVELS,
-) as readonly (keyof typeof LOG_LEVELS)[];
+export const DEFAULT_REQUIRED_LEVELS = Object.keys(LOG_LEVELS) as readonly LogLevel[];
 
 /**
  * Default correlation timeout in milliseconds (5 minutes)

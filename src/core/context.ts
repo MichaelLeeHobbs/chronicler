@@ -128,7 +128,7 @@ export class ContextStore {
   constructor(initial: ContextRecord = {}, maxKeys = Infinity) {
     this.maxKeys = maxKeys;
     const { context } = sanitizeContextInput(initial, {}, maxKeys);
-    this.context = { ...context };
+    this.context = context;
   }
 
   /**
