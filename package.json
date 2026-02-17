@@ -1,11 +1,16 @@
 {
   "name": "@ubercode/chronicler",
   "version": "0.1.0",
-  "description": "A TypeScript-first toolkit for building chronicle and audit utilities.",
+  "description": "Type-safe structured logging with event definitions, correlations, and field validation for Node.js",
   "keywords": [
-    "chronicle",
-    "audit",
+    "logging",
+    "structured-logging",
+    "type-safe",
     "typescript",
+    "events",
+    "correlation",
+    "observability",
+    "audit",
     "node"
   ],
   "license": "MIT",
@@ -34,7 +39,9 @@
     "chronicler": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "sideEffects": false,
   "engines": {
@@ -54,10 +61,13 @@
     "build": "pnpm run clean && tsup",
     "check": "pnpm run lint && pnpm run typecheck && pnpm run test",
     "prepare": "husky",
-    "changeset": "changeset",
-    "version-packages": "changeset version",
-    "release": "pnpm run build && changeset publish",
-    "prepublishOnly": "pnpm run build"
+    "prepublishOnly": "pnpm run check && pnpm run build",
+    "preversion": "pnpm run check",
+    "postversion": "git push && git push --tags",
+    "version:major": "npm version major",
+    "version:minor": "npm version minor",
+    "version:patch": "npm version patch",
+    "dry-run": "npm pack --dry-run"
   },
   "lint-staged": {
     "src/**/*.{ts,tsx,js,jsx,cjs,mjs}": [
@@ -77,7 +87,6 @@
     "access": "public"
   },
   "devDependencies": {
-    "@changesets/cli": "2.29.7",
     "@types/node": "24.10.1",
     "@typescript-eslint/eslint-plugin": "8.46.4",
     "@typescript-eslint/parser": "8.46.4",
