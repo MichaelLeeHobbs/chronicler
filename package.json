@@ -1,6 +1,6 @@
 {
   "name": "@ubercode/chronicler",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Type-safe structured logging with event definitions, correlations, and field validation for Node.js",
   "keywords": [
     "logging",
