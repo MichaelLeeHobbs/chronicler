@@ -4,19 +4,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-import { tsImport } from 'tsx/esm/api';
 
 import type { ChroniclerCliConfig } from './config';
 import { DEFAULT_DOCS_CONFIG } from './config';
+import { importTsModule } from './ts-import';
 
-/** Dynamically import and validate a chronicler config file via tsx loader. */
+/** Dynamically import and validate a chronicler config file. */
 async function importConfigModule(configPath: string): Promise<ChroniclerCliConfig> {
-  const configUrl = pathToFileURL(configPath).href;
-  const configModule = (await tsImport(configUrl, import.meta.url)) as {
-    default?: ChroniclerCliConfig;
-  };
+  const configModule = (await importTsModule(configPath)) as { default?: ChroniclerCliConfig };
   const config = configModule.default;
 
   if (!config) {

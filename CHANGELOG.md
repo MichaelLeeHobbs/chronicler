@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.4] - 2026-02-19
+
+### Fixed
+
+- CLI cannot load `.ts` config or event files in CJS projects — replaced tsx loader with esbuild compilation to temp `.mjs` files, which forces ESM parsing regardless of project `"type"` ([#6](https://github.com/MichaelLeeHobbs/chronicler/issues/6))
+
+### Changed
+
+- Replaced `tsx` dependency with `esbuild` — compiles user `.ts` files directly instead of relying on Node.js loader hooks. Also resolves the Node 24 `Dynamic require of "fs"` error ([#5](https://github.com/MichaelLeeHobbs/chronicler/issues/5))
+
 ## [1.0.2] - 2026-02-19
 
 ### Fixed

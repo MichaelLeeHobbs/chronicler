@@ -1,15 +1,13 @@
 /**
  * Runtime parser for extracting event definitions from TypeScript files.
- * Uses tsx/esm/api to dynamically import the file and inspect exports.
+ * Uses esbuild to compile .ts files before importing them.
  */
 
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-import { tsImport } from 'tsx/esm/api';
 
 import type { EventDefinition } from '../../core/events';
 import type { FieldBuilder } from '../../core/fields';
+import { importTsModule } from '../ts-import';
 import type { ParsedEventGroup, ParsedEventTree, ValidationError } from '../types';
 
 /** Auto-generated event property names added by defineCorrelationGroup. Excluded from docs output. */
@@ -187,7 +185,7 @@ function collectEventsFromGroup(rootGroup: ParsedEventGroup, seen: Set<string>):
 }
 
 /**
- * Parse an events file by dynamically importing it via tsx and inspecting exports.
+ * Parse an events file by compiling it via esbuild and inspecting exports.
  *
  * **Security note:** This function dynamically imports a user-authored TypeScript
  * file, which executes arbitrary code. This is acceptable for a CLI tool that
@@ -203,8 +201,7 @@ export async function parseEventsFile(filePath: string): Promise<ParsedEventTree
   const errors: ValidationError[] = [];
   const seen = new Set<string>();
 
-  const fileUrl = pathToFileURL(absolutePath).href;
-  const mod = (await tsImport(fileUrl, import.meta.url)) as Record<string, unknown>;
+  const mod = await importTsModule(absolutePath);
 
   for (const [exportName, value] of Object.entries(mod)) {
     if (isEventGroup(value)) {
