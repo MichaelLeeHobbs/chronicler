@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.2] - 2026-02-19
+
+### Fixed
+
+- CLI fails with `Dynamic require of "fs" is not supported` on Node 24 — mark `tsx` as external in CLI bundle and inject `createRequire` shim ([#5](https://github.com/MichaelLeeHobbs/chronicler/issues/5))
+- Move `tsx` from devDependencies to dependencies so CLI works for consumers
+
 ## [1.0.1] - 2026-02-19
 
 ### Fixed

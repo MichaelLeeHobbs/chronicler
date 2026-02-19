@@ -24,6 +24,13 @@ export default defineConfig([
     treeshake: true,
     target: 'node20',
     outDir: 'dist',
-    banner: { js: '#!/usr/bin/env node' },
+    external: ['tsx'],
+    banner: {
+      js: [
+        '#!/usr/bin/env node',
+        "import { createRequire } from 'module';",
+        'const require = createRequire(import.meta.url);',
+      ].join('\n'),
+    },
   },
 ]);
