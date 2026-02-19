@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2026-02-19
+
+### Fixed
+
+- Export `RequiredFieldBuilder` and `OptionalFieldBuilder` types — fixes TS4023 for consumers with `declaration: true` that re-export `defineEvent()` results ([#4](https://github.com/MichaelLeeHobbs/chronicler/issues/4))
+
+### Improved
+
+- Rewrote README to explain _why_ each feature matters (events, event groups, correlations, forks, context) with real-world before/after examples
+
 ## [1.0.0] - 2026-02-16
 
 ### Changed

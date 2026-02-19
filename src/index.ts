@@ -29,4 +29,11 @@ export {
   type EventFields,
   type SystemEventGroup,
 } from './core/events';
-export { field, type FieldBuilder, type InferFields, type InferFieldType } from './core/fields';
+export {
+  field,
+  type FieldBuilder,
+  type InferFields,
+  type InferFieldType,
+  type OptionalFieldBuilder,
+  type RequiredFieldBuilder,
+} from './core/fields';
