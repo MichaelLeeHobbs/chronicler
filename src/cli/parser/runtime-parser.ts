@@ -6,7 +6,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { register } from 'tsx/esm/api';
+import { tsImport } from 'tsx/esm/api';
 
 import type { EventDefinition } from '../../core/events';
 import type { FieldBuilder } from '../../core/fields';
@@ -196,7 +196,6 @@ function collectEventsFromGroup(rootGroup: ParsedEventGroup, seen: Set<string>):
  * @param filePath - Path to the TypeScript events file to parse
  * @returns Parsed event tree containing extracted events, groups, and any parse errors
  */
-/* eslint-disable max-depth -- Accepted deviation: event file parsing with nested group detection */
 export async function parseEventsFile(filePath: string): Promise<ParsedEventTree> {
   const absolutePath = path.resolve(filePath);
   const events: EventDefinition[] = [];
@@ -204,33 +203,26 @@ export async function parseEventsFile(filePath: string): Promise<ParsedEventTree
   const errors: ValidationError[] = [];
   const seen = new Set<string>();
 
-  const unregister = register();
+  const fileUrl = pathToFileURL(absolutePath).href;
+  const mod = (await tsImport(fileUrl, import.meta.url)) as Record<string, unknown>;
 
-  try {
-    const fileUrl = pathToFileURL(absolutePath).href;
-    const mod = (await import(fileUrl)) as Record<string, unknown>;
-
-    for (const [exportName, value] of Object.entries(mod)) {
-      if (isEventGroup(value)) {
-        const parsed = convertGroup(value);
-        groups.push(parsed);
-        events.push(...collectEventsFromGroup(parsed, seen));
-      } else if (isEventDefinition(value)) {
-        if (!seen.has(value.key)) {
-          seen.add(value.key);
-          events.push(cleanEvent(value));
-        }
-      } else if (looksLikeEvent(value)) {
-        errors.push({
-          type: 'parse-error',
-          message: `Export "${exportName}" looks like an event definition but is missing required properties (key, level, message).`,
-        });
+  for (const [exportName, value] of Object.entries(mod)) {
+    if (isEventGroup(value)) {
+      const parsed = convertGroup(value);
+      groups.push(parsed);
+      events.push(...collectEventsFromGroup(parsed, seen));
+    } else if (isEventDefinition(value)) {
+      if (!seen.has(value.key)) {
+        seen.add(value.key);
+        events.push(cleanEvent(value));
       }
+    } else if (looksLikeEvent(value)) {
+      errors.push({
+        type: 'parse-error',
+        message: `Export "${exportName}" looks like an event definition but is missing required properties (key, level, message).`,
+      });
     }
-  } finally {
-    void unregister();
   }
 
   return { events, groups, errors };
 }
-/* eslint-enable max-depth */

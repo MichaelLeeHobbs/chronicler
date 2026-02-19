@@ -6,34 +6,30 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { register } from 'tsx/esm/api';
+import { tsImport } from 'tsx/esm/api';
 
 import type { ChroniclerCliConfig } from './config';
 import { DEFAULT_DOCS_CONFIG } from './config';
 
 /** Dynamically import and validate a chronicler config file via tsx loader. */
 async function importConfigModule(configPath: string): Promise<ChroniclerCliConfig> {
-  const unregister = register();
+  const configUrl = pathToFileURL(configPath).href;
+  const configModule = (await tsImport(configUrl, import.meta.url)) as {
+    default?: ChroniclerCliConfig;
+  };
+  const config = configModule.default;
 
-  try {
-    const configUrl = pathToFileURL(configPath).href;
-    const configModule = (await import(configUrl)) as { default?: ChroniclerCliConfig };
-    const config = configModule.default;
-
-    if (!config) {
-      throw new Error('chronicler.config.ts must have a default export');
-    }
-    if (!config.eventsFile) {
-      throw new Error('eventsFile is required in chronicler.config.ts');
-    }
-
-    return {
-      eventsFile: config.eventsFile,
-      docs: { ...DEFAULT_DOCS_CONFIG, ...config.docs },
-    };
-  } finally {
-    void unregister();
+  if (!config) {
+    throw new Error('chronicler.config.ts must have a default export');
   }
+  if (!config.eventsFile) {
+    throw new Error('eventsFile is required in chronicler.config.ts');
+  }
+
+  return {
+    eventsFile: config.eventsFile,
+    docs: { ...DEFAULT_DOCS_CONFIG, ...config.docs },
+  };
 }
 
 /**
