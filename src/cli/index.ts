@@ -8,6 +8,7 @@ import { Command } from 'commander';
 
 import type { ChroniclerCliConfig } from './config';
 import { loadConfig, validateEventsFile } from './config-loader';
+import { resolveDocsOptions } from './docs-options';
 import { generateDocs } from './generator/docs-generator';
 import { parseEventsFile } from './parser/runtime-parser';
 import { formatErrors, validateEventTree } from './parser/validator';
@@ -121,36 +122,14 @@ async function runValidate(options: { verbose?: boolean; json?: boolean; config?
   printValidateSuccess(tree, options.verbose ?? false, elapsed);
 }
 
-/** Merge CLI flags with config-file docs options, validating the format. */
-function resolveDocsOptions(
-  config: { docs?: { format?: string; outputPath?: string } },
-  options: { format?: string; output?: string },
-): { format: 'markdown' | 'json'; outputPath: string } {
-  const VALID_FORMATS = ['markdown', 'json'] as const;
-  let format = config.docs?.format ?? 'markdown';
-  let outputPath = config.docs?.outputPath ?? './docs/chronicler-events.md';
-
-  if (options.format) {
-    if (!VALID_FORMATS.includes(options.format as (typeof VALID_FORMATS)[number])) {
-      console.error(
-        `Error: Invalid format "${options.format}". Must be one of: ${VALID_FORMATS.join(', ')}`,
-      );
-      process.exit(1);
-    }
-    format = options.format;
-  }
-  if (options.output) outputPath = options.output;
-
-  return { format: format as 'markdown' | 'json', outputPath };
-}
-
 async function runDocs(options: { format?: string; output?: string; config?: string }) {
   const startTime = Date.now();
 
   console.log('🔍 Loading configuration...');
   const loadedConfig = await loadConfig(resolveCwd(options.config));
-  const { format, outputPath } = resolveDocsOptions(loadedConfig, options);
-  const config: ChroniclerCliConfig = { ...loadedConfig, docs: { format, outputPath } };
+  const docs = resolveDocsOptions(loadedConfig, options);
+  const { format, outputPath } = docs;
+  const config: ChroniclerCliConfig = { ...loadedConfig, docs };
 
   console.log(`📂 Validating events file exists...`);
   validateEventsFile(config);
