@@ -19,23 +19,27 @@ import type { ParsedEventTree } from '../../src/cli/types';
 describe('Docs CLI end-to-end', () => {
   const fixturesPath = path.join(__dirname, 'fixtures');
   const fixturePath = path.join(fixturesPath, 'docs-events.ts');
-  const outputDir = path.join(__dirname, '../__temp__/docs-e2e');
-  const markdownPath = path.join(outputDir, 'events.md');
-  const jsonPath = path.join(outputDir, 'events.json');
+  // Each test gets its own unique temp directory via mkdtempSync, so parallel
+  // test files can never delete one another's output. The directory must live
+  // inside the project root because generateDocs rejects paths outside cwd.
+  const baseTmp = path.join(__dirname, '../__temp__');
+  let outputDir: string;
+  let markdownPath: string;
+  let jsonPath: string;
 
   let tree: ParsedEventTree;
 
   beforeEach(async () => {
-    if (fs.existsSync(outputDir)) {
-      fs.rmSync(outputDir, { recursive: true });
-    }
+    fs.mkdirSync(baseTmp, { recursive: true });
+    outputDir = fs.mkdtempSync(path.join(baseTmp, 'docs-e2e-'));
+    markdownPath = path.join(outputDir, 'events.md');
+    jsonPath = path.join(outputDir, 'events.json');
     tree = await parseEventsFile(fixturePath);
   });
 
   afterEach(() => {
-    if (fs.existsSync(outputDir)) {
-      fs.rmSync(outputDir, { recursive: true });
-    }
+    // Only ever removes this test's own unique directory.
+    fs.rmSync(outputDir, { recursive: true, force: true });
   });
 
   // ── Parsing ──────────────────────────────────────────────────────

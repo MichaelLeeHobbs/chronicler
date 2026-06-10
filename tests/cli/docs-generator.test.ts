@@ -1,24 +1,31 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ChroniclerCliConfig } from '../../src/cli/config';
 import { generateDocs } from '../../src/cli/generator/docs-generator';
 import type { ParsedEventTree } from '../../src/cli/types';
 
 describe('Documentation Generator', () => {
-  // Use a dedicated subdirectory so the recursive cleanup below never deletes
-  // sibling test files' temp dirs (e.g. docs-e2e) when run in parallel.
-  const outputDir = path.join(__dirname, '../__temp__/docs-generator');
-  const markdownPath = path.join(outputDir, 'events.md');
-  const jsonPath = path.join(outputDir, 'events.json');
+  // Each test gets its own unique temp directory via mkdtempSync, so parallel
+  // test files can never delete one another's output. The directory must live
+  // inside the project root because generateDocs rejects paths outside cwd.
+  const baseTmp = path.join(__dirname, '../__temp__');
+  let outputDir: string;
+  let markdownPath: string;
+  let jsonPath: string;
 
   beforeEach(() => {
-    // Clean up output directory
-    if (fs.existsSync(outputDir)) {
-      fs.rmSync(outputDir, { recursive: true, force: true });
-    }
+    fs.mkdirSync(baseTmp, { recursive: true });
+    outputDir = fs.mkdtempSync(path.join(baseTmp, 'docs-generator-'));
+    markdownPath = path.join(outputDir, 'events.md');
+    jsonPath = path.join(outputDir, 'events.json');
+  });
+
+  afterEach(() => {
+    // Only ever removes this test's own unique directory.
+    fs.rmSync(outputDir, { recursive: true, force: true });
   });
 
   const sampleTree: ParsedEventTree = {
