@@ -60,8 +60,15 @@ export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig)
     throw new Error('Output directory resolves outside the project directory via symlink.');
   }
 
+  // Normalize line endings before writing. Generated content uses LF
+  // internally; convert to the configured EOL so repos that normalize the
+  // working tree to CRLF don't see spurious diffs on every regeneration.
+  const eol = config.docs?.eol ?? 'lf';
+  const normalized =
+    eol === 'crlf' ? content.replace(/\r?\n/g, '\r\n') : content.replace(/\r\n/g, '\n');
+
   // Write output
-  fs.writeFileSync(resolved, content, 'utf-8');
+  fs.writeFileSync(resolved, normalized, 'utf-8');
 }
 
 /** Collect all event keys from groups and their nested sub-groups. */

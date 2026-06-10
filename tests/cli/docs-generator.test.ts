@@ -8,14 +8,16 @@ import { generateDocs } from '../../src/cli/generator/docs-generator';
 import type { ParsedEventTree } from '../../src/cli/types';
 
 describe('Documentation Generator', () => {
-  const outputDir = path.join(__dirname, '../__temp__');
+  // Use a dedicated subdirectory so the recursive cleanup below never deletes
+  // sibling test files' temp dirs (e.g. docs-e2e) when run in parallel.
+  const outputDir = path.join(__dirname, '../__temp__/docs-generator');
   const markdownPath = path.join(outputDir, 'events.md');
   const jsonPath = path.join(outputDir, 'events.json');
 
   beforeEach(() => {
     // Clean up output directory
     if (fs.existsSync(outputDir)) {
-      fs.rmSync(outputDir, { recursive: true });
+      fs.rmSync(outputDir, { recursive: true, force: true });
     }
   });
 
@@ -190,6 +192,99 @@ describe('Documentation Generator', () => {
       expect(event.fields[0]!.name).toBe('port');
       expect(event.fields[0]!.type).toBe('number');
       expect(event.fields[0]!.required).toBe(true);
+    });
+  });
+
+  describe('Line Endings', () => {
+    it('defaults to LF line endings when eol is not configured', () => {
+      const config: ChroniclerCliConfig = {
+        eventsFile: './test.ts',
+        docs: {
+          format: 'markdown',
+          outputPath: markdownPath,
+        },
+      };
+
+      generateDocs(sampleTree, config);
+
+      const content = fs.readFileSync(markdownPath, 'utf-8');
+      expect(content).toContain('\n');
+      expect(content).not.toContain('\r\n');
+    });
+
+    it('writes CRLF line endings when eol is "crlf"', () => {
+      const config: ChroniclerCliConfig = {
+        eventsFile: './test.ts',
+        docs: {
+          format: 'markdown',
+          outputPath: markdownPath,
+          eol: 'crlf',
+        },
+      };
+
+      generateDocs(sampleTree, config);
+
+      const content = fs.readFileSync(markdownPath, 'utf-8');
+      // Every newline must be CRLF — no bare LF should remain.
+      expect(content).toContain('\r\n');
+      expect(/(?<!\r)\n/.test(content)).toBe(false);
+    });
+
+    it('writes LF line endings when eol is "lf"', () => {
+      const config: ChroniclerCliConfig = {
+        eventsFile: './test.ts',
+        docs: {
+          format: 'markdown',
+          outputPath: markdownPath,
+          eol: 'lf',
+        },
+      };
+
+      generateDocs(sampleTree, config);
+
+      const content = fs.readFileSync(markdownPath, 'utf-8');
+      expect(content).toContain('\n');
+      expect(content).not.toContain('\r\n');
+    });
+
+    it('applies CRLF normalization to JSON output as well', () => {
+      const config: ChroniclerCliConfig = {
+        eventsFile: './test.ts',
+        docs: {
+          format: 'json',
+          outputPath: jsonPath,
+          eol: 'crlf',
+        },
+      };
+
+      generateDocs(sampleTree, config);
+
+      const content = fs.readFileSync(jsonPath, 'utf-8');
+      expect(content).toContain('\r\n');
+      expect(/(?<!\r)\n/.test(content)).toBe(false);
+      // Content must still be valid JSON after normalization.
+      expect(() => {
+        JSON.parse(content);
+      }).not.toThrow();
+    });
+
+    it('produces identical content across repeated regenerations (CRLF)', () => {
+      const config: ChroniclerCliConfig = {
+        eventsFile: './test.ts',
+        docs: {
+          format: 'markdown',
+          outputPath: markdownPath,
+          eol: 'crlf',
+        },
+      };
+
+      generateDocs(sampleTree, config);
+      const first = fs.readFileSync(markdownPath, 'utf-8');
+
+      generateDocs(sampleTree, config);
+      const second = fs.readFileSync(markdownPath, 'utf-8');
+
+      expect(second).toBe(first);
     });
   });
 

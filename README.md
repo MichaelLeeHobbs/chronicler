@@ -355,9 +355,16 @@ export default {
   docs: {
     format: 'markdown',
     outputPath: './docs/events.md',
+    eol: 'lf', // 'lf' (default) | 'crlf'
   },
 };
 ```
+
+| `docs` option | Type                   | Default                         | Description                                                                                                                                          |
+| ------------- | ---------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`      | `'markdown' \| 'json'` | `'markdown'`                    | Output format for the generated docs.                                                                                                                |
+| `outputPath`  | `string`               | `'./docs/chronicler-events.md'` | Where the generated docs are written (must resolve inside the project).                                                                              |
+| `eol`         | `'lf' \| 'crlf'`       | `'lf'`                          | Line ending for the written file. Set `'crlf'` on CRLF-normalized repos (`.gitattributes` `eol=crlf`) to avoid spurious diffs on every regeneration. |
 
 ## API Reference
 
