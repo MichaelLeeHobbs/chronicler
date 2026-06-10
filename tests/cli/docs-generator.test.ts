@@ -8,14 +8,16 @@ import { generateDocs } from '../../src/cli/generator/docs-generator';
 import type { ParsedEventTree } from '../../src/cli/types';
 
 describe('Documentation Generator', () => {
-  const outputDir = path.join(__dirname, '../__temp__');
+  // Use a dedicated subdirectory so the recursive cleanup below never deletes
+  // sibling test files' temp dirs (e.g. docs-e2e) when run in parallel.
+  const outputDir = path.join(__dirname, '../__temp__/docs-generator');
   const markdownPath = path.join(outputDir, 'events.md');
   const jsonPath = path.join(outputDir, 'events.json');
 
   beforeEach(() => {
     // Clean up output directory
     if (fs.existsSync(outputDir)) {
-      fs.rmSync(outputDir, { recursive: true });
+      fs.rmSync(outputDir, { recursive: true, force: true });
     }
   });
 
