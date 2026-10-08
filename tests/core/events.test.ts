@@ -449,8 +449,24 @@ describe('lifecycleEvents()', () => {
     expect(life.complete).toMatchObject({ key: 'api.request.complete', level: 'info' });
     expect(life.fail).toMatchObject({ key: 'api.request.fail', level: 'error' });
     expect(life.timeout).toMatchObject({ key: 'api.request.timeout', level: 'warn', fields: {} });
-    expect(life.complete.fields.duration._required).toBe(false);
-    expect(life.fail.fields.error._type).toBe('error');
-    expect(life.fail.fields.error._required).toBe(false);
+    expect(life.complete.fields.duration?._required).toBe(false);
+    expect(life.fail.fields.error?._type).toBe('error');
+    expect(life.fail.fields.error?._required).toBe(false);
+  });
+
+  it('adds fields declared with correlation({ complete, fail })', () => {
+    const life = lifecycleEvents('api.request', {
+      completeFields: { status: field.number() },
+      failFields: { reason: field.string().optional() },
+    });
+    expect(Object.keys(life.complete.fields)).toEqual(['status', 'duration']);
+    expect(Object.keys(life.fail.fields)).toEqual(['reason', 'duration', 'error']);
+  });
+
+  it('rejects lifecycle fields that redefine duration or error', () => {
+    const bad = correlation({ events: {} }) as unknown as Record<string, unknown>;
+    expect(() =>
+      defineEvents({ a: { ...bad, failFields: { error: field.string() } } } as never),
+    ).toThrow(/redefines built-in lifecycle field\(s\): error/);
   });
 });

@@ -270,7 +270,22 @@ Now filter by `correlationId` in your log aggregator and see the entire request 
 | `{key}.fail`     | `fail(error)` called, or `run` threw | `duration`, `error` |
 | `{key}.timeout`  | No activity within `timeout`         | none                |
 
-`complete()` and `fail()` take extra fields, but the lifecycle events only define `duration` and `error`, so extras are logged and listed in `_validation.unknownFields`. Prefer a defined event (like `completed` with `statusCode` in the [example app](examples/winston-app)) for data you want on the record.
+To log more on `.complete` or `.fail`, declare the extra fields on the correlation. They're typed and validated like any event's fields:
+
+```ts
+request: (correlation({
+  events: {
+    /* ... */
+  },
+  complete: { statusCode: field.number() },
+  fail: { statusCode: field.number().optional() },
+}),
+  request.complete({ statusCode: 200 })); // http.request.complete { duration, statusCode }
+request.fail(err, { statusCode: 502 }); // http.request.fail { duration, error, statusCode }
+request.complete({ status: 200 }); // compile error: not declared
+```
+
+They can't redefine `duration` or `error`. Without declarations, `complete()` takes no fields and `fail()` takes only the error.
 
 #### Nested correlations
 
@@ -537,7 +552,24 @@ test('logs the login', () => {
 
 `createTestChronicle(events, config?)` accepts every `createChronicle` option except `events` and `backend`, and returns `{ chronicle, emitted, eventsOf(event), assertEmitted(event, fields?), clear() }`. `eventsOf` and `assertEmitted` take an event definition or an emitter. `assertEmitted` works with any test runner.
 
-`createTestChronicle` builds a new chronicle. Code that imports your app's own chronicle module still logs through that one, so to capture its events in tests, make the app's backend swappable (for example, a lazy `backend` function that returns a test backend when one is set).
+`createTestChronicle` builds a new chronicle. To test code that logs through your app's own chronicle, use `captureEvents` on it instead:
+
+```ts
+import { captureEvents } from '@ubercode/chronicler/testing';
+import { chronicle } from '../src/logger';
+import { events } from '../src/events';
+
+let capture: ReturnType<typeof captureEvents>;
+beforeEach(() => (capture = captureEvents(chronicle)));
+afterEach(() => capture.restore());
+
+test('login handler audits the attempt', async () => {
+  await loginHandler(req, res); // calls admin.login(...) internally
+  capture.assertEmitted(events.admin.login, { success: true });
+});
+```
+
+While capturing, every emitter, fork and correlation of that chronicle records in memory, and its configured backend isn't used (a lazy `backend` function isn't even called). `captureEvents` returns the same helpers plus `restore()`.
 
 ## Payload Reference
 
@@ -650,8 +682,8 @@ The emitter tree for the catalog: an `Emitter` function for each event and a `Co
 
 - The correlation's own events as emitters
 - `correlationId`: for propagation to downstream services
-- `complete(fields?)`: emit `{key}.complete` with `duration`
-- `fail(error?, fields?)`: emit `{key}.fail` with `duration` and `error`
+- `complete(fields?)`: emit `{key}.complete` with `duration` and the fields declared in `correlation({ complete })`
+- `fail(error?, fields?)`: emit `{key}.fail` with `duration`, `error` and the fields declared in `correlation({ fail })`
 - `fork(context?)`: a `CorrelationFork` (the correlation's events, `correlationId`, `fork`, `run`, `log`, `addContext`)
 - `run(fn)`, `log(...)`, `addContext(...)`
 

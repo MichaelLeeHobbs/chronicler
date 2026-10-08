@@ -33,6 +33,7 @@ const apiEvents = defineEvents({
   request: correlation({
     doc: 'API request',
     timeout: 5000,
+    complete: { status: field.number().optional() },
     events: {
       validated: event({
         level: 'info',

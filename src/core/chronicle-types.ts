@@ -1,6 +1,6 @@
 import type { LogLevel } from './constants';
 import type { ContextRecord, ContextValidationResult } from './context';
-import type { CorrelationDefinition, EventDefinition, FieldDefs } from './events';
+import type { CorrelationDefinition, EventDefinition, FieldDefs, NoFields } from './events';
 import type { InferFields } from './fields';
 
 /**
@@ -46,8 +46,12 @@ export interface ScopeMethods<Self> {
 export type Emitters<C> = {
   readonly [K in keyof C]: C[K] extends EventDefinition<infer F extends FieldDefs>
     ? Emitter<F>
-    : C[K] extends CorrelationDefinition<infer E extends object>
-      ? CorrelationStarter<E>
+    : C[K] extends CorrelationDefinition<
+          infer E extends object,
+          infer CF extends FieldDefs,
+          infer FF extends FieldDefs
+        >
+      ? CorrelationStarter<E, CF, FF>
       : Emitters<C[K]>;
 };
 
@@ -65,16 +69,27 @@ export type CorrelationFork<E> = Emitters<E> &
     readonly correlationId: string;
   };
 
-/** A running correlation: its events, scope methods and lifecycle. */
-export type CorrelationHandle<E> = CorrelationFork<E> & {
-  /** End the correlation successfully. Emits `<key>.complete` with `duration`. */
-  complete(fields?: Record<string, unknown>): void;
-  /** End the correlation with a failure. Emits `<key>.fail` with `duration` and `error`. */
-  fail(error?: unknown, fields?: Record<string, unknown>): void;
+/**
+ * A running correlation: its events, scope methods and lifecycle. `CF` and `FF` are the extra
+ * fields declared with `correlation({ complete, fail })`.
+ */
+export type CorrelationHandle<
+  E,
+  CF extends FieldDefs = NoFields,
+  FF extends FieldDefs = NoFields,
+> = CorrelationFork<E> & {
+  /** End the correlation successfully. Emits `<key>.complete` with `duration` and the declared fields. */
+  complete(...fields: EmitterArgs<CF>): void;
+  /** End the correlation with a failure. Emits `<key>.fail` with `duration`, `error` and the declared fields. */
+  fail(error?: unknown, ...fields: EmitterArgs<FF>): void;
 };
 
 /** Starts a correlation. Found in the emitter tree where the catalog has a `correlation()`. */
-export interface CorrelationStarter<E> {
+export interface CorrelationStarter<
+  E,
+  CF extends FieldDefs = NoFields,
+  FF extends FieldDefs = NoFields,
+> {
   /** Full dotted key of the correlation. */
   readonly key: string;
   /**
@@ -83,17 +98,18 @@ export interface CorrelationStarter<E> {
    * event is flagged in `_validation`. Started inside another correlation, it is nested: its
    * events carry `parentCorrelationId` and `rootCorrelationId`.
    */
-  begin(context?: ContextRecord): CorrelationHandle<E>;
+  begin(context?: ContextRecord): CorrelationHandle<E, CF, FF>;
   /**
    * Start the correlation and run `fn` with it as the ambient scope. The correlation is not
    * completed when `fn` returns (call `complete()`); it is failed if `fn` throws or rejects.
    */
-  run<T>(fn: (correlation: CorrelationHandle<E>) => T): T;
-  run<T>(context: ContextRecord, fn: (correlation: CorrelationHandle<E>) => T): T;
+  run<T>(fn: (correlation: CorrelationHandle<E, CF, FF>) => T): T;
+  run<T>(context: ContextRecord, fn: (correlation: CorrelationHandle<E, CF, FF>) => T): T;
 }
 
 /** The handle type of a correlation starter: `HandleOf<typeof chronicle.http.request>`. */
-export type HandleOf<S> = S extends CorrelationStarter<infer E> ? CorrelationHandle<E> : never;
+export type HandleOf<S> =
+  S extends CorrelationStarter<infer E, infer CF, infer FF> ? CorrelationHandle<E, CF, FF> : never;
 
 /** The fields object of an event definition or emitter. */
 export type FieldsOf<T> =

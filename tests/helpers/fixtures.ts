@@ -39,6 +39,8 @@ export const events = defineEvents({
     request: correlation({
       doc: 'HTTP request lifecycle',
       timeout: 100,
+      complete: { status: field.number().optional() },
+      fail: { status: field.number().optional() },
       events: {
         received: event({ level: 'info', message: 'received', fields: { path: field.string() } }),
         ping: event({ level: 'debug', message: 'ping' }),

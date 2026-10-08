@@ -42,11 +42,20 @@ describe('correlation lifecycle', () => {
     ]);
   });
 
-  it('passes extra fields to complete()', () => {
+  it('passes declared extra fields to complete() without validation issues', () => {
     const { mock, chronicle } = setup();
     chronicle.http.request.begin().complete({ status: 200 });
     expect(mock.getLastPayload()?.fields).toEqual({ duration: 0, status: 200 });
-    expect(mock.getLastPayload()?._validation).toEqual({ unknownFields: ['status'] });
+    expect(mock.getLastPayload()?._validation).toBeUndefined();
+  });
+
+  it('validates declared complete() fields at runtime', () => {
+    const { mock, chronicle } = setup();
+    const req = chronicle.http.request.begin() as unknown as {
+      complete: (fields: Record<string, unknown>) => void;
+    };
+    req.complete({ status: 'ok' });
+    expect(mock.getLastPayload()?._validation).toEqual({ typeErrors: ['status'] });
   });
 
   it('fail() emits fail at error level with duration and serialized error', () => {

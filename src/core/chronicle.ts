@@ -26,6 +26,7 @@ import {
   type AnyEventDefinition,
   type CheckCatalog,
   defineEvents,
+  type FieldDefs,
   isCorrelationDefinition,
   isEventDefinition,
   type LifecycleEvents,
@@ -113,8 +114,14 @@ const isFinished = (correlation: Correlation): boolean =>
 class Runtime {
   private als: AsyncLocalStorage<Scope> | undefined;
   activeCorrelations = 0;
+  /** Backend that replaces the configured one, set by `captureEvents()` in tests. */
+  backendOverride: LogBackend | undefined;
 
   constructor(readonly config: ResolvedConfig) {}
+
+  backend(): LogBackend {
+    return this.backendOverride ?? this.config.backend();
+  }
 
   /** Run `fn` with `scope` ambient. The store is created on first use, so apps that never call `run` pay nothing. */
   runIn<T>(scope: Scope, fn: () => T): T {
@@ -199,7 +206,7 @@ class Scope {
       ...this.basePayload(def.key, result.normalizedFields, reportedStatus),
       ...(validation ? { _validation: validation } : {}),
     };
-    callBackendMethod(config.backend(), def.level, def.message, payload);
+    callBackendMethod(this.runtime.backend(), def.level, def.message, payload);
     this.touch();
   }
 
@@ -212,7 +219,7 @@ class Scope {
       ...this.basePayload('', sanitizeLogFields(fields), this.correlation?.status),
       ...(validation ? { _validation: validation } : {}),
     };
-    callBackendMethod(config.backend(), level, message, payload);
+    callBackendMethod(this.runtime.backend(), level, message, payload);
     this.touch();
   }
 
@@ -251,7 +258,7 @@ class Scope {
       id,
       parentId: parent?.id,
       rootId: parent?.rootId ?? id,
-      lifecycle: lifecycleEvents(def.key),
+      lifecycle: lifecycleEvents(def.key, def),
       startedAt: Date.now(),
       outer: this,
       timer: undefined,
@@ -365,7 +372,7 @@ const makeEmitter = (def: AnyEventDefinition, resolve: Resolve) => {
   return emitter;
 };
 
-type Handle = CorrelationHandle<object>;
+type Handle = CorrelationHandle<object, FieldDefs, FieldDefs>;
 
 /** Run `fn` with the correlation ambient; fail the correlation if `fn` throws or rejects. */
 const runCorrelation = <T>(handle: Handle, fn: (handle: Handle) => T): T => {
@@ -469,6 +476,18 @@ const makeCorrelationTree = (
   return tree;
 };
 
+/**
+ * Non-enumerable hook on every chronicle tree, used by `@ubercode/chronicler/testing` to swap the
+ * backend of an existing chronicle. `Symbol.for` so it works across copies of the package.
+ */
+export const BACKEND_HOOK = Symbol.for('chronicler.backendHook');
+
+/** The hook stored under {@link BACKEND_HOOK}. */
+export interface BackendHook {
+  /** Replace the backend (or restore the configured one with `undefined`); returns the previous override. */
+  setOverride(backend: LogBackend | undefined): LogBackend | undefined;
+}
+
 const makeChronicleTree = (
   catalog: object,
   resolve: Resolve,
@@ -476,6 +495,15 @@ const makeChronicleTree = (
 ): Record<string, unknown> => {
   const tree: Record<string, unknown> = {};
   bindNode(catalog, resolve, tree);
+  const { runtime } = runScope();
+  const hook: BackendHook = {
+    setOverride(backend) {
+      const previous = runtime.backendOverride;
+      runtime.backendOverride = backend;
+      return previous;
+    },
+  };
+  Object.defineProperty(tree, BACKEND_HOOK, { value: hook, enumerable: false });
   addScopeMethods(tree, resolve, runScope, (from, context) => {
     const child = from.fork(context);
     return makeChronicleTree(

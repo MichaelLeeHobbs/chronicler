@@ -27,7 +27,8 @@ All notable changes to this project will be documented in this file.
 - Catalogs compose: a catalog mounted inside another has its keys re-derived from the outer path
 - `walkCatalog()`, `isCatalog()`, `isEventDefinition()` and `isCorrelationDefinition()` for tooling; the CLI uses them instead of inspecting object shapes
 - `backend` may be a function, created lazily on the first event
-- `@ubercode/chronicler/testing` with `createTestChronicle(events, config?)`, which records events in memory and provides `eventsOf()` and `assertEmitted()`
+- `@ubercode/chronicler/testing` with `createTestChronicle(events, config?)`, which records events in memory and provides `eventsOf()` and `assertEmitted()`, and `captureEvents(chronicle)`, which records an existing chronicle's events (such as the one your app exports) until `restore()`
+- `correlation({ complete, fail })` declares typed extra fields for the `.complete` and `.fail` events; `complete()` and `fail()` only accept declared fields
 - Events without required fields can be called with no argument (`admin.heartbeat()`), and events that declare no fields reject extra keys at compile time
 - CLI: `chronicler keys --write` / `--check` / `--json` records event keys in a lockfile (`chronicler.lock.json`, configurable as `keys.lockfile`) and fails when a key changes. `eventsExport` in `chronicler.config.ts` names the catalog export
 

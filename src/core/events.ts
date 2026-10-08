@@ -43,7 +43,11 @@ export interface EventDefinition<F extends FieldDefs = FieldDefs> {
  *
  * Created with {@link correlation}. `events` holds the events that belong to it.
  */
-export interface CorrelationDefinition<E extends object = object> {
+export interface CorrelationDefinition<
+  E extends object = object,
+  CF extends FieldDefs = NoFields,
+  FF extends FieldDefs = NoFields,
+> {
   readonly kind: typeof CORRELATION_KIND;
   readonly key: string;
   readonly keyOverride?: string;
@@ -51,12 +55,16 @@ export interface CorrelationDefinition<E extends object = object> {
   /** Idle timeout in milliseconds. `0` disables it. */
   readonly timeout: number;
   readonly events: E;
+  /** Extra fields `complete()` accepts, logged on `<key>.complete` next to `duration`. */
+  readonly completeFields: CF;
+  /** Extra fields `fail()` accepts, logged on `<key>.fail` next to `duration` and `error`. */
+  readonly failFields: FF;
 }
 
 /** Any event definition, whatever its fields. */
 export type AnyEventDefinition = EventDefinition<FieldDefs>;
 /** Any correlation definition, whatever its events. */
-export type AnyCorrelationDefinition = CorrelationDefinition<object>;
+export type AnyCorrelationDefinition = CorrelationDefinition<object, FieldDefs, FieldDefs>;
 
 /**
  * Names that can't be used for catalog entries, because the emitter tree, correlation handles
@@ -164,12 +172,20 @@ export function event(
  * Lifecycle events `<key>.start`, `.complete`, `.fail` and `.timeout` are generated automatically.
  * The timeout defaults to 5 minutes, resets on any activity, and `0` disables it.
  */
-export function correlation<const E extends object>(options: {
+export function correlation<
+  const E extends object,
+  const CF extends FieldDefs = NoFields,
+  const FF extends FieldDefs = NoFields,
+>(options: {
   readonly doc?: string;
   readonly timeout?: number;
   readonly key?: string;
   readonly events: E & CheckCorrelationEvents<E>;
-}): CorrelationDefinition<E> {
+  /** Extra fields for `complete()`, e.g. `{ statusCode: field.number() }`. Can't redefine `duration`. */
+  readonly complete?: CF & Partial<Record<'duration', never>>;
+  /** Extra fields for `fail()`. Can't redefine `duration` or `error`. */
+  readonly fail?: FF & Partial<Record<'duration' | 'error', never>>;
+}): CorrelationDefinition<E, CF, FF> {
   return {
     kind: CORRELATION_KIND,
     key: '',
@@ -177,6 +193,8 @@ export function correlation<const E extends object>(options: {
     ...(options.doc !== undefined ? { doc: options.doc } : {}),
     timeout: options.timeout ?? DEFAULT_CORRELATION_TIMEOUT_MS,
     events: options.events,
+    completeFields: options.complete ?? ({} as CF),
+    failFields: options.fail ?? ({} as FF),
   };
 }
 
@@ -225,17 +243,30 @@ const LIFECYCLE_FIELDS = {
 } as const;
 
 /** The four auto-generated lifecycle events of a correlation. */
-export type LifecycleEvents = {
-  readonly [K in keyof typeof LIFECYCLE_FIELDS]: EventDefinition<(typeof LIFECYCLE_FIELDS)[K]>;
-};
+export interface LifecycleEvents {
+  readonly start: AnyEventDefinition;
+  readonly complete: AnyEventDefinition;
+  readonly fail: AnyEventDefinition;
+  readonly timeout: AnyEventDefinition;
+}
+
+/** Extra fields a correlation declares for its `.complete` and `.fail` events. */
+export interface LifecycleExtras {
+  readonly completeFields?: FieldDefs;
+  readonly failFields?: FieldDefs;
+}
 
 /**
  * Build the lifecycle events for a correlation key.
  *
  * @param correlationKey - Full key of the correlation (e.g. `http.request`)
+ * @param extras - Extra fields declared with `correlation({ complete, fail })`
  * @returns Event definitions for `.start`, `.complete`, `.fail` and `.timeout`
  */
-export const lifecycleEvents = (correlationKey: string): LifecycleEvents => ({
+export const lifecycleEvents = (
+  correlationKey: string,
+  extras: LifecycleExtras = {},
+): LifecycleEvents => ({
   start: {
     kind: EVENT_KIND,
     key: `${correlationKey}.start`,
@@ -250,7 +281,7 @@ export const lifecycleEvents = (correlationKey: string): LifecycleEvents => ({
     level: 'info',
     message: `${correlationKey} completed`,
     doc: 'Auto-generated correlation completion event',
-    fields: LIFECYCLE_FIELDS.complete,
+    fields: { ...extras.completeFields, ...LIFECYCLE_FIELDS.complete },
   },
   fail: {
     kind: EVENT_KIND,
@@ -258,7 +289,7 @@ export const lifecycleEvents = (correlationKey: string): LifecycleEvents => ({
     level: 'error',
     message: `${correlationKey} failed`,
     doc: 'Auto-generated correlation failure event',
-    fields: LIFECYCLE_FIELDS.fail,
+    fields: { ...extras.failFields, ...LIFECYCLE_FIELDS.fail },
   },
   timeout: {
     kind: EVENT_KIND,
@@ -373,6 +404,18 @@ const walkEvent = (state: WalkState, def: AnyEventDefinition, at: Placement): vo
   });
 };
 
+const checkLifecycleExtras = (def: AnyCorrelationDefinition, path: string): void => {
+  const clashes = [
+    ...Object.keys(def.completeFields ?? {}).filter((name) => name === 'duration'),
+    ...Object.keys(def.failFields ?? {}).filter((name) => name === 'duration' || name === 'error'),
+  ];
+  if (clashes.length > 0) {
+    throw catalogError(
+      `Correlation ${describePath(path)} redefines built-in lifecycle field(s): ${clashes.join(', ')}.`,
+    );
+  }
+};
+
 const walkCorrelation = (
   state: WalkState,
   def: AnyCorrelationDefinition,
@@ -386,8 +429,10 @@ const walkCorrelation = (
   }
   const key = def.keyOverride ?? derivedKey;
   checkKey(key);
+  checkLifecycleExtras(def, path);
   state.entries.push({ kind: 'correlation', key, path, definition: { ...def, key } });
-  for (const life of Object.values(lifecycleEvents(key))) {
+  const { start, complete, fail, timeout } = lifecycleEvents(key, def);
+  for (const life of [start, complete, fail, timeout]) {
     claimKey(state, life.key, `${path} (lifecycle)`);
     state.entries.push({
       kind: 'event',

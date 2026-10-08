@@ -33,7 +33,7 @@ Package manager is **pnpm 10.18.0**. Lint enforces zero warnings (`--max-warning
 
 ### Core (`src/core/`)
 
-The central API flow: `defineEvents({...})` catalog → `createChronicle({ events, backend?, metadata? })` → `Chronicle<C>` emitter tree. Events are functions (`admin.login(fields)`); correlations are starters (`http.request.begin(ctx?)` / `.run(ctx?, fn)`) that return a `CorrelationHandle` with the correlation's own events plus `complete()` / `fail()` / `fork()`. Every scope also has `fork(ctx?)`, `run(fn)`, `log(level, msg, fields?)` and `addContext(ctx)`.
+The central API flow: `defineEvents({...})` catalog → `createChronicle({ events, backend?, metadata? })` → `Chronicle<C>` emitter tree. Events are functions (`admin.login(fields)`); correlations are starters (`http.request.begin(ctx?)` / `.run(ctx?, fn)`) that return a `CorrelationHandle` with the correlation's own events plus `complete()` / `fail()` / `fork()`. `correlation({ complete, fail })` declares typed extra fields for the lifecycle events. Every scope also has `fork(ctx?)`, `run(fn)`, `log(level, msg, fields?)` and `addContext(ctx)`.
 
 - **events.ts** — `event()`, `correlation()`, `group()` and `defineEvents()`. `defineEvents` walks the catalog (`walkCatalog()`), validates names/levels/timeouts/duplicate keys (throws `INVALID_CATALOG`), and stamps each definition's `key` from its path (or its `key` override). Definitions carry a string `kind` discriminant (`chronicler:event` / `chronicler:correlation`). `lifecycleEvents()` builds the auto `.start` / `.complete` / `.fail` / `.timeout` events. `RESERVED_CATALOG_NAMES` and the `CheckCatalog` type reject reserved names and nested correlation definitions at compile time.
 - **chronicle.ts** — `createChronicle`. A `Runtime` holds resolved config, the lazily created `AsyncLocalStorage` (first `run()`), and the active-correlation count. A `Scope` (context store + forkId + optional `Correlation`) does validation, payload assembly and backend calls; the root, forks and correlations are all scopes. Root-tree emitters resolve the ambient scope (skipping finished correlations and flagging `staleCorrelationId`); fork trees and handles are bound to their own scope. Correlations started from a scope inside an unfinished correlation are nested (`parentCorrelationId` / `rootCorrelationId`).
@@ -49,7 +49,7 @@ The central API flow: `defineEvents({...})` catalog → `createChronicle({ event
 
 ### Testing entry (`src/testing.ts`)
 
-Published as `@ubercode/chronicler/testing`. `createTestChronicle(events, config?)` returns `{ chronicle, emitted, eventsOf(def|emitter), assertEmitted(def|emitter, fields?), clear() }`, recording events in memory.
+Published as `@ubercode/chronicler/testing`. `createTestChronicle(events, config?)` returns `{ chronicle, emitted, eventsOf(def|emitter), assertEmitted(def|emitter, fields?), clear() }`, recording events in memory. `captureEvents(chronicle)` records an existing chronicle's events through a non-enumerable `Symbol.for('chronicler.backendHook')` hook on every chronicle tree, which swaps the runtime's backend until `restore()`.
 
 ### CLI (`src/cli/`, published from `packages/cli`)
 

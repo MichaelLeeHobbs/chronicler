@@ -44,6 +44,8 @@ const events = defineEvents({
   http: {
     request: correlation({
       timeout: 1000,
+      complete: { status: field.number().optional() },
+      fail: { status: field.number().optional() },
       events: {
         received: event({ level: 'info', message: 'received', fields: { path: field.string() } }),
         ping: event({ level: 'debug', message: 'ping' }),
@@ -169,7 +171,11 @@ describe('Type Inference Tests', () => {
       >();
       expectTypeOf(chronicle.admin.login.key).toEqualTypeOf<string>();
       expectTypeOf(chronicle.http.request).toEqualTypeOf<
-        CorrelationStarter<(typeof events)['http']['request']['events']>
+        CorrelationStarter<
+          (typeof events)['http']['request']['events'],
+          (typeof events)['http']['request']['completeFields'],
+          (typeof events)['http']['request']['failFields']
+        >
       >();
       expectTypeOf(chronicle.http.request.key).toEqualTypeOf<string>();
       expectTypeOf(chronicle).toEqualTypeOf<Chronicle<typeof events>>();
@@ -249,9 +255,12 @@ describe('Type Inference Tests', () => {
   describe('correlations', () => {
     type Request = HandleOf<typeof chronicle.http.request>;
     type RequestEvents = (typeof events)['http']['request']['events'];
+    type RequestDef = (typeof events)['http']['request'];
 
     it('HandleOf gives the correlation handle', () => {
-      expectTypeOf<Request>().toEqualTypeOf<CorrelationHandle<RequestEvents>>();
+      expectTypeOf<Request>().toEqualTypeOf<
+        CorrelationHandle<RequestEvents, RequestDef['completeFields'], RequestDef['failFields']>
+      >();
       expectTypeOf(chronicle.http.request.begin()).toEqualTypeOf<Request>();
       expectTypeOf<HandleOf<typeof chronicle.admin.login>>().toBeNever();
     });
@@ -266,6 +275,10 @@ describe('Type Inference Tests', () => {
         req.complete({ status: 200 });
         req.fail(new Error('x'), { status: 500 });
         req.fail();
+        // @ts-expect-error -- undeclared complete() field
+        req.complete({ nope: 1 });
+        // @ts-expect-error -- wrong type for a declared field
+        req.complete({ status: '200' });
         // @ts-expect-error -- missing path
         req.received({});
         // @ts-expect-error -- root events are not on the handle

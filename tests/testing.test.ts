@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { correlation, defineEvents, event, field } from '../src';
-import { createTestChronicle } from '../src/testing';
+import { correlation, createChronicle, defineEvents, event, field } from '../src';
+import { captureEvents, createTestChronicle } from '../src/testing';
 
 const events = defineEvents({
   admin: {
@@ -137,5 +137,91 @@ describe('createTestChronicle', () => {
     const b = createTestChronicle(events);
     a.chronicle.admin.heartbeat();
     expect(b.emitted).toHaveLength(0);
+  });
+});
+
+describe('captureEvents', () => {
+  const makeApp = () => {
+    const sent: string[] = [];
+    let created = 0;
+    const app = createChronicle({
+      events,
+      backend: () => {
+        created++;
+        const send = (_message: string, payload: { eventKey: string }) => {
+          sent.push(payload.eventKey);
+        };
+        return {
+          fatal: send,
+          critical: send,
+          alert: send,
+          error: send,
+          warn: send,
+          audit: send,
+          info: send,
+          debug: send,
+          trace: send,
+        };
+      },
+    });
+    return { app, sent, created: () => created };
+  };
+
+  it('records events of an existing chronicle instead of sending them', () => {
+    const { app, sent, created } = makeApp();
+    const { admin } = app;
+    const capture = captureEvents(app);
+    admin.login({ userId: 'u1', success: true });
+    capture.assertEmitted(events.admin.login, { userId: 'u1' });
+    expect(sent).toEqual([]);
+    expect(created()).toBe(0);
+    capture.restore();
+  });
+
+  it('covers forks and correlations of the chronicle', async () => {
+    const { app } = makeApp();
+    const capture = captureEvents(app);
+    app.fork({ step: 'a' }).admin.heartbeat();
+    await app.http.request.run(async (req) => {
+      await Promise.resolve();
+      req.received({ path: '/' });
+      app.admin.heartbeat();
+      req.complete();
+    });
+    expect(capture.emitted.map((e) => e.payload.eventKey)).toEqual([
+      'admin.heartbeat',
+      'http.request.start',
+      'http.request.received',
+      'admin.heartbeat',
+      'http.request.complete',
+    ]);
+    capture.restore();
+  });
+
+  it('restore() sends events to the real backend again, and is idempotent', () => {
+    const { app, sent } = makeApp();
+    const capture = captureEvents(app);
+    app.admin.heartbeat();
+    capture.restore();
+    capture.restore();
+    app.admin.heartbeat();
+    expect(capture.emitted).toHaveLength(1);
+    expect(sent).toEqual(['admin.heartbeat']);
+  });
+
+  it('nested captures restore the outer capture', () => {
+    const { app } = makeApp();
+    const outer = captureEvents(app);
+    const inner = captureEvents(app);
+    app.admin.heartbeat();
+    inner.restore();
+    app.admin.heartbeat();
+    expect(inner.emitted).toHaveLength(1);
+    expect(outer.emitted).toHaveLength(1);
+    outer.restore();
+  });
+
+  it('throws a TypeError for objects that are not chronicles', () => {
+    expect(() => captureEvents({})).toThrow(TypeError);
   });
 });
