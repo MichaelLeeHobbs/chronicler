@@ -6,12 +6,17 @@ export interface ValidationMetadata {
   readonly invalidValues?: string[];
   readonly unknownFields?: string[];
   /**
-   * Set when the ambient correlation had already completed or failed, so the event was logged
-   * outside it. Usually a timer, pool or listener created during a request outliving the request.
+   * Set when the ambient span had already completed or failed, so the event was logged
+   * outside it. Holds that span's span id. Usually a timer, pool or listener created during a request outliving the request.
    */
-  readonly staleCorrelationId?: string;
-  /** Set on a correlation's start event when `limits.maxActiveCorrelations` was exceeded. */
-  readonly correlationLimitExceeded?: true;
+  readonly staleSpanId?: string;
+  /** Set on a span's start event when `limits.maxActiveSpans` was exceeded. */
+  readonly spanLimitExceeded?: true;
+  /**
+   * Set on a span's start event when the `traceparent` passed to `begin()` or `run()` was not a
+   * valid W3C header. The span started a new trace instead.
+   */
+  readonly invalidTraceparent?: true;
 }
 
 interface FieldValidationResult {

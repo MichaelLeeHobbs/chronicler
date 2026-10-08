@@ -14,7 +14,7 @@ describe('reserved fields', () => {
     expect(isReservedTopLevelField('customField')).toBe(false);
   });
 
-  it.each(['parentCorrelationId', 'rootCorrelationId', 'correlationState', 'correlationId'])(
+  it.each(['parentSpanId', 'traceId', 'spanState', 'spanId'])(
     'reserves the payload field %s',
     (name) => {
       expect(RESERVED_TOP_LEVEL_FIELDS).toContain(name);
@@ -23,8 +23,8 @@ describe('reserved fields', () => {
   );
 
   it('finds reserved keys within objects', () => {
-    const invalid = assertNoReservedKeys({ eventKey: 'x', custom: 1, rootCorrelationId: 'y' });
+    const invalid = assertNoReservedKeys({ eventKey: 'x', custom: 1, traceId: 'y' });
 
-    expect(invalid).toEqual(['eventKey', 'rootCorrelationId']);
+    expect(invalid).toEqual(['eventKey', 'traceId']);
   });
 });

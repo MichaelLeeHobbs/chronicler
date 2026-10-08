@@ -1,6 +1,6 @@
 # @ubercode/chronicler
 
-Type-safe structured logging for Node.js. Define your events once, in one catalog, with levels, fields and docs. Then log them as typed function calls, with compile-time safety, runtime validation, request correlation and auto-generated documentation.
+Type-safe structured logging for Node.js. Define your events once, in one catalog, with levels, fields and docs. Then log them as typed function calls, with compile-time safety, runtime validation, request span and auto-generated documentation.
 
 ```
 npm install @ubercode/chronicler
@@ -129,7 +129,7 @@ Rules for the catalog:
 
   The CLI's [`chronicler keys`](#cli) command keeps a lockfile of keys so an accidental rename fails CI.
 
-- **Reserved names.** `fork`, `run`, `log`, `addContext`, `begin`, `start`, `complete`, `fail`, `timeout`, `correlationId` and `then` can't be used as names at any level, because the emitter tree and correlation handles use them. This is a compile error and a runtime `ChroniclerError` with code `INVALID_CATALOG`.
+- **Reserved names.** `fork`, `run`, `log`, `addContext`, `begin`, `start`, `complete`, `fail`, `timeout`, `spanId` and `then` can't be used as names at any level, because the emitter tree and span handles use them. This is a compile error and a runtime `ChroniclerError` with code `INVALID_CATALOG`.
 - **Catalogs compose.** Split a large catalog by area and mount the pieces: `defineEvents({ billing: billingEvents, auth: authEvents })`. Keys are re-derived from the outer path.
 - **Keep catalog files free of logger imports.** The module that calls `createChronicle()` imports the catalog; if a catalog file imports that module back (say, to log something), the circular import hands `createChronicle()` an `undefined` entry. Chronicler throws `INVALID_CATALOG` with a hint when it sees one, but the fix is to keep `events.ts` a pure definitions module.
 
@@ -162,11 +162,11 @@ For one-off logs without a defined event, `chronicle.log(level, message, fields?
 
 Groups of keys also enable **router backends**: you can route all `admin.*` events to a compliance log stream and all `http.*` events to a monitoring stream, from a single chronicle.
 
-### Correlations
+### Spans
 
-A **correlation** tracks a unit of work from start to finish. This is the feature you wish you had every time you're debugging a production issue and trying to piece together what happened during a single HTTP request across 20 log lines.
+A **span** tracks a unit of work from start to finish. This is the feature you wish you had every time you're debugging a production issue and trying to piece together what happened during a single HTTP request across 20 log lines.
 
-Without correlations, you get this in your logs:
+Without spans, you get this in your logs:
 
 ```
 INFO  Request validated         { path: '/api/users' }
@@ -176,14 +176,14 @@ ERROR Database query failed     { table: 'orders' }       ← which request?
 INFO  Response sent             { status: 200 }           ← which request??
 ```
 
-With correlations, every log entry for a single request shares a correlation ID, and you get automatic lifecycle events. Define one with `correlation()`:
+With spans, every log entry for a single request shares a span ID, and you get automatic lifecycle events. Define one with `span()`:
 
 ```ts
-import { correlation, defineEvents, event, field } from '@ubercode/chronicler';
+import { span, defineEvents, event, field } from '@ubercode/chronicler';
 
 export const events = defineEvents({
   http: {
-    request: correlation({
+    request: span({
       doc: 'HTTP request lifecycle',
       timeout: 30_000,
       events: {
@@ -199,7 +199,7 @@ export const events = defineEvents({
 });
 ```
 
-In the emitter tree, a correlation is a **starter** with `begin()` and `run()`.
+In the emitter tree, a span is a **starter** with `begin()` and `run()`.
 
 #### `begin()`: an explicit handle
 
@@ -213,11 +213,11 @@ request.complete();
 // Auto-emits: http.request.complete { duration: 142 }
 ```
 
-The handle has the correlation's own events (`request.validated`), its `correlationId`, `complete(fields?)`, `fail(error?, fields?)`, `fork(context?)`, `run(fn)`, `log()` and `addContext()`.
+The handle has the span's own events (`request.validated`), its `spanId`, `complete(fields?)`, `fail(error?, fields?)`, `fork(context?)`, `run(fn)`, `log()` and `addContext()`.
 
-#### `run()`: an ambient correlation
+#### `run()`: an ambient span
 
-Passing a handle to every function that logs is tedious. `run()` starts the correlation and makes it **ambient** (via `AsyncLocalStorage`) for everything `fn` calls, including after `await`. Any emitter on the chronicle, like `admin.login(...)`, logs inside the correlation without being passed anything.
+Passing a handle to every function that logs is tedious. `run()` starts the span and makes it **ambient** (via `AsyncLocalStorage`) for everything `fn` calls, including after `await`. Any emitter on the chronicle, like `admin.login(...)`, logs inside the span without being passed anything.
 
 An Express middleware:
 
@@ -231,14 +231,14 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 
   http.request.run({ requestId }, (request) => {
     request.validated({ method: req.method, path: req.path });
-    res.setHeader('x-correlation-id', request.correlationId);
+    res.setHeader('x-span-id', request.spanId);
 
     res.on('finish', () => request.complete());
     res.on('close', () => {
       if (!res.writableFinished) request.fail(new Error('Client closed the connection'));
     });
 
-    next(); // every handler downstream runs inside the correlation
+    next(); // every handler downstream runs inside the span
   });
 }
 ```
@@ -247,12 +247,12 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 // A controller: no request-scoped logger to thread through.
 export const login = async (req: Request, res: Response) => {
   const success = await authenticate(req.body);
-  admin.login({ userId: req.body.userId, success }); // carries the request's correlationId and requestId
+  admin.login({ userId: req.body.userId, success }); // carries the request's spanId and requestId
   res.json({ success });
 };
 ```
 
-`run()` **never completes the correlation on its own**: in a middleware the response is sent long after `next()` returns, so you call `complete()` when the work is really done. It **does fail** the correlation if `fn` throws or its returned promise rejects (the error is rethrown). For a self-contained job, that makes this pattern safe:
+`run()` **never completes the span on its own**: in a middleware the response is sent long after `next()` returns, so you call `complete()` when the work is really done. It **does fail** the span if `fn` throws or its returned promise rejects (the error is rethrown). For a self-contained job, that makes this pattern safe:
 
 ```ts
 await jobs.nightly.run(async (job) => {
@@ -261,7 +261,7 @@ await jobs.nightly.run(async (job) => {
 }); // a throw inside emits jobs.nightly.fail with the error
 ```
 
-Now filter by `correlationId` in your log aggregator and see the entire request in order. Auto-generated events give you:
+Now filter by `spanId` in your log aggregator and see the entire request in order. Auto-generated events give you:
 
 | Auto-event       | When                                 | Includes            |
 | ---------------- | ------------------------------------ | ------------------- |
@@ -270,10 +270,10 @@ Now filter by `correlationId` in your log aggregator and see the entire request 
 | `{key}.fail`     | `fail(error)` called, or `run` threw | `duration`, `error` |
 | `{key}.timeout`  | No activity within `timeout`         | none                |
 
-To log more on `.complete` or `.fail`, declare the extra fields on the correlation. They're typed and validated like any event's fields:
+To log more on `.complete` or `.fail`, declare the extra fields on the span. They're typed and validated like any event's fields:
 
 ```ts
-request: (correlation({
+request: (span({
   events: {
     /* ... */
   },
@@ -287,14 +287,14 @@ request.complete({ status: 200 }); // compile error: not declared
 
 They can't redefine `duration` or `error`. Without declarations, `complete()` takes no fields and `fail()` takes only the error.
 
-#### Nested correlations
+#### Nested spans
 
-A correlation started while another is active (it's ambient, or you start it from a `chronicle.fork()` taken inside it) is **nested**. Its events carry its own `correlationId`, its parent's id as `parentCorrelationId`, and the outermost id as `rootCorrelationId`:
+A span started while another is active (it's ambient, or you start it from a `chronicle.fork()` taken inside it) is **nested**. Its events carry its own `spanId`, its parent's id as `parentSpanId`, and the outermost id as `traceId`:
 
 ```ts
 http.request.run({ requestId }, async (request) => {
   await db.query.run(async (query) => {
-    // correlationId: query's id, parentCorrelationId: request's id, rootCorrelationId: request's id
+    // spanId: query's id, parentSpanId: request's id, traceId: request's id
     query.executed({ table: 'users' });
     query.complete();
   });
@@ -302,11 +302,11 @@ http.request.run({ requestId }, async (request) => {
 });
 ```
 
-Every correlated event has `rootCorrelationId`; filter on it to see a whole request including nested work. Each nested correlation has its own lifecycle events and timeout. Correlations can't be _defined_ inside correlations (that's a compile and `INVALID_CATALOG` error); they nest at runtime.
+Every correlated event has `traceId`; filter on it to see a whole request including nested work. Each nested span has its own lifecycle events and timeout. Spans can't be _defined_ inside spans (that's a compile and `INVALID_CATALOG` error); they nest at runtime.
 
 #### Background work: `chronicle.run(fn)`
 
-Work started during a request but outliving it (a timer, a queue consumer, a fire-and-forget promise) inherits the request's ambient correlation. Once the request completes, that's wrong. Wrap it in the root chronicle's `run()`, which runs `fn` with no ambient correlation:
+Work started during a request but outliving it (a timer, a queue consumer, a fire-and-forget promise) inherits the request's ambient span. Once the request completes, that's wrong. Wrap it in the root chronicle's `run()`, which runs `fn` with no ambient span:
 
 ```ts
 http.request.run(async (request) => {
@@ -317,24 +317,24 @@ http.request.run(async (request) => {
 });
 ```
 
-If you forget, Chronicler catches it: an emitter whose ambient correlation has already completed or failed logs outside it instead, with `_validation.staleCorrelationId` set to the finished correlation's id. Search for that flag to find leaks.
+If you forget, Chronicler catches it: an emitter whose ambient span has already completed or failed logs outside it instead, with `_validation.staleSpanId` set to the finished span's id. Search for that flag to find leaks.
 
-#### Timeouts and `correlationState`
+#### Timeouts and `spanState`
 
-Each correlation has an idle `timeout` (default 5 minutes; `0` disables it). It resets on every event logged in the correlation. When it fires, `{key}.timeout` is emitted and the correlation is **timed out**:
+Each span has an idle `timeout` (default 5 minutes; `0` disables it). It resets on every event logged in the span. When it fires, `{key}.timeout` is emitted and the span is **timed out**:
 
-- Events logged to it afterwards still carry its `correlationId`, plus `correlationState: 'timedOut'`.
+- Events logged to it afterwards still carry its `spanId`, plus `spanState: 'timedOut'`.
 - A late `complete()` or `fail()` is still accepted once and reports the real `duration`.
 
-Handles and forks of a correlation that has completed or failed also keep logging with its ids, marked `correlationState: 'completed'` or `'failed'`. `correlationState` is absent while the correlation is active, so `ispresent(correlationState)` finds late events.
+Handles and forks of a span that has completed or failed also keep logging with its ids, marked `spanState: 'completed'` or `'failed'`. `spanState` is absent while the span is active, so `ispresent(spanState)` finds late events.
 
 #### Limits
 
-`limits.maxActiveCorrelations` (default 1000) bounds how many active correlations are tracked. Starting one past the limit never throws: the correlation works normally but isn't counted, and its `.start` event carries `_validation.correlationLimitExceeded: true`. A sustained stream of these usually means correlations that are never completed.
+`limits.maxActiveSpans` (default 1000) bounds how many active spans are tracked. Starting one past the limit never throws: the span works normally but isn't counted, and its `.start` event carries `_validation.spanLimitExceeded: true`. A sustained stream of these usually means spans that are never completed.
 
 ### Forks
 
-**Forks** handle parallel work. When a request fans out to several services, queries or steps, forks give each branch its own `forkId` while keeping the correlation:
+**Forks** handle parallel work. When a request fans out to several services, queries or steps, forks give each branch its own `forkId` while keeping the span:
 
 ```ts
 await http.request.run(async (request) => {
@@ -352,7 +352,7 @@ async function loadData() {
 ```
 
 - `chronicle.fork(ctx?)` forks the ambient scope (or the root) and returns the full emitter tree bound to the fork. Calling `fork.run(fn)` makes the fork ambient for `fn`.
-- `handle.fork(ctx?)` on a correlation handle returns a fork with only that correlation's events, plus `fork`, `run`, `log` and `addContext`. It can't start other correlations directly; use `fork.run(() => ...)` to make it ambient for code that does.
+- `handle.fork(ctx?)` on a span handle returns a fork with only that span's events, plus `fork`, `run`, `log` and `addContext`. It can't start other spans directly; use `fork.run(() => ...)` to make it ambient for code that does.
 
 Every log entry carries its `forkId` (`0` for root, then `1`, `2`, `2.1`, ...), so you can reconstruct the execution tree. Nesting past `limits.maxForkDepth` (default 10) throws `FORK_DEPTH_EXCEEDED`.
 
@@ -376,14 +376,14 @@ Child scopes start from their parent's context:
 ```ts
 http.request.run({ requestId }, async (request) => {
   const user = await authenticate(req);
-  chronicle.addContext({ userId: user.id }); // added to this request's correlation only
+  chronicle.addContext({ userId: user.id }); // added to this request's span only
   admin.login({ userId: user.id, success: true }); // metadata includes requestId and userId
 });
 ```
 
 Like emitters, `chronicle.addContext()` acts on the ambient scope. Called outside any `run()`, it adds to the root scope, which every later event shares.
 
-Reserved payload names (`eventKey`, `correlationId`, `fields`, etc.) are dropped from context. Passing them in `createChronicle({ metadata })` throws `RESERVED_FIELD`.
+Reserved payload names (`eventKey`, `spanId`, `fields`, etc.) are dropped from context. Passing them in `createChronicle({ metadata })` throws `RESERVED_FIELD`.
 
 ### Ambient scopes and performance
 
@@ -475,7 +475,7 @@ export const chronicle = createChronicle({
 });
 ```
 
-See [`examples/winston-app`](examples/winston-app) for a full Express app with a router backend, ambient request correlations, forks and background work.
+See [`examples/winston-app`](examples/winston-app) for a full Express app with a router backend, ambient request spans, forks and background work.
 
 ## Field Builders
 
@@ -569,35 +569,35 @@ test('login handler audits the attempt', async () => {
 });
 ```
 
-While capturing, every emitter, fork and correlation of that chronicle records in memory, and its configured backend isn't used (a lazy `backend` function isn't even called). `captureEvents` returns the same helpers plus `restore()`.
+While capturing, every emitter, fork and span of that chronicle records in memory, and its configured backend isn't used (a lazy `backend` function isn't even called). `captureEvents` returns the same helpers plus `restore()`.
 
 ## Payload Reference
 
 Every event reaches the backend as `(message, payload)`, where `payload` is a `LogPayload`:
 
-| Field                 | Type                                     | Description                                                                      |
-| --------------------- | ---------------------------------------- | -------------------------------------------------------------------------------- |
-| `eventKey`            | `string`                                 | The event's key, e.g. `admin.login`. Empty for `log()`.                          |
-| `fields`              | `Record<string, unknown>`                | The event's fields, validated and sanitized.                                     |
-| `correlationId`       | `string`                                 | Innermost correlation id, or `''` outside any correlation.                       |
-| `parentCorrelationId` | `string?`                                | Id of the enclosing correlation. Only on nested correlations.                    |
-| `rootCorrelationId`   | `string?`                                | Id of the outermost correlation. On every correlated event.                      |
-| `correlationState`    | `'timedOut' \| 'completed' \| 'failed'?` | Only when the correlation is no longer active.                                   |
-| `forkId`              | `string`                                 | `0` for the root, then `1`, `2`, `2.1`, ...                                      |
-| `metadata`            | `Record<string, unknown>`                | Context: `metadata` from config plus fork, correlation and `addContext` context. |
-| `timestamp`           | `string`                                 | ISO 8601.                                                                        |
-| `_validation`         | `ValidationMetadata?`                    | Present only when something needs attention (below).                             |
+| Field          | Type                                     | Description                                                               |
+| -------------- | ---------------------------------------- | ------------------------------------------------------------------------- |
+| `eventKey`     | `string`                                 | The event's key, e.g. `admin.login`. Empty for `log()`.                   |
+| `fields`       | `Record<string, unknown>`                | The event's fields, validated and sanitized.                              |
+| `spanId`       | `string`                                 | Innermost span id, or `''` outside any span.                              |
+| `parentSpanId` | `string?`                                | Id of the enclosing span. Only on nested spans.                           |
+| `traceId`      | `string?`                                | Id of the outermost span. On every correlated event.                      |
+| `spanState`    | `'timedOut' \| 'completed' \| 'failed'?` | Only when the span is no longer active.                                   |
+| `forkId`       | `string`                                 | `0` for the root, then `1`, `2`, `2.1`, ...                               |
+| `metadata`     | `Record<string, unknown>`                | Context: `metadata` from config plus fork, span and `addContext` context. |
+| `timestamp`    | `string`                                 | ISO 8601.                                                                 |
+| `_validation`  | `ValidationMetadata?`                    | Present only when something needs attention (below).                      |
 
 `_validation` keys:
 
-| Key                        | Meaning                                                                               |
-| -------------------------- | ------------------------------------------------------------------------------------- |
-| `missingFields`            | Required fields that were not provided.                                               |
-| `typeErrors`               | Fields whose value has the wrong type.                                                |
-| `invalidValues`            | Fields with an invalid value of the right type (e.g. `NaN` for a number).             |
-| `unknownFields`            | Fields not in the event definition. They're still logged.                             |
-| `staleCorrelationId`       | The ambient correlation had already finished; the event was logged outside it.        |
-| `correlationLimitExceeded` | On a `.start` event: the correlation was started past `limits.maxActiveCorrelations`. |
+| Key                 | Meaning                                                                   |
+| ------------------- | ------------------------------------------------------------------------- |
+| `missingFields`     | Required fields that were not provided.                                   |
+| `typeErrors`        | Fields whose value has the wrong type.                                    |
+| `invalidValues`     | Fields with an invalid value of the right type (e.g. `NaN` for a number). |
+| `unknownFields`     | Fields not in the event definition. They're still logged.                 |
+| `staleSpanId`       | The ambient span had already finished; the event was logged outside it.   |
+| `spanLimitExceeded` | On a `.start` event: the span was started past `limits.maxActiveSpans`.   |
 
 See [`docs/CloudWatch.md`](docs/CloudWatch.md) for CloudWatch Logs Insights queries over these fields.
 
@@ -640,51 +640,51 @@ See [`packages/cli/README.md`](packages/cli/README.md) for all commands and opti
 
 ### Defining events
 
-| Function                                                    | Description                                                                                     |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `defineEvents(catalog)`                                     | Validate a catalog and stamp each definition's `key`. Throws `INVALID_CATALOG` if malformed.    |
-| `event({ level, message, doc?, fields?, key? })`            | Define an event.                                                                                |
-| `correlation({ events, doc?, timeout?, key? })`             | Define a correlation. `timeout` in ms, default 5 minutes, `0` disables.                         |
-| `group({ doc }, children)`                                  | Document a namespace.                                                                           |
-| `walkCatalog(catalog)`                                      | List every namespace, correlation and event (including lifecycle events) with its resolved key. |
-| `isEventDefinition`, `isCorrelationDefinition`, `isCatalog` | Type guards, e.g. for tooling.                                                                  |
+| Function                                             | Description                                                                                  |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `defineEvents(catalog)`                              | Validate a catalog and stamp each definition's `key`. Throws `INVALID_CATALOG` if malformed. |
+| `event({ level, message, doc?, fields?, key? })`     | Define an event.                                                                             |
+| `span({ events, doc?, timeout?, key? })`             | Define a span. `timeout` in ms, default 5 minutes, `0` disables.                             |
+| `group({ doc }, children)`                           | Document a namespace.                                                                        |
+| `walkCatalog(catalog)`                               | List every namespace, span and event (including lifecycle events) with its resolved key.     |
+| `isEventDefinition`, `isSpanDefinition`, `isCatalog` | Type guards, e.g. for tooling.                                                               |
 
 ### `createChronicle(config)`
 
-| Option                         | Type                                                  | Default         | Description                                 |
-| ------------------------------ | ----------------------------------------------------- | --------------- | ------------------------------------------- |
-| `events`                       | catalog                                               | _required_      | The event catalog                           |
-| `backend`                      | `LogBackend \| () => LogBackend`                      | Console backend | Where events are sent; a function is lazy   |
-| `metadata`                     | `Record<string, string \| number \| boolean \| null>` | `{}`            | Context attached to every event             |
-| `strict`                       | `boolean`                                             | `false`         | Throw on field validation errors            |
-| `minLevel`                     | `LogLevel`                                            | `'trace'`       | Minimum level to emit                       |
-| `limits.maxContextKeys`        | `number`                                              | `100`           | Max context entries per scope               |
-| `limits.maxForkDepth`          | `number`                                              | `10`            | Max fork nesting depth                      |
-| `limits.maxActiveCorrelations` | `number`                                              | `1000`          | Active correlations tracked before flagging |
-| `correlationIdGenerator`       | `() => string`                                        | `randomUUID`    | Custom correlation ID generator             |
+| Option                  | Type                                                  | Default         | Description                               |
+| ----------------------- | ----------------------------------------------------- | --------------- | ----------------------------------------- |
+| `events`                | catalog                                               | _required_      | The event catalog                         |
+| `backend`               | `LogBackend \| () => LogBackend`                      | Console backend | Where events are sent; a function is lazy |
+| `metadata`              | `Record<string, string \| number \| boolean \| null>` | `{}`            | Context attached to every event           |
+| `strict`                | `boolean`                                             | `false`         | Throw on field validation errors          |
+| `minLevel`              | `LogLevel`                                            | `'trace'`       | Minimum level to emit                     |
+| `limits.maxContextKeys` | `number`                                              | `100`           | Max context entries per scope             |
+| `limits.maxForkDepth`   | `number`                                              | `10`            | Max fork nesting depth                    |
+| `limits.maxActiveSpans` | `number`                                              | `1000`          | Active spans tracked before flagging      |
+| `spanIdGenerator`       | `() => string`                                        | `randomUUID`    | Custom span ID generator                  |
 
 ### `Chronicle<typeof events>` (returned by `createChronicle`)
 
-The emitter tree for the catalog: an `Emitter` function for each event and a `CorrelationStarter` for each correlation, plus:
+The emitter tree for the catalog: an `Emitter` function for each event and a `SpanStarter` for each span, plus:
 
 - `fork(context?)`: a child of the ambient scope (or the root), as a full emitter tree
-- `run(fn)`: on the root chronicle, runs `fn` with no ambient correlation; on a fork, runs `fn` with the fork ambient
+- `run(fn)`: on the root chronicle, runs `fn` with no ambient span; on a fork, runs `fn` with the fork ambient
 - `log(level, message, fields?)`: untyped escape hatch
 - `addContext(context)`: add context to the ambient scope (or the root), first write wins
 
-### `CorrelationStarter`
+### `SpanStarter`
 
-- `key`: the correlation's key
-- `begin(context?)`: start the correlation and return its `CorrelationHandle`
+- `key`: the span's key
+- `begin(context?)`: start the span and return its `SpanHandle`
 - `run(fn)` / `run(context, fn)`: start it, run `fn(handle)` with it ambient; fails it if `fn` throws or rejects, never completes it
 
-### `CorrelationHandle` (returned by `begin`, passed to `run`)
+### `SpanHandle` (returned by `begin`, passed to `run`)
 
-- The correlation's own events as emitters
-- `correlationId`: for propagation to downstream services
-- `complete(fields?)`: emit `{key}.complete` with `duration` and the fields declared in `correlation({ complete })`
-- `fail(error?, fields?)`: emit `{key}.fail` with `duration`, `error` and the fields declared in `correlation({ fail })`
-- `fork(context?)`: a `CorrelationFork` (the correlation's events, `correlationId`, `fork`, `run`, `log`, `addContext`)
+- The span's own events as emitters
+- `spanId`: for propagation to downstream services
+- `complete(fields?)`: emit `{key}.complete` with `duration` and the fields declared in `span({ complete })`
+- `fail(error?, fields?)`: emit `{key}.fail` with `duration`, `error` and the fields declared in `span({ fail })`
+- `fork(context?)`: a `SpanFork` (the span's events, `spanId`, `fork`, `run`, `log`, `addContext`)
 - `run(fn)`, `log(...)`, `addContext(...)`
 
 Use `HandleOf<typeof chronicle.http.request>` to type a parameter that receives a handle.
@@ -697,30 +697,30 @@ Configuration and programming errors throw `ChroniclerError` with a `code`: `INV
 
 2.0 replaces standalone event definitions and `chronicle.event(def, fields)` with a catalog and typed emitters. There is no compatibility shim.
 
-| 1.x                                                                                     | 2.0                                                                                                            |
-| --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `defineEvent({ key: 'admin.login', level, message, fields })`                           | `event({ level, message, fields })` placed at `admin.login` in `defineEvents({...})`                           |
-| `defineEventGroup({ key: 'admin', type: 'system', doc, events })`                       | A nested object, or `group({ doc }, { ... })` for a documented namespace                                       |
-| `defineCorrelationGroup({ key: 'http.request', type: 'correlation', timeout, events })` | `correlation({ timeout, events })` placed at `http.request`                                                    |
-| A key that doesn't match where the definition now sits                                  | `event({ key: 'old.key', ... })` / `correlation({ key: 'old.key', ... })`                                      |
-| `createChronicle({ backend, metadata })`                                                | `createChronicle({ events, backend, metadata })` (`metadata` is now optional)                                  |
-| `chronicle.event(admin.events.login, { userId, success })`                              | `chronicle.admin.login({ userId, success })`, or `admin.login(...)` after `export const { admin } = chronicle` |
-| `chronicle.event(def, {})` for an event without fields                                  | `admin.heartbeat()`                                                                                            |
-| `const corr = chronicle.startCorrelation(httpRequest, ctx)`                             | `const corr = chronicle.http.request.begin(ctx)`, or `http.request.run(ctx, fn)` for an ambient correlation    |
-| `corr.event(httpRequest.events.validated, fields)`                                      | `corr.validated(fields)`                                                                                       |
-| Attaching the correlation to `req` (`(req as any).chronicle = corr`)                    | `http.request.run(...)` in middleware; handlers call `admin.login(...)` directly                               |
-| `CORRELATION_LIMIT_EXCEEDED` thrown by `startCorrelation`                               | Never throws; `_validation.correlationLimitExceeded` on the `.start` event                                     |
-| `Chronicler`, `CorrelationChronicle` types                                              | `Chronicle<typeof events>`, `CorrelationHandle`, `CorrelationFork`, `HandleOf`                                 |
-| `EventFields<typeof def>`                                                               | `FieldsOf<typeof events.admin.login>`                                                                          |
-| Tests with a hand-rolled mock backend                                                   | `createTestChronicle(events)` from `@ubercode/chronicler/testing`                                              |
+| 1.x                                                                       | 2.0                                                                                                            |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `defineEvent({ key: 'admin.login', level, message, fields })`             | `event({ level, message, fields })` placed at `admin.login` in `defineEvents({...})`                           |
+| `defineEventGroup({ key: 'admin', type: 'system', doc, events })`         | A nested object, or `group({ doc }, { ... })` for a documented namespace                                       |
+| `defineSpanGroup({ key: 'http.request', type: 'span', timeout, events })` | `span({ timeout, events })` placed at `http.request`                                                           |
+| A key that doesn't match where the definition now sits                    | `event({ key: 'old.key', ... })` / `span({ key: 'old.key', ... })`                                             |
+| `createChronicle({ backend, metadata })`                                  | `createChronicle({ events, backend, metadata })` (`metadata` is now optional)                                  |
+| `chronicle.event(admin.events.login, { userId, success })`                | `chronicle.admin.login({ userId, success })`, or `admin.login(...)` after `export const { admin } = chronicle` |
+| `chronicle.event(def, {})` for an event without fields                    | `admin.heartbeat()`                                                                                            |
+| `const corr = chronicle.startSpan(httpRequest, ctx)`                      | `const corr = chronicle.http.request.begin(ctx)`, or `http.request.run(ctx, fn)` for an ambient span           |
+| `corr.event(httpRequest.events.validated, fields)`                        | `corr.validated(fields)`                                                                                       |
+| Attaching the span to `req` (`(req as any).chronicle = corr`)             | `http.request.run(...)` in middleware; handlers call `admin.login(...)` directly                               |
+| `SPAN_LIMIT_EXCEEDED` thrown by `startSpan`                               | Never throws; `_validation.spanLimitExceeded` on the `.start` event                                            |
+| `Chronicler`, `SpanChronicle` types                                       | `Chronicle<typeof events>`, `SpanHandle`, `SpanFork`, `HandleOf`                                               |
+| `EventFields<typeof def>`                                                 | `FieldsOf<typeof events.admin.login>`                                                                          |
+| Tests with a hand-rolled mock backend                                     | `createTestChronicle(events)` from `@ubercode/chronicler/testing`                                              |
 
 Behavior changes to check:
 
 - **Keys come from the catalog path.** Before migrating, export your 1.x keys (`chronicler docs --format json` with the 1.x CLI). After migrating, compare them with `chronicler keys` and add `key` overrides wherever a key changed, then run `chronicler keys --write` to lock them.
 - **Catalog names are validated.** Names must be camelCase and can't be [reserved](#events-and-the-catalog).
-- **Forks of a correlation** expose only that correlation's events and can't start unrelated correlations. Forks and handles used after the correlation ends still log, but now carry `correlationState`.
+- **Forks of a span** expose only that span's events and can't start unrelated spans. Forks and handles used after the span ends still log, but now carry `spanState`.
 - **Child scope context overrides.** Context passed to `fork()`, `begin()` or `run()` now replaces inherited values with the same key. `addContext()` is still first-write-wins.
-- **New payload fields**: `rootCorrelationId`, `parentCorrelationId` and `correlationState`. They're reserved, so they can't be used as context keys.
+- **New payload fields**: `traceId`, `parentSpanId` and `spanState`. They're reserved, so they can't be used as context keys.
 
 ## License
 

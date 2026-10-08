@@ -1,6 +1,6 @@
 /**
  * Event key lockfile: a sorted, stable snapshot of every event key in the catalog (including
- * correlation lifecycle keys) with its level and fields, used to catch accidental breaking
+ * span lifecycle keys) with its level and fields, used to catch accidental breaking
  * changes to the wire contract (`chronicler keys --write` / `--check`).
  */
 

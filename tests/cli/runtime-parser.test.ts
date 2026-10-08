@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { parseEventsFile, parseEventsModule } from '../../src/cli/parser/runtime-parser';
 import { validateEventTree } from '../../src/cli/parser/validator';
 import type { ParsedEvent, ParsedEventTree } from '../../src/cli/types';
-import { correlation, defineEvents, event, field } from '../../src/index';
+import { defineEvents, event, field, span } from '../../src/index';
 
 const fixturesPath = path.join(__dirname, 'fixtures');
 const fixture = (name: string) => path.join(fixturesPath, name);
@@ -57,7 +57,7 @@ describe('Runtime Parser', () => {
       expect(tree.events.filter((e) => e.key === 'system.startup')).toHaveLength(1);
     });
 
-    it('lists every event, including correlation lifecycle events', async () => {
+    it('lists every event, including span lifecycle events', async () => {
       const tree = await parseEventsFile(fixture('valid-events.ts'));
 
       expect(tree.events.map((e) => e.key)).toEqual([
@@ -71,7 +71,7 @@ describe('Runtime Parser', () => {
       ]);
       const lifecycle = tree.events.filter((e) => e.lifecycle);
       expect(lifecycle).toHaveLength(4);
-      expect(lifecycle.every((e) => e.correlationKey === 'api.query')).toBe(true);
+      expect(lifecycle.every((e) => e.spanKey === 'api.query')).toBe(true);
     });
 
     it('builds namespaces with group() docs', async () => {
@@ -83,7 +83,7 @@ describe('Runtime Parser', () => {
       expect(Object.keys(system!.events)).toEqual(['startup', 'shutdown']);
     });
 
-    it('nests correlations with timeout and lifecycle events under their namespace', async () => {
+    it('nests spans with timeout and lifecycle events under their namespace', async () => {
       const tree = await parseEventsFile(fixture('valid-events.ts'));
 
       const api = tree.groups.find((g) => g.key === 'api');
@@ -91,7 +91,7 @@ describe('Runtime Parser', () => {
       expect(api?.doc).toBe('');
 
       const query = api!.groups.query!;
-      expect(query.kind).toBe('correlation');
+      expect(query.kind).toBe('span');
       expect(query.key).toBe('api.query');
       expect(query.doc).toBe('API query operations');
       expect(query.timeout).toBe(30000);
@@ -102,7 +102,7 @@ describe('Runtime Parser', () => {
         'api.query.timeout',
       ]);
       expect(Object.keys(query.events)).toEqual(['executed']);
-      expect(query.events.executed?.correlationKey).toBe('api.query');
+      expect(query.events.executed?.spanKey).toBe('api.query');
     });
 
     it('skips catalogs mounted inside another exported catalog', async () => {
@@ -176,7 +176,7 @@ describe('Runtime Parser', () => {
       const a = defineEvents({ user: { created: event({ level: 'info', message: 'a' }) } });
       const b = defineEvents({
         user: { created: event({ level: 'warn', message: 'b' }) },
-        job: correlation({ events: {} }),
+        job: span({ events: {} }),
       });
 
       const tree = parseEventsModule({ a, b });
@@ -200,7 +200,7 @@ describe('Runtime Parser', () => {
     it('uses key overrides as event keys', () => {
       const catalog = defineEvents({
         renamed: event({ key: 'legacy.name', level: 'info', message: 'x', doc: 'd' }),
-        job: correlation({
+        job: span({
           key: 'batch.job',
           events: { step: event({ level: 'info', message: 's', fields: { n: field.number() } }) },
         }),
@@ -237,7 +237,7 @@ describe('Runtime Parser', () => {
       expect(errors[0]!.message).toContain('user.created');
       expect(errors[1]!.message).toContain('eventKey');
       expect(errors[2]!.message).toContain('chronicler.internal');
-      expect(errors[3]!.message).toContain('Correlation key "chronicler.job"');
+      expect(errors[3]!.message).toContain('Span key "chronicler.job"');
     });
 
     it('does not validate auto-generated lifecycle events', () => {
@@ -257,18 +257,16 @@ describe('Runtime Parser', () => {
 
     it('detects reserved field usage', () => {
       const tree = makeTree({
-        events: [
-          makeEvent({ fields: { correlationId: { type: 'string', required: true, doc: '' } } }),
-        ],
+        events: [makeEvent({ fields: { spanId: { type: 'string', required: true, doc: '' } } })],
       });
 
       const errors = validateEventTree(tree);
       expect(errors).toHaveLength(1);
       expect(errors[0]!.type).toBe('reserved-field');
-      expect(errors[0]!.message).toContain('correlationId');
+      expect(errors[0]!.message).toContain('spanId');
     });
 
-    it('detects invalid correlation timeouts in nested groups', () => {
+    it('detects invalid span timeouts in nested groups', () => {
       const tree = makeTree({
         groups: [
           {
@@ -282,7 +280,7 @@ describe('Runtime Parser', () => {
               job: {
                 key: 'a.job',
                 path: 'a.job',
-                kind: 'correlation',
+                kind: 'span',
                 doc: '',
                 timeout: -1,
                 events: {},

@@ -18,7 +18,7 @@ export function createApp(): express.Express {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Request logging middleware (creates correlations)
+  // Request logging middleware (creates spans)
   app.use(requestLogger);
 
   // API routes

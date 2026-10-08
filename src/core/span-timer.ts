@@ -1,8 +1,8 @@
 /**
- * Auto-reset idle timeout for a correlation.
+ * Auto-reset idle timeout for a span.
  * Resets on any activity; invokes the callback if idle for the configured duration.
  */
-export class CorrelationTimer {
+export class SpanTimer {
   private timeoutId: NodeJS.Timeout | undefined;
 
   constructor(

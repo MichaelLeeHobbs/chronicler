@@ -3,7 +3,7 @@
  * a reserved payload field, and the reserved `chronicler.` prefix.
  */
 
-import { correlation, defineEvents, event, field } from '../../../src/index';
+import { defineEvents, event, field, span } from '../../../src/index';
 
 export const events = defineEvents({
   user: {
@@ -17,6 +17,6 @@ export const events = defineEvents({
   },
   chronicler: {
     internal: event({ level: 'debug', message: 'Internal', doc: 'Reserved prefix' }),
-    job: correlation({ doc: 'Reserved correlation', events: {} }),
+    job: span({ doc: 'Reserved span', events: {} }),
   },
 });

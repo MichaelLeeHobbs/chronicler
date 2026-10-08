@@ -76,11 +76,11 @@ describe('Documentation Generator', () => {
     message: key,
     doc: 'Auto-generated',
     fields: {},
-    correlationKey: 'api.request',
+    spanKey: 'api.request',
     lifecycle: true,
   });
 
-  const correlationTree: ParsedEventTree = {
+  const spanTree: ParsedEventTree = {
     events: [],
     groups: [
       {
@@ -94,7 +94,7 @@ describe('Documentation Generator', () => {
           request: {
             key: 'api.request',
             path: 'api.request',
-            kind: 'correlation',
+            kind: 'span',
             doc: 'API request tracking',
             timeout: 30000,
             events: {},
@@ -147,7 +147,7 @@ describe('Documentation Generator', () => {
       expect(content).toContain('**`port`** (`number`, required): Server port');
     });
 
-    it('documents correlations with timeout and lifecycle events', () => {
+    it('documents spans with timeout and lifecycle events', () => {
       const config: ChroniclerCliConfig = {
         eventsFile: './test.ts',
         docs: {
@@ -156,16 +156,16 @@ describe('Documentation Generator', () => {
         },
       };
 
-      generateDocs(correlationTree, config);
+      generateDocs(spanTree, config);
 
       const content = fs.readFileSync(markdownPath, 'utf-8');
 
       expect(content).toContain('## api\n\nAPI events');
       expect(content).toContain('### api.request');
-      expect(content).toContain('**Type:** Correlation');
+      expect(content).toContain('**Type:** Span');
       expect(content).toContain('**Timeout:** 30000ms (activity-based)');
       expect(content).toContain('**Auto-Generated Events:**');
-      expect(content).toContain('- `api.request.start` (`info`) - Logged when correlation starts');
+      expect(content).toContain('- `api.request.start` (`info`) - Logged when span starts');
       expect(content).toContain('`api.request.complete` (`info`)');
       expect(content).toContain('`api.request.fail` (`error`)');
       expect(content).toContain('`api.request.timeout` (`warn`)');
@@ -175,9 +175,9 @@ describe('Documentation Generator', () => {
     });
 
     it('shows a disabled timeout', () => {
-      const group = correlationTree.groups[0]!.groups.request!;
+      const group = spanTree.groups[0]!.groups.request!;
       const tree: ParsedEventTree = {
-        ...correlationTree,
+        ...spanTree,
         groups: [{ ...group, timeout: 0 }],
       };
       const config: ChroniclerCliConfig = {
@@ -265,13 +265,13 @@ describe('Documentation Generator', () => {
       expect(event.fields[0]!.required).toBe(true);
     });
 
-    it('serializes nested correlations with lifecycle events', () => {
+    it('serializes nested spans with lifecycle events', () => {
       const config: ChroniclerCliConfig = {
         eventsFile: './test.ts',
         docs: { format: 'json', outputPath: jsonPath },
       };
 
-      generateDocs(correlationTree, config);
+      generateDocs(spanTree, config);
 
       const json = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')) as {
         groups: {
@@ -290,7 +290,7 @@ describe('Documentation Generator', () => {
       const request = json.groups[0]!.groups[0]!;
       expect(request.name).toBe('request');
       expect(request.key).toBe('api.request');
-      expect(request.type).toBe('correlation');
+      expect(request.type).toBe('span');
       expect(request.timeout).toBe(30000);
       expect(request.autoEvents).toEqual(['start', 'complete', 'fail', 'timeout']);
       expect(request.lifecycleEvents.map((e) => e.level)).toEqual([

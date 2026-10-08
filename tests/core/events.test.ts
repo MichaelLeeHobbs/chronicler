@@ -1,22 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_CORRELATION_TIMEOUT_MS } from '../../src/core/constants';
+import { DEFAULT_SPAN_TIMEOUT_MS } from '../../src/core/constants';
 import { ChroniclerError } from '../../src/core/errors';
 import {
   type CatalogEntry,
-  correlation,
-  CORRELATION_KIND,
   defineEvents,
   event,
   EVENT_KIND,
   group,
   isCatalog,
-  isCorrelationDefinition,
   isEventDefinition,
   isMountedCatalog,
+  isSpanDefinition,
   lifecycleEvents,
   namespaceDoc,
   RESERVED_CATALOG_NAMES,
+  span,
+  SPAN_KIND,
   walkCatalog,
 } from '../../src/core/events';
 import { field } from '../../src/core/fields';
@@ -71,18 +71,18 @@ describe('event()', () => {
   });
 });
 
-describe('correlation()', () => {
-  it('creates a correlation definition with the default timeout', () => {
-    const def = correlation({ events: { step: ping() } });
-    expect(def.kind).toBe(CORRELATION_KIND);
-    expect(def.timeout).toBe(DEFAULT_CORRELATION_TIMEOUT_MS);
+describe('span()', () => {
+  it('creates a span definition with the default timeout', () => {
+    const def = span({ events: { step: ping() } });
+    expect(def.kind).toBe(SPAN_KIND);
+    expect(def.timeout).toBe(DEFAULT_SPAN_TIMEOUT_MS);
     expect(def.key).toBe('');
     expect(def).not.toHaveProperty('doc');
     expect(def).not.toHaveProperty('keyOverride');
   });
 
   it('keeps timeout, doc and key options', () => {
-    const def = correlation({ doc: 'd', timeout: 0, key: 'legacy.flow', events: {} });
+    const def = span({ doc: 'd', timeout: 0, key: 'legacy.flow', events: {} });
     expect(def.timeout).toBe(0);
     expect(def.doc).toBe('d');
     expect(def.keyOverride).toBe('legacy.flow');
@@ -90,21 +90,21 @@ describe('correlation()', () => {
 });
 
 describe('type guards', () => {
-  it('discriminates events, correlations and catalogs', () => {
+  it('discriminates events, spans and catalogs', () => {
     const ev = ping();
-    const corr = correlation({ events: {} });
+    const corr = span({ events: {} });
     const catalog = defineEvents({ a: ping() });
 
     expect(isEventDefinition(ev)).toBe(true);
     expect(isEventDefinition(corr)).toBe(false);
-    expect(isCorrelationDefinition(corr)).toBe(true);
-    expect(isCorrelationDefinition(ev)).toBe(false);
+    expect(isSpanDefinition(corr)).toBe(true);
+    expect(isSpanDefinition(ev)).toBe(false);
     expect(isCatalog(catalog)).toBe(true);
     expect(isCatalog({ a: ev })).toBe(false);
 
     for (const value of [null, undefined, 'x', 1, {}]) {
       expect(isEventDefinition(value)).toBe(false);
-      expect(isCorrelationDefinition(value)).toBe(false);
+      expect(isSpanDefinition(value)).toBe(false);
       expect(isCatalog(value)).toBe(false);
       expect(isMountedCatalog(value)).toBe(false);
     }
@@ -112,7 +112,7 @@ describe('type guards', () => {
 
   it('recognises definitions from another copy of the package by their string kind', () => {
     expect(isEventDefinition({ kind: 'chronicler:event' })).toBe(true);
-    expect(isCorrelationDefinition({ kind: 'chronicler:correlation' })).toBe(true);
+    expect(isSpanDefinition({ kind: 'chronicler:span' })).toBe(true);
   });
 
   it('does not enumerate the catalog marker', () => {
@@ -149,9 +149,9 @@ describe('defineEvents() key derivation', () => {
     expect(events.admin.deep.nested.leaf.key).toBe('admin.deep.nested.leaf');
   });
 
-  it('stamps keys onto correlations and their events', () => {
+  it('stamps keys onto spans and their events', () => {
     const events = defineEvents({
-      http: { request: correlation({ events: { started: ping(), sub: { step: ping() } } }) },
+      http: { request: span({ events: { started: ping(), sub: { step: ping() } } }) },
     });
 
     expect(events.http.request.key).toBe('http.request');
@@ -166,9 +166,9 @@ describe('defineEvents() key derivation', () => {
     expect(events.admin.login.key).toBe('auth.signIn');
   });
 
-  it('derives correlation event keys from the overridden correlation key', () => {
+  it('derives span event keys from the overridden span key', () => {
     const events = defineEvents({
-      http: { request: correlation({ key: 'web.req', events: { started: ping() } }) },
+      http: { request: span({ key: 'web.req', events: { started: ping() } }) },
     });
     expect(events.http.request.key).toBe('web.req');
     expect(events.http.request.events.started.key).toBe('web.req.started');
@@ -192,7 +192,7 @@ describe('defineEvents() key derivation', () => {
 
 describe('catalog composition', () => {
   it('re-derives keys when one catalog is mounted inside another', () => {
-    const admin = defineEvents({ login: ping(), flow: correlation({ events: { step: ping() } }) });
+    const admin = defineEvents({ login: ping(), flow: span({ events: { step: ping() } }) });
     expect(admin.login.key).toBe('login');
 
     const events = defineEvents({ admin });
@@ -256,10 +256,10 @@ describe('defineEvents() INVALID_CATALOG errors', () => {
     expect(message).toContain(`"admin.deep.${name}"`);
   });
 
-  it.each(RESERVED_CATALOG_NAMES)('rejects the reserved name "%s" in a correlation', (name) => {
+  it.each(RESERVED_CATALOG_NAMES)('rejects the reserved name "%s" in a span', (name) => {
     const message = catalogError(() =>
       defineUnchecked({
-        http: { request: correlation({ events: { [name]: ping() } as never }) },
+        http: { request: span({ events: { [name]: ping() } as never }) },
       }),
     );
     expect(message).toContain(`"http.request.${name}"`);
@@ -269,10 +269,10 @@ describe('defineEvents() INVALID_CATALOG errors', () => {
     expect(catalogError(() => defineUnchecked({ run: { a: ping() } }))).toContain('reserved');
   });
 
-  it('rejects a reserved name nested in a namespace inside a correlation', () => {
+  it('rejects a reserved name nested in a namespace inside a span', () => {
     const message = catalogError(() =>
       defineUnchecked({
-        job: correlation({ events: { phase: { then: ping() } } as never }),
+        job: span({ events: { phase: { then: ping() } } as never }),
       }),
     );
     expect(message).toContain('"job.phase.then"');
@@ -294,28 +294,26 @@ describe('defineEvents() INVALID_CATALOG errors', () => {
   });
 
   it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])('rejects the timeout %s', (timeout) => {
-    const message = catalogError(() =>
-      defineUnchecked({ job: correlation({ timeout, events: {} }) }),
-    );
+    const message = catalogError(() => defineUnchecked({ job: span({ timeout, events: {} }) }));
     expect(message).toContain('invalid timeout');
   });
 
   it('accepts a timeout of 0', () => {
-    expect(() => defineEvents({ job: correlation({ timeout: 0, events: {} }) })).not.toThrow();
+    expect(() => defineEvents({ job: span({ timeout: 0, events: {} }) })).not.toThrow();
   });
 
-  it('rejects a correlation directly inside a correlation', () => {
-    const inner = correlation({ events: {} });
+  it('rejects a span directly inside a span', () => {
+    const inner = span({ events: {} });
     const message = catalogError(() =>
-      defineUnchecked({ outer: correlation({ events: { inner } as never }) }),
+      defineUnchecked({ outer: span({ events: { inner } as never }) }),
     );
-    expect(message).toContain('inside correlation "outer"');
+    expect(message).toContain('inside span "outer"');
   });
 
-  it('rejects a correlation in a namespace inside a correlation', () => {
-    const inner = correlation({ events: {} });
+  it('rejects a span in a namespace inside a span', () => {
+    const inner = span({ events: {} });
     const message = catalogError(() =>
-      defineUnchecked({ outer: correlation({ events: { phase: { inner } } as never }) }),
+      defineUnchecked({ outer: span({ events: { phase: { inner } } as never }) }),
     );
     expect(message).toContain('"outer.phase.inner"');
   });
@@ -335,18 +333,18 @@ describe('defineEvents() INVALID_CATALOG errors', () => {
   it('rejects a key override that collides with a lifecycle event', () => {
     const message = catalogError(() =>
       defineEvents({
-        job: correlation({ events: {} }),
+        job: span({ events: {} }),
         other: event({ level: 'info', message: 'x', key: 'job.start' }),
       }),
     );
     expect(message).toContain('Duplicate event key "job.start"');
   });
 
-  it('rejects duplicate correlation keys through their lifecycle events', () => {
+  it('rejects duplicate span keys through their lifecycle events', () => {
     const message = catalogError(() =>
       defineEvents({
-        a: correlation({ key: 'shared', events: {} }),
-        b: correlation({ key: 'shared', events: {} }),
+        a: span({ key: 'shared', events: {} }),
+        b: span({ key: 'shared', events: {} }),
       }),
     );
     expect(message).toContain('Duplicate event key "shared.start"');
@@ -358,9 +356,9 @@ describe('defineEvents() INVALID_CATALOG errors', () => {
         catalogError(() => defineEvents({ x: event({ level: 'info', message: 'x', key }) })),
       ).toContain('Invalid event key');
     }
-    expect(
-      catalogError(() => defineEvents({ x: correlation({ key: 'Nope', events: {} }) })),
-    ).toContain('Invalid event key');
+    expect(catalogError(() => defineEvents({ x: span({ key: 'Nope', events: {} }) }))).toContain(
+      'Invalid event key',
+    );
   });
 
   it('rejects keys longer than 256 characters', () => {
@@ -380,7 +378,7 @@ describe('walkCatalog()', () => {
   const events = defineEvents({
     admin: group({ doc: 'Admin events' }, { login: ping() }),
     http: {
-      request: correlation({
+      request: span({
         doc: 'HTTP request',
         events: { started: ping(), phase: { parsed: ping() } },
       }),
@@ -390,16 +388,16 @@ describe('walkCatalog()', () => {
   const summarise = (entries: CatalogEntry[]) =>
     entries.map((e) =>
       e.kind === 'event'
-        ? `${e.kind}:${e.key}${e.lifecycle ? ':life' : ''}${e.correlationKey ? `@${e.correlationKey}` : ''}`
+        ? `${e.kind}:${e.key}${e.lifecycle ? ':life' : ''}${e.spanKey ? `@${e.spanKey}` : ''}`
         : `${e.kind}:${e.key}`,
     );
 
-  it('lists namespaces, correlations, lifecycle events and events in order', () => {
+  it('lists namespaces, spans, lifecycle events and events in order', () => {
     expect(summarise(walkCatalog(events))).toEqual([
       'namespace:admin',
       'event:admin.login',
       'namespace:http',
-      'correlation:http.request',
+      'span:http.request',
       'event:http.request.start:life@http.request',
       'event:http.request.complete:life@http.request',
       'event:http.request.fail:life@http.request',
@@ -410,13 +408,13 @@ describe('walkCatalog()', () => {
     ]);
   });
 
-  it('reports namespace docs and correlation keys of namespaces', () => {
+  it('reports namespace docs and span keys of namespaces', () => {
     const entries = walkCatalog(events);
     const admin = entries.find((e) => e.kind === 'namespace' && e.key === 'admin');
     expect(admin).toMatchObject({ doc: 'Admin events', path: 'admin' });
-    expect(admin).not.toHaveProperty('correlationKey');
+    expect(admin).not.toHaveProperty('spanKey');
     const phase = entries.find((e) => e.kind === 'namespace' && e.key === 'http.request.phase');
-    expect(phase).toMatchObject({ correlationKey: 'http.request' });
+    expect(phase).toMatchObject({ spanKey: 'http.request' });
     expect(phase).not.toHaveProperty('doc');
   });
 
@@ -425,17 +423,17 @@ describe('walkCatalog()', () => {
     const entry = entries.find((e) => e.kind === 'event');
     expect(entry?.kind === 'event' && entry.definition.key).toBe('a.b');
     expect(entry).toMatchObject({ path: 'a.b', lifecycle: false });
-    expect(entry).not.toHaveProperty('correlationKey');
+    expect(entry).not.toHaveProperty('spanKey');
   });
 
   it('distinguishes key from path when a key override is used', () => {
     const entries = walkCatalog({
       a: { b: event({ level: 'info', message: 'x', key: 'legacy.b' }) },
-      flow: correlation({ key: 'legacy.flow', events: { s: ping() } }),
+      flow: span({ key: 'legacy.flow', events: { s: ping() } }),
     });
     const ev = entries.find((e) => e.kind === 'event' && e.path === 'a.b');
     expect(ev?.key).toBe('legacy.b');
-    const corr = entries.find((e) => e.kind === 'correlation');
+    const corr = entries.find((e) => e.kind === 'span');
     expect(corr).toMatchObject({ key: 'legacy.flow', path: 'flow' });
     const step = entries.find((e) => e.kind === 'event' && e.path === 'flow.s');
     expect(step?.key).toBe('legacy.flow.s');
@@ -454,7 +452,7 @@ describe('lifecycleEvents()', () => {
     expect(life.fail.fields.error?._required).toBe(false);
   });
 
-  it('adds fields declared with correlation({ complete, fail })', () => {
+  it('adds fields declared with span({ complete, fail })', () => {
     const life = lifecycleEvents('api.request', {
       completeFields: { status: field.number() },
       failFields: { reason: field.string().optional() },
@@ -464,7 +462,7 @@ describe('lifecycleEvents()', () => {
   });
 
   it('rejects lifecycle fields that redefine duration or error', () => {
-    const bad = correlation({ events: {} }) as unknown as Record<string, unknown>;
+    const bad = span({ events: {} }) as unknown as Record<string, unknown>;
     expect(() =>
       defineEvents({ a: { ...bad, failFields: { error: field.string() } } } as never),
     ).toThrow(/redefines built-in lifecycle field\(s\): error/);

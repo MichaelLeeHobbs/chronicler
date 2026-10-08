@@ -3,9 +3,9 @@
 These queries assume Chronicler emits structured JSON logs with top-level fields like:
 
 - eventKey, level, message
-- correlationId, forkId
-- parentCorrelationId (nested correlations only), rootCorrelationId (any correlated event)
-- correlationState (only on events logged after the correlation timed out, completed or failed)
+- spanId, forkId
+- parentSpanId (nested spans only), traceId (any correlated event)
+- spanState (only on events logged after the span timed out, completed or failed)
 - timestamp
 - metadata (object)
 - fields (object)
@@ -24,29 +24,29 @@ fields @timestamp, eventKey, level, message
 | limit 50
 ```
 
-Find errors with correlationId:
+Find errors with spanId:
 
 ```
-fields @timestamp, eventKey, message, correlationId
+fields @timestamp, eventKey, message, spanId
 | filter level in ['error','critical','fatal']
-| filter correlationId = 'abc-123'
+| filter spanId = 'abc-123'
 | sort @timestamp asc
 ```
 
-## Correlations
+## Spans
 
-All events for a correlation in order with durations:
+All events for a span in order with durations:
 
 ```
-fields @timestamp, eventKey, message, correlationId, fields.duration
-| filter correlationId = 'abc-123'
+fields @timestamp, eventKey, message, spanId, fields.duration
+| filter spanId = 'abc-123'
 | sort @timestamp asc
 ```
 
 List slow completes (> 2s):
 
 ```
-fields @timestamp, eventKey, correlationId, fields.duration
+fields @timestamp, eventKey, spanId, fields.duration
 | filter eventKey like /\.complete$/
 | filter ispresent(fields.duration) and fields.duration > 2000
 | sort fields.duration desc
@@ -56,40 +56,40 @@ fields @timestamp, eventKey, correlationId, fields.duration
 Find timeouts:
 
 ```
-fields @timestamp, eventKey, correlationId
+fields @timestamp, eventKey, spanId
 | filter eventKey like /\.timeout$/
 | sort @timestamp desc
 ```
 
-A whole request, including correlations nested inside it (database queries, jobs it started):
+A whole request, including spans nested inside it (database queries, jobs it started):
 
 ```
-fields @timestamp, eventKey, correlationId, parentCorrelationId, forkId
-| filter rootCorrelationId = 'abc-123'
+fields @timestamp, eventKey, spanId, parentSpanId, forkId
+| filter traceId = 'abc-123'
 | sort @timestamp asc
 ```
 
-Events logged after their correlation ended (work outliving a timeout, or forks used after `complete()`):
+Events logged after their span ended (work outliving a timeout, or forks used after `complete()`):
 
 ```
-fields @timestamp, eventKey, correlationId, correlationState
-| filter ispresent(correlationState)
-| stats count() by eventKey, correlationState
+fields @timestamp, eventKey, spanId, spanState
+| filter ispresent(spanState)
+| stats count() by eventKey, spanState
 ```
 
-Leaked ambient work: events whose ambient correlation had already finished, so they were logged outside it. Wrap the code that logs them in `chronicle.run(...)`:
+Leaked ambient work: events whose ambient span had already finished, so they were logged outside it. Wrap the code that logs them in `chronicle.run(...)`:
 
 ```
-fields @timestamp, eventKey, _validation.staleCorrelationId
-| filter ispresent(_validation.staleCorrelationId)
+fields @timestamp, eventKey, _validation.staleSpanId
+| filter ispresent(_validation.staleSpanId)
 | stats count() by eventKey
 ```
 
-Correlations started past `limits.maxActiveCorrelations` (often correlations that are never completed):
+Spans started past `limits.maxActiveSpans` (often spans that are never completed):
 
 ```
 fields @timestamp, eventKey
-| filter ispresent(_validation.correlationLimitExceeded)
+| filter ispresent(_validation.spanLimitExceeded)
 | stats count() by eventKey
 ```
 
@@ -136,6 +136,6 @@ Find logs from a specific fork:
 
 ```
 fields @timestamp, eventKey, forkId
-| filter correlationId = 'abc-123' and forkId like /^1(\.|$)/
+| filter spanId = 'abc-123' and forkId like /^1(\.|$)/
 | sort @timestamp asc
 ```

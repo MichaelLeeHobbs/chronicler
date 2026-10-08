@@ -48,11 +48,11 @@ const parseError = (message: string): ValidationError => ({ type: 'parse-error',
 const isCatalogError = (error: unknown): error is Error =>
   error instanceof Error && (error as { code?: unknown }).code === 'INVALID_CATALOG';
 
-/** Heuristic for a Chronicler 1.x event group (`{ key, type: 'system' | 'correlation' }`). */
+/** Heuristic for a Chronicler 1.x event group (`{ key, type: 'system' | 'span' }`). */
 const looksLikeV1Group = (value: unknown): boolean => {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return typeof v.key === 'string' && (v.type === 'system' || v.type === 'correlation');
+  return typeof v.key === 'string' && (v.type === 'system' || v.type === 'span');
 };
 
 function selectNamedExport(mod: Record<string, unknown>, exportName: string): CatalogSelection {
@@ -128,7 +128,7 @@ function toParsedEvent(entry: Extract<CatalogEntry, { kind: 'event' }>): ParsedE
     message: def.message,
     doc: def.doc ?? '',
     fields: toParsedFields(def.fields),
-    ...(entry.correlationKey !== undefined ? { correlationKey: entry.correlationKey } : {}),
+    ...(entry.spanKey !== undefined ? { spanKey: entry.spanKey } : {}),
     lifecycle: entry.lifecycle,
   };
 }
@@ -147,7 +147,7 @@ function makeGroup(entry: Exclude<CatalogEntry, { kind: 'event' }>): ParsedEvent
   }
   return {
     ...base,
-    kind: 'correlation',
+    kind: 'span',
     doc: entry.definition.doc ?? '',
     timeout: entry.definition.timeout,
   };
@@ -156,7 +156,7 @@ function makeGroup(entry: Exclude<CatalogEntry, { kind: 'event' }>): ParsedEvent
 /** Builds the group hierarchy of one catalog from its `walkCatalog` entries. */
 class CatalogTreeBuilder {
   private readonly byPath = new Map<string, ParsedEventGroup>();
-  private readonly byCorrelationKey = new Map<string, ParsedEventGroup>();
+  private readonly bySpanKey = new Map<string, ParsedEventGroup>();
 
   constructor(
     private readonly state: BuildState,
@@ -170,7 +170,7 @@ class CatalogTreeBuilder {
     }
     const group = makeGroup(entry);
     this.byPath.set(entry.path, group);
-    if (entry.kind === 'correlation') this.byCorrelationKey.set(entry.key, group);
+    if (entry.kind === 'span') this.bySpanKey.set(entry.key, group);
     const parent = this.byPath.get(parentPath(entry.path));
     if (parent) parent.groups[lastSegment(entry.path)] = group;
     else this.state.groups.push(group);
@@ -181,7 +181,7 @@ class CatalogTreeBuilder {
     if (!this.claimKey(event.key)) return;
     this.state.events.push(event);
     if (entry.lifecycle) {
-      const owner = this.byCorrelationKey.get(entry.correlationKey ?? '');
+      const owner = this.bySpanKey.get(entry.spanKey ?? '');
       owner?.lifecycleEvents.push(event);
       return;
     }

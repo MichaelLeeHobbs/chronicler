@@ -68,12 +68,12 @@ export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig)
   fs.writeFileSync(resolved, normalized, 'utf-8');
 }
 
-/** Descriptions of the auto-generated correlation lifecycle events, by suffix. */
+/** Descriptions of the auto-generated span lifecycle events, by suffix. */
 const LIFECYCLE_DESCRIPTIONS: Readonly<Record<string, string>> = {
-  start: 'Logged when correlation starts',
-  complete: 'Logged when correlation completes (includes `duration` field)',
-  fail: 'Logged when correlation fails (includes `duration` and `error` fields)',
-  timeout: 'Logged when correlation times out due to inactivity',
+  start: 'Logged when span starts',
+  complete: 'Logged when span completes (includes `duration` field)',
+  fail: 'Logged when span fails (includes `duration` and `error` fields)',
+  timeout: 'Logged when span times out due to inactivity',
 };
 
 const lifecycleSuffix = (event: ParsedEvent): string =>
@@ -102,12 +102,12 @@ function generateMarkdown(tree: ParsedEventTree): string {
     lines.push('');
   }
 
-  // Document each top-level namespace / correlation
+  // Document each top-level namespace / span
   tree.groups.forEach((group) => {
     lines.push(...generateGroupMarkdown(group));
   });
 
-  // Document events defined at the catalog root (not in any namespace or correlation)
+  // Document events defined at the catalog root (not in any namespace or span)
   if (tree.rootEvents.length > 0) {
     lines.push('## Standalone Events');
     lines.push('');
@@ -119,9 +119,9 @@ function generateMarkdown(tree: ParsedEventTree): string {
   return lines.join('\n');
 }
 
-/** Markdown for a correlation's type, timeout and doc header lines. */
-function correlationHeaderMarkdown(group: ParsedEventGroup): string[] {
-  const lines = ['**Type:** Correlation'];
+/** Markdown for a span's type, timeout and doc header lines. */
+function spanHeaderMarkdown(group: ParsedEventGroup): string[] {
+  const lines = ['**Type:** Span'];
   if (group.timeout !== undefined) {
     lines.push(
       group.timeout === 0
@@ -133,7 +133,7 @@ function correlationHeaderMarkdown(group: ParsedEventGroup): string[] {
   return lines;
 }
 
-/** Markdown list of a correlation's auto-generated lifecycle events. */
+/** Markdown list of a span's auto-generated lifecycle events. */
 function lifecycleMarkdown(group: ParsedEventGroup): string[] {
   const lines = ['**Auto-Generated Events:**', ''];
   for (const event of group.lifecycleEvents) {
@@ -147,9 +147,9 @@ function lifecycleMarkdown(group: ParsedEventGroup): string[] {
 /** Markdown for one group (without its nested groups). */
 function groupBodyMarkdown(group: ParsedEventGroup, level: number): string[] {
   const lines = [`${'#'.repeat(Math.min(level, 6))} ${group.key}`, ''];
-  if (group.kind === 'correlation') lines.push(...correlationHeaderMarkdown(group));
+  if (group.kind === 'span') lines.push(...spanHeaderMarkdown(group));
   if (group.doc) lines.push(group.doc, '');
-  if (group.kind === 'correlation') lines.push(...lifecycleMarkdown(group));
+  if (group.kind === 'span') lines.push(...lifecycleMarkdown(group));
   Object.values(group.events).forEach((event) => {
     lines.push(...generateEventMarkdown(event, level + 1));
   });
@@ -157,7 +157,7 @@ function groupBodyMarkdown(group: ParsedEventGroup, level: number): string[] {
 }
 
 /**
- * Generate Markdown for a namespace or correlation and its nested groups (iterative)
+ * Generate Markdown for a namespace or span and its nested groups (iterative)
  */
 function generateGroupMarkdown(rootGroup: ParsedEventGroup, rootLevel = 2): string[] {
   const lines: string[] = [];
@@ -230,18 +230,18 @@ function generateJSON(tree: ParsedEventTree): string {
 }
 
 /**
- * Serialize a namespace or correlation (and its nested groups) to JSON
+ * Serialize a namespace or span (and its nested groups) to JSON
  */
 function serializeGroup(group: ParsedEventGroup): Record<string, unknown> {
-  const isCorrelation = group.kind === 'correlation';
+  const isSpan = group.kind === 'span';
   return {
     key: group.key,
     path: group.path,
     type: group.kind,
     doc: group.doc,
     timeout: group.timeout,
-    autoEvents: isCorrelation ? group.lifecycleEvents.map(lifecycleSuffix) : undefined,
-    lifecycleEvents: isCorrelation ? group.lifecycleEvents.map(serializeEvent) : undefined,
+    autoEvents: isSpan ? group.lifecycleEvents.map(lifecycleSuffix) : undefined,
+    lifecycleEvents: isSpan ? group.lifecycleEvents.map(serializeEvent) : undefined,
     events: Object.entries(group.events).map(([name, event]) => ({
       name,
       ...serializeEvent(event),
