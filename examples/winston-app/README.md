@@ -30,20 +30,27 @@ The app uses a **single `chronicle` instance** with `createRouterBackend` to rou
 
 ```typescript
 // src/services/chronicler.ts
-export const chronicle = createChronicle({
-  backend: createRouterBackend([
-    { backend: auditBackend, filter: (_lvl, p) => p.eventKey.startsWith('admin.') },
-    { backend: httpBackend,  filter: (_lvl, p) => p.eventKey.startsWith('http.request.') },
-    { backend: mainBackend,  filter: (_lvl, p) => /* everything else */ },
-  ]),
+export const chronicle: Chronicle<typeof events> = createChronicle({
+  events,
+  backend: () =>
+    createRouterBackend([
+      { backend: toBackend(loggerAudit), filter: (_lvl, p) => isAudit(p.eventKey) },
+      { backend: toBackend(loggerHttp), filter: (_lvl, p) => isHttp(p.eventKey) },
+      {
+        backend: toBackend(loggerMain),
+        filter: (_lvl, p) => !isAudit(p.eventKey) && !isHttp(p.eventKey),
+      },
+    ]),
   metadata: { serviceName: 'winston-app', appVersion: '1.0.0', env: 'production' },
 });
+
+export const { system, http, admin, business } = chronicle;
 ```
 
 This approach gives you:
 
 - **One chronicle** — shared context, metadata, and correlation IDs across all streams
-- **Event-key routing** — controllers just call `chronicle.event()` without knowing which stream receives it
+- **Event-key routing** — controllers just call `admin.login(...)` without knowing which stream receives it
 - **Stream isolation** — query specific log types independently in CloudWatch
 - **Different retention** — apply different retention policies per stream
 
@@ -188,29 +195,69 @@ export const loggerHttp = createLogger('http'); // HTTP requests
 
 ### Router Backend
 
-All three Winston loggers are adapted to `LogBackend` and combined into a single router:
+All three Winston loggers are adapted to `LogBackend` and combined into a single router. The backend is passed as a function, so it is created lazily on the first event:
 
 ```typescript
 // src/services/chronicler.ts
-const mainBackend = toBackend(loggerMain);
-const auditBackend = toBackend(loggerAudit);
-const httpBackend = toBackend(loggerHttp);
+const isAudit = (eventKey: string) => eventKey.startsWith('admin.');
+const isHttp = (eventKey: string) => eventKey.startsWith('http.request.');
 
-export const chronicle = createChronicle({
-  backend: createRouterBackend([
-    { backend: auditBackend, filter: (_lvl, p) => p.eventKey.startsWith('admin.') },
-    { backend: httpBackend, filter: (_lvl, p) => p.eventKey.startsWith('http.request.') },
-    {
-      backend: mainBackend,
-      filter: (_lvl, p) =>
-        !p.eventKey.startsWith('admin.') && !p.eventKey.startsWith('http.request.'),
-    },
-  ]),
-  metadata: { serviceName: 'winston-app', appVersion: '1.0.0', env: 'production' },
+export const chronicle: Chronicle<typeof events> = createChronicle({
+  events,
+  backend: () =>
+    createRouterBackend([
+      { backend: toBackend(loggerAudit), filter: (_lvl, p) => isAudit(p.eventKey) },
+      { backend: toBackend(loggerHttp), filter: (_lvl, p) => isHttp(p.eventKey) },
+      {
+        backend: toBackend(loggerMain),
+        filter: (_lvl, p) => !isAudit(p.eventKey) && !isHttp(p.eventKey),
+      },
+    ]),
+  metadata: {
+    serviceName: config.app.name,
+    appVersion: config.app.version,
+    env: config.environment,
+  },
 });
+
+export const { system, http, admin, business } = chronicle;
 ```
 
-Controllers simply import the single `chronicle` — no need to know which stream receives their events.
+Controllers import the namespaces they need (`import { admin } from '../services/chronicler.js'`) and call `admin.login({ ... })`. They don't need to know which stream receives their events.
+
+## Request Correlations
+
+`src/middleware/requestLogger.ts` runs every request inside an ambient `http.request` correlation:
+
+```typescript
+export function requestLogger(req: Request, res: Response, next: NextFunction) {
+  const requestId = req.get('x-request-id') ?? `req-${randomUUID()}`;
+
+  http.request.run({ requestId }, (request) => {
+    const startTime = Date.now();
+    request.started({ method: req.method, path: req.path });
+    res.setHeader('x-correlation-id', request.correlationId);
+
+    res.on('finish', () => {
+      request.completed({ statusCode: res.statusCode, duration: Date.now() - startTime });
+      request.complete();
+    });
+    res.on('close', () => {
+      if (!res.writableFinished) request.fail(new Error('Client closed the connection'));
+    });
+
+    next();
+  });
+}
+```
+
+Everything downstream of `next()`, including async handlers, logs inside that correlation. A controller calling `admin.login({ ... })` gets the request's `correlationId` and `requestId` without being passed anything. `run()` never completes the correlation by itself (the response is sent later), so the middleware completes it on `finish`, and fails it if the client disconnects first.
+
+The example also shows:
+
+- **Context** — `admin.controller.ts` calls `chronicle.addContext({ userId })`, which applies to the rest of that request's events.
+- **Forks** — `health.controller.ts` probes dependencies in parallel, each from `chronicle.fork({ dependency })`, so their events share the request's correlation id with distinct `forkId`s.
+- **Background work** — `user.controller.ts` wraps a timer in `chronicle.run(...)` so the `business.dataProcessed` event it logs later is not attributed to the already-finished request.
 
 ## Event Documentation
 

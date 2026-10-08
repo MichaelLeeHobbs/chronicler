@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Chronicler is a TypeScript-first structured logging toolkit for Node.js 20+. It enforces type-safe, documented event definitions with correlations, forks, and field validation. Events are defined once with keys, levels, fields, and docs, then logged through backends (Winston, CloudWatch, etc.).
+Chronicler is a TypeScript-first structured logging toolkit for Node.js 20+. Events are defined once in a nested catalog (`defineEvents`) with levels, fields and docs; keys are derived from the catalog path. `createChronicle({ events })` returns a typed emitter tree (`chronicle.admin.login({...})`) with correlations, forks, ambient scopes and non-throwing field validation, logged through pluggable backends (Winston, CloudWatch, etc.).
 
 ## Commands
 
@@ -33,22 +33,27 @@ Package manager is **pnpm 10.18.0**. Lint enforces zero warnings (`--max-warning
 
 ### Core (`src/core/`)
 
-The central API flow: `createChronicle(config)` → `Chronicler` interface → `event()` / `startCorrelation()` / `fork()`.
+The central API flow: `defineEvents({...})` catalog → `createChronicle({ events, backend?, metadata? })` → `Chronicle<C>` emitter tree. Events are functions (`admin.login(fields)`); correlations are starters (`http.request.begin(ctx?)` / `.run(ctx?, fn)`) that return a `CorrelationHandle` with the correlation's own events plus `complete()` / `fail()` / `fork()`. Every scope also has `fork(ctx?)`, `run(fn)`, `log(level, msg, fields?)` and `addContext(ctx)`.
 
-- **chronicle.ts** — Factory (`createChronicle`) and main `Chronicler`/`CorrelationChronicle` implementations. `buildPayload()` orchestrates validation, sampling, and payload assembly before calling the backend.
-- **events.ts** — `defineEvent()` creates type-safe event schemas. `defineCorrelationGroup()` auto-generates lifecycle events (`.start`, `.complete`, `.fail`, `.timeout`). Event groups are discriminated by `type: 'system' | 'correlation'`.
-- **fields.ts** — Field builder system via `t` object (`t.string()`, `t.number()`, `t.boolean()`, `t.error()`). Builders chain `.optional()` and `.doc()`. `InferFields<F>` derives TypeScript types from field definitions at compile time.
-- **validation.ts** — Validates required fields and types at runtime. Errors are captured in `_validation` metadata, never thrown.
-- **context-store.ts** — Immutable context snapshots. Context collisions preserve original values; reserved field attempts are silently dropped. `addContext()` returns `ContextValidationResult`.
-- **backend.ts** — `LogBackend` is a simple `Record<LogLevel, (message, payload) => void>`. Nine log levels: fatal(0) through trace(8).
-- **constants.ts** — Global constants: log level priority map, default timeout (5min), fork ID separator (`.`).
-- **reserved.ts** — Reserved top-level fields (eventKey, level, message, correlationId, forkId, timestamp, hostname, fields, \_validation). O(1) lookups via Set.
-- **correlation-timer.ts** — Auto-reset timeout management for correlations.
-- **errors.ts** — Single `ChroniclerError` class with `code` discriminator (`UNSUPPORTED_LOG_LEVEL`, `RESERVED_FIELD`, `BACKEND_METHOD`, `FORK_DEPTH_EXCEEDED`, `CORRELATION_LIMIT_EXCEEDED`).
+- **events.ts** — `event()`, `correlation()`, `group()` and `defineEvents()`. `defineEvents` walks the catalog (`walkCatalog()`), validates names/levels/timeouts/duplicate keys (throws `INVALID_CATALOG`), and stamps each definition's `key` from its path (or its `key` override). Definitions carry a string `kind` discriminant (`chronicler:event` / `chronicler:correlation`). `lifecycleEvents()` builds the auto `.start` / `.complete` / `.fail` / `.timeout` events. `RESERVED_CATALOG_NAMES` and the `CheckCatalog` type reject reserved names and nested correlation definitions at compile time.
+- **chronicle.ts** — `createChronicle`. A `Runtime` holds resolved config, the lazily created `AsyncLocalStorage` (first `run()`), and the active-correlation count. A `Scope` (context store + forkId + optional `Correlation`) does validation, payload assembly and backend calls; the root, forks and correlations are all scopes. Root-tree emitters resolve the ambient scope (skipping finished correlations and flagging `staleCorrelationId`); fork trees and handles are bound to their own scope. Correlations started from a scope inside an unfinished correlation are nested (`parentCorrelationId` / `rootCorrelationId`).
+- **chronicle-types.ts** — Public types: `Chronicle`, `Emitters`, `Emitter`, `EmitterArgs`, `CorrelationStarter`, `CorrelationHandle`, `CorrelationFork`, `HandleOf`, `FieldsOf`, `ScopeMethods`.
+- **fields.ts** — Field builder system via `field` (`field.string()`, `field.number()`, `field.boolean()`, `field.error()`). Builders chain `.optional()` and `.doc()`. `InferFields<F>` derives TypeScript types from field definitions at compile time.
+- **validation.ts** — Validates required fields and types at runtime. Results go in `_validation` (`ValidationMetadata`: `missingFields`, `typeErrors`, `invalidValues`, `unknownFields`, `staleCorrelationId`, `correlationLimitExceeded`), never thrown except in strict mode.
+- **context.ts** — `ContextStore`: immutable snapshots; `add()` is first-write-wins (collisions keep the original, reported in `ContextValidationResult`); `derive(overrides)` creates a child store where overrides replace inherited values. Reserved fields are dropped.
+- **backend.ts** — `LogBackend` is a `Record<LogLevel, (message, payload) => void>`; `LogPayload` (eventKey, fields, correlationId, parentCorrelationId?, rootCorrelationId?, correlationState?, forkId, metadata, timestamp, \_validation?). `createConsoleBackend`, `createBackend` (fallback chains), `createRouterBackend`. Nine log levels: fatal(0) through trace(8).
+- **correlation-timer.ts** — Auto-reset idle timeout for a correlation (`0` disables).
+- **constants.ts** — Log level priority map, default timeout (5min), default limits, root fork id (`0`), fork ID separator (`.`).
+- **reserved.ts** — Reserved top-level payload fields. O(1) lookups via Set.
+- **errors.ts** — Single `ChroniclerError` class with `code` discriminator (`UNSUPPORTED_LOG_LEVEL`, `RESERVED_FIELD`, `BACKEND_METHOD`, `FORK_DEPTH_EXCEEDED`, `FIELD_VALIDATION`, `INVALID_CATALOG`).
 
-### CLI (`src/cli/`)
+### Testing entry (`src/testing.ts`)
 
-Commander.js-based CLI with `validate` and `docs` commands. Uses AST parsing to analyze event definition files. Published separately as `@ubercode/chronicler-cli` from `packages/cli/`, whose tsup config bundles `src/cli/index.ts`; the core package must keep no runtime dependencies, so CLI-only deps (`esbuild`, `commander`) belong in `packages/cli/package.json` (and root devDependencies for tests).
+Published as `@ubercode/chronicler/testing`. `createTestChronicle(events, config?)` returns `{ chronicle, emitted, eventsOf(def|emitter), assertEmitted(def|emitter, fields?), clear() }`, recording events in memory.
+
+### CLI (`src/cli/`, published from `packages/cli`)
+
+Commander.js-based CLI (`@ubercode/chronicler-cli`) with `validate`, `docs` and `keys` commands. Loads the catalog from `eventsFile` (export named by `eventsExport`) and walks it with core `walkCatalog()`.
 
 ### Public API (`src/index.ts`)
 
@@ -56,14 +61,17 @@ Clean re-export surface. All public types and functions are exported from here.
 
 ## Key Design Decisions
 
-- **Non-throwing validation**: Field/context validation failures are captured in `_validation` payload metadata, not thrown as exceptions. Only configuration errors (missing backend, reserved fields in metadata) throw.
-- **Immutable context**: `ContextStore` returns copies, not references. Collisions preserve original values.
-- **Fork hierarchy**: Dotted IDs (`0`, `1`, `1.1`, `1.2.1`) represent parent-child fork relationships. Root is always `0`.
-- **`as const` not required**: `defineEvent` uses const generic parameters (TS 5.0+), so literal types narrow automatically.
+- **Catalog, not standalone definitions**: keys come from the catalog path; `key` overrides keep a wire key stable across renames. Catalog files must not import the module that calls `createChronicle()` (circular import → undefined entry → `INVALID_CATALOG`).
+- **Ambient scopes**: `correlation.run()` / `fork.run()` make a scope ambient via `AsyncLocalStorage`; root-tree emitters log to it. Root `chronicle.run(fn)` clears the ambient correlation for background work. `run()` never auto-completes a correlation but fails it if `fn` throws or rejects.
+- **Non-throwing runtime**: field/context validation, stale ambient correlations and the correlation limit are reported in `_validation`, not thrown. Only configuration errors (invalid catalog, missing backend levels, reserved fields in metadata, fork depth) and strict mode throw.
+- **Context**: child scopes (`fork`/`begin`/`run` ctx) override inherited values; `addContext()` within a scope is first-write-wins. `ContextStore` returns copies, not references.
+- **Correlation state**: after timeout/complete/fail, handles and forks keep logging with the correlation ids plus `correlationState`; a late `complete()`/`fail()` after a timeout is accepted once.
+- **Fork hierarchy**: Dotted IDs (`0`, `1`, `1.1`, `1.2.1`) represent parent-child fork relationships. Root is always `0`. Correlation forks expose only that correlation's events.
+- **`as const` not required**: `event`, `correlation`, `defineEvents` and `createChronicle` use const generic parameters (TS 5.0+).
 
 ## Testing
 
-Tests use **Vitest** with globals enabled. Test helper `MockLoggerBackend` (in `tests/helpers/mock-logger.ts`) captures log payloads for assertion.
+Tests use **Vitest** with globals enabled. Tests use `createTestChronicle` from `src/testing.ts`, or the `MockLoggerBackend` helper (`tests/helpers/mock-logger.ts`) to capture raw backend payloads; shared catalogs live in `tests/helpers/fixtures.ts`.
 
 Test directories mirror source: `tests/core/`, `tests/cli/`, `tests/types/` (compile-time type tests), `tests/integration/`.
 
@@ -74,4 +82,4 @@ Test directories mirror source: `tests/core/`, `tests/cli/`, `tests/types/` (com
 - Constants: `UPPER_SNAKE_CASE`
 - Types/interfaces: `PascalCase`
 - Functions: `camelCase`
-- Event keys: dotted camelCase — each segment starts lowercase (`system.startup`, `api.request.validated`, `http.requestStarted`)
+- Catalog names: camelCase, starting lowercase; event keys are the dotted path (`system.startup`, `api.request.validated`, `http.requestStarted`)

@@ -10,6 +10,15 @@ export interface ChroniclerCliConfig {
   readonly eventsFile: string;
 
   /**
+   * Name of the export in `eventsFile` that holds the event catalog (the object returned by
+   * `defineEvents()`). When omitted, every exported catalog that is not mounted inside another
+   * exported catalog is used.
+   *
+   * @example 'events'
+   */
+  readonly eventsExport?: string;
+
+  /**
    * Documentation generation options
    */
   readonly docs?: {
@@ -37,6 +46,18 @@ export interface ChroniclerCliConfig {
      */
     readonly eol?: 'lf' | 'crlf';
   };
+
+  /**
+   * Options for the `keys` command (event key lockfile).
+   */
+  readonly keys?: {
+    /**
+     * Path of the key lockfile, relative to the directory of chronicler.config.ts.
+     * It uses the same line endings as `docs.eol`.
+     * @default 'chronicler.lock.json'
+     */
+    readonly lockfile?: string;
+  };
 }
 
 export const DEFAULT_DOCS_CONFIG: Required<NonNullable<ChroniclerCliConfig['docs']>> = {
@@ -44,3 +65,5 @@ export const DEFAULT_DOCS_CONFIG: Required<NonNullable<ChroniclerCliConfig['docs
   format: 'markdown',
   eol: 'lf',
 };
+
+export const DEFAULT_LOCKFILE = 'chronicler.lock.json';

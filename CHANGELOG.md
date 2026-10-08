@@ -4,10 +4,46 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+2.0 redesigns how events are defined and logged. See [Migrating from 1.x](README.md#migrating-from-1x).
+
+### Breaking
+
+- Events are defined in one catalog with `defineEvents({...})`, whose leaves are `event({ level, message, doc?, fields?, key? })` and `correlation({ events, doc?, timeout?, key? })`. Keys are derived from the path (`admin.login`) instead of being written out. `defineEvent`, `defineEventGroup`, `defineCorrelationGroup` and the `type: 'system' | 'correlation'` group shape are removed
+- `createChronicle({ events, ... })` returns a typed emitter tree mirroring the catalog: `chronicle.admin.login({...})`, or `admin.login({...})` after `export const { admin } = chronicle`. `chronicle.event(def, fields)` and `chronicle.startCorrelation(group, ctx)` are removed; correlations start with `chronicle.http.request.begin(ctx?)` or `.run(ctx?, fn)`, and their events are methods on the handle (`request.validated({...})`)
+- Removed types `Chronicler`, `CorrelationChronicle` and `EventFields`; use `Chronicle<typeof events>`, `CorrelationHandle`, `CorrelationFork`, `HandleOf` and `FieldsOf`
+- Catalog names must be camelCase and can't use the reserved names `fork`, `run`, `log`, `addContext`, `begin`, `start`, `complete`, `fail`, `timeout`, `correlationId` or `then`. Invalid catalogs (including undefined entries from circular imports, duplicate keys and correlations defined inside correlations) fail to compile and throw `ChroniclerError` with the new code `INVALID_CATALOG`
+- Removed the `CORRELATION_LIMIT_EXCEEDED` error code (see Changed)
+- Context passed to `fork()`, `begin()` or `run()` now overrides inherited values with the same key. `addContext()` stays first-write-wins
+- `parentCorrelationId`, `rootCorrelationId` and `correlationState` are reserved payload fields and are dropped from context
+
+### Added
+
+- Ambient correlations: `correlation.run(ctx?, fn)` makes the correlation ambient via `AsyncLocalStorage`, so emitters called anywhere inside `fn`, including after `await`, log with its correlation id and context. `run()` fails the correlation if `fn` throws or rejects and never completes it. The store is created on the first `run()`
+- Root `chronicle.run(fn)` runs `fn` with no ambient correlation, for background work that outlives a request; `fork.run(fn)` makes a fork ambient
+- Nested correlations: a correlation started inside another is logged with `parentCorrelationId`, and every correlated event has `rootCorrelationId`
+- `correlationState` (`'timedOut' | 'completed' | 'failed'`) on events logged to a correlation that is no longer active
+- `_validation.staleCorrelationId` when the ambient correlation had already finished; the event is logged outside it
+- `group({ doc }, children)` to document a namespace, and a `key` option on `event()` and `correlation()` to keep a wire key stable across renames
+- Catalogs compose: a catalog mounted inside another has its keys re-derived from the outer path
+- `walkCatalog()`, `isCatalog()`, `isEventDefinition()` and `isCorrelationDefinition()` for tooling; the CLI uses them instead of inspecting object shapes
+- `backend` may be a function, created lazily on the first event
+- `@ubercode/chronicler/testing` with `createTestChronicle(events, config?)`, which records events in memory and provides `eventsOf()` and `assertEmitted()`
+- Events without required fields can be called with no argument (`admin.heartbeat()`), and events that declare no fields reject extra keys at compile time
+- CLI: `chronicler keys --write` / `--check` / `--json` records event keys in a lockfile (`chronicler.lock.json`, configurable as `keys.lockfile`) and fails when a key changes. `eventsExport` in `chronicler.config.ts` names the catalog export
+
 ### Changed
 
+- Starting a correlation past `limits.maxActiveCorrelations` no longer throws. The correlation works but isn't tracked, and its `.start` event has `_validation.correlationLimitExceeded: true`
+- After a timeout, a late `complete()` or `fail()` is accepted once and reports the real duration
+- `createChronicle`'s `metadata` option is optional
 - **Breaking:** the CLI moved to its own package, `@ubercode/chronicler-cli`. `@ubercode/chronicler` no longer has runtime dependencies (`esbuild` and `commander` are gone) and no longer provides the `chronicler` binary. Projects that run `chronicler validate` or `chronicler docs` should add `@ubercode/chronicler-cli` as a devDependency ([#11](https://github.com/MichaelLeeHobbs/chronicler/issues/11))
 - The CLI now depends on `esbuild` `^0.28.1`, which includes the fix for [GHSA-g7r4-m6w7-qqqr](https://github.com/advisories/GHSA-g7r4-m6w7-qqqr) ([#11](https://github.com/MichaelLeeHobbs/chronicler/issues/11))
+
+### Fixed
+
+- Forks of a correlation could start nested correlations that weren't declared in its catalog entry or governed by its docs. A correlation fork now exposes only that correlation's events; nested correlations are started from the catalog and recorded with `parentCorrelationId`
+- Forks kept logging after their correlation completed, with nothing in the payload to show it. They now carry `correlationState`, and ambient emitters skip a finished correlation and flag `_validation.staleCorrelationId`
+- Starting too many correlations threw from inside request handling; the limit is now reported in `_validation` instead
 
 ## [1.0.4] - 2026-02-19
 

@@ -4,8 +4,7 @@
 
 import type { Request, Response } from 'express';
 
-import { chronicle } from '../services/chronicler.js';
-import { system } from '../events.js';
+import { chronicle, system } from '../services/chronicler.js';
 
 export const healthCheck = (_req: Request, res: Response) => {
   res.json({
@@ -15,18 +14,30 @@ export const healthCheck = (_req: Request, res: Response) => {
   });
 };
 
-export const healthDeep = async (_req: Request, res: Response) => {
-  // Simulate checking various services
-  const checks = {
-    database: true,
-    cache: true,
-    external: true,
-  };
+/** Simulate probing a dependency. */
+const probe = async (_dependency: string): Promise<boolean> => {
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  return true;
+};
 
-  const allHealthy = Object.values(checks).every((v) => v);
+export const healthDeep = async (_req: Request, res: Response) => {
+  const dependencies = ['database', 'cache', 'external'] as const;
+
+  // Probe dependencies in parallel. Each probe logs from its own fork of the request's
+  // correlation, so its events share the correlation id but get their own forkId (1, 2, 3).
+  const results = await Promise.all(
+    dependencies.map(async (dependency) => {
+      const fork = chronicle.fork({ dependency });
+      const healthy = await probe(dependency);
+      fork.system.dependencyChecked({ dependency, healthy });
+      return [dependency, healthy] as const;
+    }),
+  );
+  const checks = Object.fromEntries(results);
+  const allHealthy = results.every(([, healthy]) => healthy);
 
   if (!allHealthy) {
-    chronicle.event(system.events.error, {
+    system.error({
       error: new Error('Health check failed'),
       context: 'deep-health-check',
     });

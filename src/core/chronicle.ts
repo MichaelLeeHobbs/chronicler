@@ -1,9 +1,13 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import {
   callBackendMethod,
+  type CorrelationState,
   createConsoleBackend,
   type LogBackend,
   type LogPayload,
 } from './backend';
+import type { Chronicle, CorrelationHandle } from './chronicle-types';
 import {
   DEFAULT_MAX_ACTIVE_CORRELATIONS,
   DEFAULT_MAX_CONTEXT_KEYS,
@@ -14,18 +18,26 @@ import {
   type LogLevel,
   ROOT_FORK_ID,
 } from './constants';
-import { type ContextRecord, ContextStore, type ContextValidationResult } from './context';
+import { type ContextRecord, ContextStore } from './context';
+import { CorrelationTimer } from './correlation-timer';
 import { ChroniclerError } from './errors';
 import {
-  type CorrelationAutoEvents,
-  type CorrelationEventGroup,
-  defineCorrelationGroup,
-  type EventDefinition,
-  type EventFields,
-  type EventRecord,
+  type AnyCorrelationDefinition,
+  type AnyEventDefinition,
+  type CheckCatalog,
+  defineEvents,
+  isCorrelationDefinition,
+  isEventDefinition,
+  type LifecycleEvents,
+  lifecycleEvents,
 } from './events';
 import { assertNoReservedKeys } from './reserved';
-import { buildValidationMetadata, sanitizeLogFields, validateFields } from './validation';
+import {
+  buildValidationMetadata,
+  sanitizeLogFields,
+  validateFields,
+  type ValidationMetadata,
+} from './validation';
 
 export interface ChroniclerLimits {
   readonly maxContextKeys?: number;
@@ -35,12 +47,23 @@ export interface ChroniclerLimits {
    * Defaults to {@link DEFAULT_MAX_FORK_DEPTH}.
    */
   readonly maxForkDepth?: number;
+  /**
+   * Number of active correlations to track. Past it, new correlations still work but aren't
+   * counted, and their start event is flagged with `_validation.correlationLimitExceeded`.
+   */
   readonly maxActiveCorrelations?: number;
 }
 
-export interface ChroniclerConfig {
-  readonly backend?: LogBackend;
-  readonly metadata: ContextRecord;
+export interface ChroniclerConfig<C extends object = object> {
+  /** The event catalog, usually from `defineEvents()`. */
+  readonly events: C;
+  /**
+   * Where events go. Defaults to the console. Pass a function to create the backend lazily on
+   * the first event, e.g. when transports need config that isn't ready at import time.
+   */
+  readonly backend?: LogBackend | (() => LogBackend);
+  /** Context attached to every event. */
+  readonly metadata?: ContextRecord;
   readonly correlationIdGenerator?: () => string;
   readonly limits?: ChroniclerLimits;
   /**
@@ -57,454 +80,416 @@ export interface ChroniclerConfig {
   readonly minLevel?: LogLevel;
 }
 
-interface ResolvedLimits {
+interface ResolvedConfig {
+  readonly backend: () => LogBackend;
   readonly maxContextKeys: number;
   readonly maxForkDepth: number;
   readonly maxActiveCorrelations: number;
-}
-
-interface ResolvedChroniclerConfig {
-  readonly backend: LogBackend;
-  readonly limits: ResolvedLimits;
   readonly minLevel: number;
-  readonly strict?: boolean | undefined;
+  readonly strict: boolean;
+  readonly correlationIdGenerator: () => string;
 }
 
-export interface Chronicler {
-  /** Emit a typed event. Fields are validated against the event definition. */
-  event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
+type CorrelationStatus = 'active' | CorrelationState;
 
-  /**
-   * Untyped escape hatch — log at any level without a pre-defined event.
-   * Useful for incremental adoption or ad-hoc debugging.
-   */
-  log(level: LogLevel, message: string, fields?: Record<string, unknown>): void;
-
-  /** Add key-value context that is attached to all subsequent events. */
-  addContext(context: ContextRecord): ContextValidationResult;
-
-  /** Start a correlation — a logical unit of work with lifecycle events. */
-  startCorrelation(group: CorrelationEventGroup, metadata?: ContextRecord): CorrelationChronicle;
-
-  /** Create an isolated child chronicle that inherits context. */
-  fork(context?: ContextRecord): Chronicler;
+interface Correlation {
+  readonly id: string;
+  readonly parentId: string | undefined;
+  readonly rootId: string;
+  readonly lifecycle: LifecycleEvents;
+  readonly startedAt: number;
+  /** Scope the correlation was started from; the ambient fallback once it has finished. */
+  readonly outer: Scope;
+  timer: CorrelationTimer | undefined;
+  status: CorrelationStatus;
+  /** Whether this correlation counts toward `maxActiveCorrelations`. */
+  tracked: boolean;
 }
 
-/**
- * A correlation represents a logical unit of work with a defined lifecycle.
- *
- * Unlike a root Chronicler, a correlation:
- * - Has a single shared correlation ID for all events
- * - Has lifecycle events (start, complete, fail, timeout)
- * - Can timeout if not completed within the configured duration
- * - Cannot start nested correlations (use fork() for parallel work within a correlation)
- */
-export interface CorrelationChronicle {
-  /** Emit a typed event within this correlation. */
-  event<E extends EventDefinition>(event: E, fields: EventFields<E>): void;
+const isFinished = (correlation: Correlation): boolean =>
+  correlation.status === 'completed' || correlation.status === 'failed';
 
-  /**
-   * Untyped escape hatch — log at any level without a pre-defined event.
-   * Useful for incremental adoption or ad-hoc debugging.
-   */
-  log(level: LogLevel, message: string, fields?: Record<string, unknown>): void;
+/** Shared state of one chronicle: config, the ambient store and the correlation counter. */
+class Runtime {
+  private als: AsyncLocalStorage<Scope> | undefined;
+  activeCorrelations = 0;
 
-  /** Add key-value context that is attached to all subsequent events. */
-  addContext(context: ContextRecord): ContextValidationResult;
+  constructor(readonly config: ResolvedConfig) {}
 
-  /** Create an isolated child chronicle that inherits context. */
-  fork(context?: ContextRecord): Chronicler;
-
-  /** Mark the correlation as successfully completed. Emits the `.complete` event. */
-  complete(fields?: Record<string, unknown>): void;
-
-  /** Mark the correlation as failed. Emits the `.fail` event at error level. */
-  fail(error?: unknown, fields?: Record<string, unknown>): void;
-
-  /** Mark the correlation as timed out. Called automatically by the timer. */
-  timeout(): void;
-}
-
-interface BuildPayloadArgs {
-  readonly contextStore: ContextStore;
-  readonly eventDef: EventDefinition;
-  readonly fields: Record<string, unknown>;
-  readonly currentCorrelationId: () => string;
-  readonly forkId: string;
-  readonly strict?: boolean | undefined;
-}
-
-/**
- * Build a complete log payload from event definition and runtime data.
- * @internal
- * @param args - Payload construction arguments including context, event, and fields
- * @returns Assembled log payload ready for backend emission
- */
-const buildPayload = (args: BuildPayloadArgs): LogPayload => {
-  const fieldValidation = validateFields(args.eventDef, args.fields);
-
-  if (args.strict) {
-    const issues: string[] = [];
-    if (fieldValidation.missingFields.length > 0) {
-      issues.push(`missing required fields: ${fieldValidation.missingFields.join(', ')}`);
-    }
-    if (fieldValidation.typeErrors.length > 0) {
-      issues.push(`type errors on fields: ${fieldValidation.typeErrors.join(', ')}`);
-    }
-    if (fieldValidation.invalidValues.length > 0) {
-      issues.push(`invalid values on fields: ${fieldValidation.invalidValues.join(', ')}`);
-    }
-    if (issues.length > 0) {
-      throw new ChroniclerError(
-        'FIELD_VALIDATION',
-        `Event "${args.eventDef.key}" failed validation: ${issues.join('; ')}`,
-      );
-    }
+  /** Run `fn` with `scope` ambient. The store is created on first use, so apps that never call `run` pay nothing. */
+  runIn<T>(scope: Scope, fn: () => T): T {
+    this.als ??= new AsyncLocalStorage<Scope>();
+    return this.als.run(scope, fn);
   }
 
-  const validationMetadata = buildValidationMetadata(fieldValidation);
+  /**
+   * The scope that ambient emitters log to: the ambient scope, or `root`. Finished
+   * correlations are skipped and reported as `staleId`.
+   */
+  current(root: Scope): ResolvedScope {
+    let scope = this.als?.getStore() ?? root;
+    let staleId: string | undefined;
+    while (scope.correlation !== undefined && isFinished(scope.correlation)) {
+      staleId ??= scope.correlation.id;
+      scope = scope.correlation.outer;
+    }
+    return staleId === undefined ? { scope } : { scope, staleId };
+  }
+}
 
-  return {
-    eventKey: args.eventDef.key,
-    fields: fieldValidation.normalizedFields,
-    correlationId: args.currentCorrelationId(),
-    forkId: args.forkId,
-    metadata: args.contextStore.snapshot(),
-    timestamp: new Date().toISOString(),
-    ...(validationMetadata ? { _validation: validationMetadata } : {}),
-  };
-};
+interface ResolvedScope {
+  readonly scope: Scope;
+  readonly staleId?: string;
+}
 
-/** Compute fork nesting depth from a dotted fork ID. */
-const forkDepthFromId = (forkId: string): number =>
-  forkId === ROOT_FORK_ID ? 0 : forkId.split(FORK_ID_SEPARATOR).length;
+const staleMetadata = (staleId: string | undefined): ValidationMetadata | undefined =>
+  staleId === undefined ? undefined : { staleCorrelationId: staleId };
 
-/**
- * Derive the next child fork ID and enforce depth limits.
- * @throws {ChroniclerError} `FORK_DEPTH_EXCEEDED` if the new depth exceeds maxDepth
- */
-const nextForkId = (parentForkId: string, counter: number, maxDepth: number): string => {
-  const childForkId =
-    parentForkId === ROOT_FORK_ID
-      ? String(counter)
-      : `${parentForkId}${FORK_ID_SEPARATOR}${counter}`;
-  const depth = forkDepthFromId(childForkId);
-  if (depth > maxDepth) {
+const mergeValidation = (
+  a: ValidationMetadata | undefined,
+  b: ValidationMetadata | undefined,
+): ValidationMetadata | undefined => (a && b ? { ...a, ...b } : (a ?? b));
+
+const assertValid = (def: AnyEventDefinition, result: ReturnType<typeof validateFields>): void => {
+  const issues: string[] = [];
+  if (result.missingFields.length > 0) {
+    issues.push(`missing required fields: ${result.missingFields.join(', ')}`);
+  }
+  if (result.typeErrors.length > 0) {
+    issues.push(`type errors on fields: ${result.typeErrors.join(', ')}`);
+  }
+  if (result.invalidValues.length > 0) {
+    issues.push(`invalid values on fields: ${result.invalidValues.join(', ')}`);
+  }
+  if (issues.length > 0) {
     throw new ChroniclerError(
-      'FORK_DEPTH_EXCEEDED',
-      `Fork depth ${depth} exceeds maximum allowed depth of ${maxDepth}`,
+      'FIELD_VALIDATION',
+      `Event "${def.key}" failed validation: ${issues.join('; ')}`,
     );
   }
-  return childForkId;
-};
-
-interface ChronicleHooks {
-  readonly onActivity?: () => void;
-}
-
-type NormalizedCorrelationGroup = Omit<CorrelationEventGroup, 'events' | 'timeout'> & {
-  readonly timeout: number;
-  readonly events: EventRecord & CorrelationAutoEvents;
-};
-
-/** Guard: returns true if the group has already been processed by defineCorrelationGroup. */
-const isAlreadyNormalized = (group: CorrelationEventGroup): group is NormalizedCorrelationGroup =>
-  typeof group.timeout === 'number' && group.events !== undefined && 'start' in group.events;
-
-/** Normalize a correlation group, skipping if already processed to avoid collision false-positives. */
-const resolveCorrelationGroup = (group: CorrelationEventGroup): NormalizedCorrelationGroup =>
-  isAlreadyNormalized(group)
-    ? group
-    : (defineCorrelationGroup(group) as NormalizedCorrelationGroup);
-
-interface ChronicleInstanceArgs {
-  readonly config: ResolvedChroniclerConfig;
-  readonly contextStore: ContextStore;
-  /** Returns the current correlation ID for this chronicle. */
-  readonly currentCorrelationId: () => string;
-  /** Creates NEW correlation IDs for startCorrelation(). */
-  readonly correlationIdGenerator: () => string;
-  readonly forkId: string;
-  readonly hooks?: ChronicleHooks;
-  readonly activeCorrelations?: { count: number };
-}
-
-// eslint-disable-next-line max-lines-per-function -- Accepted deviation: object-literal constructor, splitting reduces readability
-const createChronicleInstance = (args: ChronicleInstanceArgs): Chronicler => {
-  const {
-    config,
-    contextStore,
-    currentCorrelationId,
-    correlationIdGenerator,
-    forkId,
-    hooks = {},
-    activeCorrelations = { count: 0 },
-  } = args;
-  /** Monotonically increasing counter for generating unique child fork IDs. */
-  let forkCounter = 0;
-
-  return {
-    event(eventDef, fields) {
-      if (LOG_LEVELS[eventDef.level] > config.minLevel) return;
-      const payload = buildPayload({
-        contextStore,
-        eventDef,
-        // Deliberate type erasure: EventFields<E> → Record<string, unknown>
-        fields: fields as Record<string, unknown>,
-        currentCorrelationId,
-        forkId,
-        strict: config.strict,
-      });
-      callBackendMethod(config.backend, eventDef.level, eventDef.message, payload);
-      hooks.onActivity?.();
-    },
-    log(level, message, fields = {}) {
-      if (LOG_LEVELS[level] > config.minLevel) return;
-      const payload: LogPayload = {
-        eventKey: '',
-        fields: sanitizeLogFields(fields),
-        correlationId: currentCorrelationId(),
-        forkId,
-        metadata: contextStore.snapshot(),
-        timestamp: new Date().toISOString(),
-      };
-      callBackendMethod(config.backend, level, message, payload);
-      hooks.onActivity?.();
-    },
-    addContext(context) {
-      return contextStore.add(context);
-    },
-    fork(extraContext = {}) {
-      forkCounter++;
-      const childForkId = nextForkId(forkId, forkCounter, config.limits.maxForkDepth);
-      const forkStore = new ContextStore(contextStore.snapshot(), config.limits.maxContextKeys);
-      const forkChronicle = createChronicleInstance({
-        config,
-        contextStore: forkStore,
-        currentCorrelationId,
-        correlationIdGenerator,
-        forkId: childForkId,
-        hooks,
-        activeCorrelations,
-      });
-      if (Object.keys(extraContext).length > 0) {
-        forkChronicle.addContext(extraContext);
-      }
-      return forkChronicle;
-    },
-    startCorrelation(group, metadata = {}) {
-      if (activeCorrelations.count >= config.limits.maxActiveCorrelations) {
-        throw new ChroniclerError(
-          'CORRELATION_LIMIT_EXCEEDED',
-          `Active correlation limit of ${config.limits.maxActiveCorrelations} exceeded`,
-        );
-      }
-      const definedGroup = resolveCorrelationGroup(group);
-      activeCorrelations.count++;
-      const correlationStore = new ContextStore(
-        contextStore.snapshot(),
-        config.limits.maxContextKeys,
-      );
-      if (Object.keys(metadata).length > 0) {
-        correlationStore.add(metadata);
-      }
-      const correlationId = correlationIdGenerator();
-      return new CorrelationChronicleImpl({
-        config,
-        group: definedGroup,
-        contextStore: correlationStore,
-        currentCorrelationId: () => correlationId,
-        correlationIdGenerator,
-        forkId,
-        activeCorrelations,
-      });
-    },
-  };
 };
 
 /**
- * Auto-reset timeout for correlation groups.
- * Resets on any activity; invokes callback if idle for the configured duration.
+ * One logging scope: a context store, a fork id and an optional correlation.
+ * The root chronicle, forks and correlations are all scopes.
  */
-export class CorrelationTimer {
-  private timeoutId: NodeJS.Timeout | undefined;
-
-  constructor(
-    private readonly timeout: number,
-    private readonly onTimeout: () => void,
-  ) {}
-
-  start(): void {
-    this.clear();
-    if (this.timeout > 0) {
-      this.timeoutId = setTimeout(this.onTimeout, this.timeout);
-      this.timeoutId.unref();
-    }
-  }
-
-  /** Reset the timer (keep-alive on activity). */
-  touch(): void {
-    this.start();
-  }
-
-  clear(): void {
-    if (this.timeoutId !== undefined) {
-      clearTimeout(this.timeoutId);
-      this.timeoutId = undefined;
-    }
-  }
-}
-
-interface CorrelationChronicleArgs {
-  readonly config: ResolvedChroniclerConfig;
-  readonly group: NormalizedCorrelationGroup;
-  readonly contextStore: ContextStore;
-  readonly currentCorrelationId: () => string;
-  readonly correlationIdGenerator: () => string;
-  readonly forkId: string;
-  readonly activeCorrelations?: { count: number };
-}
-
-class CorrelationChronicleImpl implements CorrelationChronicle {
-  private readonly config: ResolvedChroniclerConfig;
-  private readonly contextStore: ContextStore;
-  private readonly currentCorrelationId: () => string;
-  private readonly correlationIdGenerator: () => string;
-  private readonly forkId: string;
-  private readonly activeCorrelations: { count: number };
-  private readonly timer: CorrelationTimer;
-  private completed = false;
-  private readonly startedAt = Date.now();
-  private readonly autoEvents: CorrelationAutoEvents;
+class Scope {
   private forkCounter = 0;
 
-  constructor(args: CorrelationChronicleArgs) {
-    this.config = args.config;
-    this.contextStore = args.contextStore;
-    this.currentCorrelationId = args.currentCorrelationId;
-    this.correlationIdGenerator = args.correlationIdGenerator;
-    this.forkId = args.forkId;
-    this.activeCorrelations = args.activeCorrelations ?? { count: 0 };
-    this.timer = new CorrelationTimer(args.group.timeout, () => this.timeout());
-    this.autoEvents = args.group.events as CorrelationAutoEvents;
-    this.timer.start();
-    this.emitAutoEvent(this.autoEvents.start, {});
-  }
+  constructor(
+    readonly runtime: Runtime,
+    readonly context: ContextStore,
+    readonly forkId: string,
+    readonly correlation: Correlation | undefined,
+  ) {}
 
-  event<E extends EventDefinition>(eventDef: E, fields: EventFields<E>): void {
-    if (this.completed) return;
-    if (LOG_LEVELS[eventDef.level] > this.config.minLevel) return;
-    const payload = buildPayload({
-      contextStore: this.contextStore,
-      eventDef,
-      // Deliberate type erasure: EventFields<E> → Record<string, unknown>
-      fields: fields as Record<string, unknown>,
-      currentCorrelationId: this.currentCorrelationId,
-      forkId: this.forkId,
-      strict: this.config.strict,
-    });
-    callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
-    this.timer.touch();
-  }
-
-  log(level: LogLevel, message: string, fields: Record<string, unknown> = {}): void {
-    if (this.completed) return;
-    if (LOG_LEVELS[level] > this.config.minLevel) return;
+  /** Log an event defined in the catalog. */
+  emit(
+    def: AnyEventDefinition,
+    fields: Record<string, unknown> | undefined,
+    extra?: ValidationMetadata,
+    reportedStatus: CorrelationStatus | undefined = this.correlation?.status,
+  ): void {
+    const { config } = this.runtime;
+    if (LOG_LEVELS[def.level] > config.minLevel) return;
+    const result = validateFields(def, fields);
+    if (config.strict) assertValid(def, result);
+    const validation = mergeValidation(buildValidationMetadata(result), extra);
     const payload: LogPayload = {
-      eventKey: '',
-      fields: sanitizeLogFields(fields),
-      correlationId: this.currentCorrelationId(),
+      ...this.basePayload(def.key, result.normalizedFields, reportedStatus),
+      ...(validation ? { _validation: validation } : {}),
+    };
+    callBackendMethod(config.backend(), def.level, def.message, payload);
+    this.touch();
+  }
+
+  /** Untyped escape hatch. */
+  log(level: LogLevel, message: string, fields: Record<string, unknown>, staleId?: string): void {
+    const { config } = this.runtime;
+    if (LOG_LEVELS[level] > config.minLevel) return;
+    const validation = staleMetadata(staleId);
+    const payload: LogPayload = {
+      ...this.basePayload('', sanitizeLogFields(fields), this.correlation?.status),
+      ...(validation ? { _validation: validation } : {}),
+    };
+    callBackendMethod(config.backend(), level, message, payload);
+    this.touch();
+  }
+
+  /** Create a child scope with the next fork id. */
+  fork(context: ContextRecord = {}): Scope {
+    const { config } = this.runtime;
+    this.forkCounter++;
+    const childForkId =
+      this.forkId === ROOT_FORK_ID
+        ? String(this.forkCounter)
+        : `${this.forkId}${FORK_ID_SEPARATOR}${this.forkCounter}`;
+    const depth = childForkId.split(FORK_ID_SEPARATOR).length;
+    if (depth > config.maxForkDepth) {
+      throw new ChroniclerError(
+        'FORK_DEPTH_EXCEEDED',
+        `Fork depth ${depth} exceeds maximum allowed depth of ${config.maxForkDepth}`,
+      );
+    }
+    const { store } = this.context.derive(context);
+    this.touch();
+    return new Scope(this.runtime, store, childForkId, this.correlation);
+  }
+
+  /** Start a correlation from this scope. Nested when this scope is inside an unfinished correlation. */
+  startCorrelation(def: AnyCorrelationDefinition, context: ContextRecord = {}): Scope {
+    const runtime = this.runtime;
+    const { config } = runtime;
+    const parent =
+      this.correlation !== undefined && !isFinished(this.correlation)
+        ? this.correlation
+        : undefined;
+    const tracked = runtime.activeCorrelations < config.maxActiveCorrelations;
+    if (tracked) runtime.activeCorrelations++;
+    const id = config.correlationIdGenerator();
+    const correlation: Correlation = {
+      id,
+      parentId: parent?.id,
+      rootId: parent?.rootId ?? id,
+      lifecycle: lifecycleEvents(def.key),
+      startedAt: Date.now(),
+      outer: this,
+      timer: undefined,
+      status: 'active',
+      tracked,
+    };
+    const scope = new Scope(runtime, this.context.derive(context).store, this.forkId, correlation);
+    correlation.timer = new CorrelationTimer(def.timeout, () => scope.endCorrelation('timedOut'));
+    correlation.timer.start();
+    scope.emit(
+      correlation.lifecycle.start,
+      {},
+      tracked ? undefined : { correlationLimitExceeded: true },
+    );
+    return scope;
+  }
+
+  /**
+   * End this scope's correlation. `complete()` and `fail()` are accepted once, also after a
+   * timeout (a late end reports the real duration); a timeout only fires while active.
+   */
+  endCorrelation(status: CorrelationState, error?: unknown, fields: Record<string, unknown> = {}) {
+    const correlation = this.correlation;
+    const previous = correlation && this.release(correlation, status);
+    if (correlation === undefined || previous === undefined) return;
+    const { lifecycle } = correlation;
+    if (status === 'timedOut') {
+      this.emit(lifecycle.timeout, {}, undefined, previous);
+      return;
+    }
+    const duration = Date.now() - correlation.startedAt;
+    const errorField =
+      status === 'failed' && error !== undefined ? { error: describeError(error) } : {};
+    const def = status === 'completed' ? lifecycle.complete : lifecycle.fail;
+    this.emit(def, { duration, ...errorField, ...fields }, undefined, previous);
+  }
+
+  /** Move a correlation to `status`. Returns its previous status, or `undefined` if the move isn't allowed. */
+  private release(
+    correlation: Correlation,
+    status: CorrelationState,
+  ): CorrelationStatus | undefined {
+    if (isFinished(correlation)) return undefined;
+    if (status === 'timedOut' && correlation.status !== 'active') return undefined;
+    const previous = correlation.status;
+    correlation.timer?.clear();
+    if (correlation.tracked) {
+      this.runtime.activeCorrelations--;
+      correlation.tracked = false;
+    }
+    correlation.status = status;
+    return previous;
+  }
+
+  private touch(): void {
+    if (this.correlation?.status === 'active') this.correlation.timer?.touch();
+  }
+
+  private basePayload(
+    eventKey: string,
+    fields: Record<string, unknown>,
+    status: CorrelationStatus | undefined,
+  ): LogPayload {
+    const correlation = this.correlation;
+    return {
+      eventKey,
+      fields,
+      correlationId: correlation?.id ?? '',
+      ...(correlation?.parentId !== undefined ? { parentCorrelationId: correlation.parentId } : {}),
+      ...(correlation !== undefined ? { rootCorrelationId: correlation.rootId } : {}),
+      ...(status !== undefined && status !== 'active' ? { correlationState: status } : {}),
       forkId: this.forkId,
-      metadata: this.contextStore.snapshot(),
+      metadata: this.context.snapshot(),
       timestamp: new Date().toISOString(),
     };
-    callBackendMethod(this.config.backend, level, message, payload);
-    this.timer.touch();
-  }
-
-  addContext(context: ContextRecord): ContextValidationResult {
-    return this.contextStore.add(context);
-  }
-
-  fork(extraContext: ContextRecord = {}): Chronicler {
-    this.forkCounter++;
-    const childForkId = nextForkId(this.forkId, this.forkCounter, this.config.limits.maxForkDepth);
-    const forkStore = new ContextStore(
-      this.contextStore.snapshot(),
-      this.config.limits.maxContextKeys,
-    );
-
-    const forkChronicle = createChronicleInstance({
-      config: this.config,
-      contextStore: forkStore,
-      currentCorrelationId: this.currentCorrelationId,
-      correlationIdGenerator: this.correlationIdGenerator,
-      forkId: childForkId,
-      hooks: { onActivity: () => this.timer.touch() },
-      activeCorrelations: this.activeCorrelations,
-    });
-
-    if (Object.keys(extraContext).length > 0) {
-      forkChronicle.addContext(extraContext);
-    }
-
-    return forkChronicle;
-  }
-
-  complete(fields: Record<string, unknown> = {}): void {
-    if (!this.finalize()) return;
-    this.emitAutoEvent(this.autoEvents.complete, {
-      duration: Date.now() - this.startedAt,
-      ...fields,
-    });
-  }
-
-  fail(error?: unknown, fields: Record<string, unknown> = {}): void {
-    if (!this.finalize()) return;
-    this.emitAutoEvent(this.autoEvents.fail, {
-      duration: Date.now() - this.startedAt,
-      error,
-      ...fields,
-    });
-  }
-
-  timeout(): void {
-    if (!this.finalize()) return;
-    this.emitAutoEvent(this.autoEvents.timeout, {});
-  }
-
-  /** Mark correlation as done: decrement counter, clear timer. Returns false if already completed. */
-  private finalize(): boolean {
-    if (this.completed) return false;
-    this.activeCorrelations.count--;
-    this.completed = true;
-    this.timer.clear();
-    return true;
-  }
-
-  private emitAutoEvent(eventDef: EventDefinition, fields: Record<string, unknown>): void {
-    if (LOG_LEVELS[eventDef.level] > this.config.minLevel) return;
-    const payload = buildPayload({
-      contextStore: this.contextStore,
-      eventDef,
-      fields,
-      currentCorrelationId: this.currentCorrelationId,
-      forkId: this.forkId,
-      strict: this.config.strict,
-    });
-    callBackendMethod(this.config.backend, eventDef.level, eventDef.message, payload);
   }
 }
 
-/** Validate and resolve user-provided config into fully-resolved internal config. */
-const resolveChroniclerConfig = (
-  config: ChroniclerConfig,
-  // eslint-disable-next-line complexity -- config resolution requires checking all option paths
-): { resolved: ResolvedChroniclerConfig; correlationIdGenerator: () => string } => {
-  const resolvedBackend = config.backend ?? createConsoleBackend();
+type Resolve = () => ResolvedScope;
 
+/** Turn any thrown value into something the `error` field accepts, so the reason isn't lost. */
+const describeError = (error: unknown): Error | string => {
+  if (error instanceof Error || typeof error === 'string') return error;
+  try {
+    return JSON.stringify(error) ?? String(error);
+  } catch {
+    return String(error);
+  }
+};
+
+/** Fail a correlation from an error path; never let logging replace or add to the caller's error. */
+const failQuietly = (handle: Handle, err: unknown): void => {
+  try {
+    handle.fail(err);
+  } catch {
+    // Logging must not mask the caller's error or cause an unhandled rejection.
+  }
+};
+
+const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
+  (typeof value === 'object' || typeof value === 'function') &&
+  value !== null &&
+  typeof (value as { then?: unknown }).then === 'function';
+
+const makeEmitter = (def: AnyEventDefinition, resolve: Resolve) => {
+  const emitter = (fields?: Record<string, unknown>): void => {
+    const { scope, staleId } = resolve();
+    scope.emit(def, fields, staleMetadata(staleId));
+  };
+  Object.defineProperty(emitter, 'key', { value: def.key, enumerable: true });
+  return emitter;
+};
+
+type Handle = CorrelationHandle<object>;
+
+/** Run `fn` with the correlation ambient; fail the correlation if `fn` throws or rejects. */
+const runCorrelation = <T>(handle: Handle, fn: (handle: Handle) => T): T => {
+  let result: T;
+  try {
+    result = handle.run(() => fn(handle));
+  } catch (err: unknown) {
+    failQuietly(handle, err);
+    throw err;
+  }
+  if (isPromiseLike(result)) {
+    result.then(undefined, (err: unknown) => failQuietly(handle, err));
+  }
+  return result;
+};
+
+const makeStarter = (def: AnyCorrelationDefinition, resolve: Resolve) => {
+  const begin = (context?: ContextRecord): Handle =>
+    makeCorrelationTree(def, resolve().scope.startCorrelation(def, context), true) as Handle;
+  return {
+    key: def.key,
+    begin,
+    run: <T>(
+      contextOrFn: ContextRecord | ((handle: Handle) => T),
+      maybeFn?: (handle: Handle) => T,
+    ): T => {
+      const [context, fn] =
+        typeof contextOrFn === 'function' ? [undefined, contextOrFn] : [contextOrFn, maybeFn];
+      if (fn === undefined) {
+        throw new TypeError('run() requires a function');
+      }
+      return runCorrelation(begin(context), fn);
+    },
+  };
+};
+
+/**
+ * Bind every event and correlation under `node` into `target`. Namespaces are bound lazily, on
+ * first access, so forks of a large catalog stay cheap.
+ */
+const bindNode = (node: object, resolve: Resolve, target: Record<string, unknown>): void => {
+  for (const [name, child] of Object.entries(node as Record<string, unknown>)) {
+    if (isEventDefinition(child)) {
+      target[name] = makeEmitter(child, resolve);
+    } else if (isCorrelationDefinition(child)) {
+      target[name] = makeStarter(child, resolve);
+    } else {
+      Object.defineProperty(target, name, {
+        enumerable: true,
+        configurable: true,
+        get() {
+          const bound: Record<string, unknown> = {};
+          bindNode(child as object, resolve, bound);
+          Object.defineProperty(target, name, { value: bound, enumerable: true });
+          return bound;
+        },
+      });
+    }
+  }
+};
+
+const addScopeMethods = (
+  tree: Record<string, unknown>,
+  resolve: Resolve,
+  runScope: () => Scope,
+  fork: (scope: Scope, context?: ContextRecord) => unknown,
+): void => {
+  tree.fork = (context?: ContextRecord) => fork(resolve().scope, context);
+  tree.run = <T>(fn: () => T): T => {
+    const scope = runScope();
+    return scope.runtime.runIn(scope, fn);
+  };
+  tree.log = (level: LogLevel, message: string, fields: Record<string, unknown> = {}) => {
+    const { scope, staleId } = resolve();
+    scope.log(level, message, fields, staleId);
+  };
+  tree.addContext = (context: ContextRecord) => resolve().scope.context.add(context);
+};
+
+const makeCorrelationTree = (
+  def: AnyCorrelationDefinition,
+  scope: Scope,
+  withLifecycle: boolean,
+): Record<string, unknown> => {
+  const resolve: Resolve = () => ({ scope });
+  const tree: Record<string, unknown> = {};
+  bindNode(def.events, resolve, tree);
+  tree.correlationId = scope.correlation?.id ?? '';
+  addScopeMethods(
+    tree,
+    resolve,
+    () => scope,
+    (from, context) => makeCorrelationTree(def, from.fork(context), false),
+  );
+  if (withLifecycle) {
+    tree.complete = (fields?: Record<string, unknown>) =>
+      scope.endCorrelation('completed', undefined, fields);
+    tree.fail = (error?: unknown, fields?: Record<string, unknown>) =>
+      scope.endCorrelation('failed', error, fields);
+  }
+  return tree;
+};
+
+const makeChronicleTree = (
+  catalog: object,
+  resolve: Resolve,
+  runScope: () => Scope,
+): Record<string, unknown> => {
+  const tree: Record<string, unknown> = {};
+  bindNode(catalog, resolve, tree);
+  addScopeMethods(tree, resolve, runScope, (from, context) => {
+    const child = from.fork(context);
+    return makeChronicleTree(
+      catalog,
+      () => ({ scope: child }),
+      () => child,
+    );
+  });
+  return tree;
+};
+
+const checkBackend = (backend: LogBackend): LogBackend => {
   const missingLevels = DEFAULT_REQUIRED_LEVELS.filter(
-    (level) => typeof resolvedBackend[level] !== 'function',
+    (level) => typeof backend[level] !== 'function',
   );
   if (missingLevels.length > 0) {
     throw new ChroniclerError(
@@ -512,54 +497,70 @@ const resolveChroniclerConfig = (
       `Log backend is missing level(s): ${missingLevels.join(', ')}. A valid backend must implement all 9 levels: ${DEFAULT_REQUIRED_LEVELS.join(', ')}. Use createBackend() for automatic fallback handling.`,
     );
   }
+  return backend;
+};
 
-  const reservedMetadata = assertNoReservedKeys(config.metadata);
+const resolveBackend = (backend: ChroniclerConfig['backend']): (() => LogBackend) => {
+  if (typeof backend === 'function') {
+    let resolved: LogBackend | undefined;
+    return () => (resolved ??= checkBackend(backend()));
+  }
+  const resolved = checkBackend(backend ?? createConsoleBackend());
+  return () => resolved;
+};
+
+// eslint-disable-next-line complexity -- config resolution checks each optional setting
+const resolveConfig = (config: ChroniclerConfig): ResolvedConfig => {
+  const reservedMetadata = assertNoReservedKeys(config.metadata ?? {});
   if (reservedMetadata.length > 0) {
     throw new ChroniclerError(
       'RESERVED_FIELD',
       `Reserved fields cannot be used in metadata: ${reservedMetadata.join(', ')}`,
     );
   }
-
-  const resolvedLimits: ResolvedLimits = {
+  return {
+    backend: resolveBackend(config.backend),
     maxContextKeys: config.limits?.maxContextKeys ?? DEFAULT_MAX_CONTEXT_KEYS,
     maxForkDepth: config.limits?.maxForkDepth ?? DEFAULT_MAX_FORK_DEPTH,
     maxActiveCorrelations: config.limits?.maxActiveCorrelations ?? DEFAULT_MAX_ACTIVE_CORRELATIONS,
-  };
-
-  return {
-    resolved: {
-      backend: resolvedBackend,
-      limits: resolvedLimits,
-      minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],
-      strict: config.strict,
-    },
+    minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],
+    strict: config.strict ?? false,
     correlationIdGenerator: config.correlationIdGenerator ?? (() => crypto.randomUUID()),
   };
 };
 
 /**
- * Create a root Chronicler instance.
+ * Create a chronicle: the typed emitter tree for an event catalog.
  *
- * This is the main entry point for the library. The returned `Chronicler`
- * can log events, add context, start correlations, and create forks.
+ * @example
+ * ```typescript
+ * export const chronicle = createChronicle({ events, backend, metadata: { service: 'api' } });
+ * export const { admin, http } = chronicle;
  *
- * @param config - Chronicler configuration with optional backend, metadata, and optional correlation settings
- * @returns A configured `Chronicler` instance
+ * admin.login({ userId: 'u-1', success: true });
+ * ```
+ *
+ * @param config - The catalog plus backend, metadata, limits and validation options
+ * @returns The emitter tree with `fork`, `run`, `log` and `addContext`
+ * @throws {ChroniclerError} `INVALID_CATALOG` if the catalog is malformed
  * @throws {ChroniclerError} `UNSUPPORTED_LOG_LEVEL` if the backend is missing required methods
  * @throws {ChroniclerError} `RESERVED_FIELD` if `config.metadata` contains reserved field names
  */
-export const createChronicle = (config: ChroniclerConfig): Chronicler => {
-  const { resolved, correlationIdGenerator } = resolveChroniclerConfig(config);
-  const baseContextStore = new ContextStore(config.metadata, resolved.limits.maxContextKeys);
-
-  return createChronicleInstance({
-    config: resolved,
-    contextStore: baseContextStore,
-    currentCorrelationId: () => '',
-    correlationIdGenerator,
-    forkId: ROOT_FORK_ID,
-    /** Shared mutable counter tracking uncompleted correlations for limit enforcement. */
-    activeCorrelations: { count: 0 },
-  });
+export const createChronicle = <const C extends object>(
+  config: ChroniclerConfig<C> & { readonly events: CheckCatalog<C> },
+): Chronicle<C> => {
+  const catalog = defineEvents(config.events as object);
+  const resolved = resolveConfig(config);
+  const runtime = new Runtime(resolved);
+  const root = new Scope(
+    runtime,
+    new ContextStore(config.metadata ?? {}, resolved.maxContextKeys),
+    ROOT_FORK_ID,
+    undefined,
+  );
+  return makeChronicleTree(
+    catalog,
+    () => runtime.current(root),
+    () => root,
+  ) as Chronicle<C>;
 };

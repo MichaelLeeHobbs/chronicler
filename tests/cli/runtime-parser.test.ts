@@ -2,147 +2,306 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { parseEventsFile } from '../../src/cli/parser/runtime-parser';
+import { parseEventsFile, parseEventsModule } from '../../src/cli/parser/runtime-parser';
 import { validateEventTree } from '../../src/cli/parser/validator';
+import type { ParsedEvent, ParsedEventTree } from '../../src/cli/types';
+import { correlation, defineEvents, event, field } from '../../src/index';
+
+const fixturesPath = path.join(__dirname, 'fixtures');
+const fixture = (name: string) => path.join(fixturesPath, name);
+
+const makeEvent = (overrides: Partial<ParsedEvent> = {}): ParsedEvent => ({
+  key: 'test.event',
+  path: 'test.event',
+  level: 'info',
+  message: 'test',
+  doc: 'test',
+  fields: {},
+  lifecycle: false,
+  ...overrides,
+});
+
+const makeTree = (overrides: Partial<ParsedEventTree> = {}): ParsedEventTree => ({
+  events: [],
+  groups: [],
+  rootEvents: [],
+  catalogExports: ['events'],
+  errors: [],
+  ...overrides,
+});
 
 describe('Runtime Parser', () => {
-  const fixturesPath = path.join(__dirname, 'fixtures');
-
   describe('parseEventsFile', () => {
-    it('parses valid event definitions', async () => {
-      const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = await parseEventsFile(filePath);
+    it('parses a valid catalog', async () => {
+      const tree = await parseEventsFile(fixture('valid-events.ts'));
 
-      expect(tree.events.length).toBeGreaterThan(0);
-      expect(tree.errors.length).toBe(0);
+      expect(tree.errors).toHaveLength(0);
+      expect(tree.catalogExports).toEqual(['events']);
 
-      // Check that we found the startup event
-      const startupEvent = tree.events.find((e) => e.key === 'system.startup');
-      expect(startupEvent).toBeDefined();
-      expect(startupEvent?.level).toBe('info');
-      expect(startupEvent?.message).toBe('Application started');
-      expect(startupEvent?.fields).toBeDefined();
-      expect(startupEvent?.fields?.port).toBeDefined();
-      expect(startupEvent!.fields!.port!._type).toBe('number');
-      expect(startupEvent!.fields!.port!._required).toBe(true);
+      const startup = tree.events.find((e) => e.key === 'system.startup');
+      expect(startup).toBeDefined();
+      expect(startup?.level).toBe('info');
+      expect(startup?.message).toBe('Application started');
+      expect(startup?.fields.port).toEqual({ type: 'number', required: true, doc: 'Server port' });
+      expect(startup?.fields.mode).toEqual({
+        type: 'string',
+        required: false,
+        doc: 'Runtime mode',
+      });
     });
 
-    it('extracts all event properties correctly', async () => {
-      const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = await parseEventsFile(filePath);
+    it('dedupes a catalog exported under two names (named + default)', async () => {
+      const tree = await parseEventsFile(fixture('valid-events.ts'));
 
-      const queryEvent = tree.events.find((e) => e.key === 'api.query.executed');
-      expect(queryEvent).toBeDefined();
-      expect(queryEvent?.key).toBe('api.query.executed');
-      expect(queryEvent?.level).toBe('info');
-      expect(queryEvent?.message).toBe('Query executed');
-      expect(queryEvent?.doc).toBe('Logged when query completes');
-      expect(queryEvent?.fields).toBeDefined();
-      expect(Object.keys(queryEvent?.fields ?? {})).toHaveLength(2);
+      expect(tree.catalogExports).toEqual(['events']);
+      expect(tree.events.filter((e) => e.key === 'system.startup')).toHaveLength(1);
     });
 
-    it('extracts event groups', async () => {
-      const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = await parseEventsFile(filePath);
+    it('lists every event, including correlation lifecycle events', async () => {
+      const tree = await parseEventsFile(fixture('valid-events.ts'));
 
-      expect(tree.groups.length).toBeGreaterThanOrEqual(2);
-
-      const systemGroup = tree.groups.find((g) => g.key === 'system');
-      expect(systemGroup).toBeDefined();
-      expect(systemGroup?.type).toBe('system');
-      expect(systemGroup?.doc).toBe('System-level events');
+      expect(tree.events.map((e) => e.key)).toEqual([
+        'system.startup',
+        'system.shutdown',
+        'api.query.start',
+        'api.query.complete',
+        'api.query.fail',
+        'api.query.timeout',
+        'api.query.executed',
+      ]);
+      const lifecycle = tree.events.filter((e) => e.lifecycle);
+      expect(lifecycle).toHaveLength(4);
+      expect(lifecycle.every((e) => e.correlationKey === 'api.query')).toBe(true);
     });
 
-    it('extracts correlation groups with timeout', async () => {
-      const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = await parseEventsFile(filePath);
+    it('builds namespaces with group() docs', async () => {
+      const tree = await parseEventsFile(fixture('valid-events.ts'));
 
-      const queryGroup = tree.groups.find((g) => g.key === 'api.query');
-      expect(queryGroup).toBeDefined();
-      expect(queryGroup?.type).toBe('correlation');
-      expect(queryGroup?.doc).toBe('API query operations');
-      expect(queryGroup?.timeout).toBe(30000);
+      const system = tree.groups.find((g) => g.key === 'system');
+      expect(system?.kind).toBe('namespace');
+      expect(system?.doc).toBe('System-level events');
+      expect(Object.keys(system!.events)).toEqual(['startup', 'shutdown']);
     });
 
-    it('extracts inline events within groups', async () => {
-      const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = await parseEventsFile(filePath);
+    it('nests correlations with timeout and lifecycle events under their namespace', async () => {
+      const tree = await parseEventsFile(fixture('valid-events.ts'));
 
-      const queryGroup = tree.groups.find((g) => g.key === 'api.query');
-      expect(queryGroup).toBeDefined();
-      expect(Object.keys(queryGroup!.events)).toContain('executed');
+      const api = tree.groups.find((g) => g.key === 'api');
+      expect(api?.kind).toBe('namespace');
+      expect(api?.doc).toBe('');
 
-      const executed = queryGroup!.events.executed;
-      expect(executed).toBeDefined();
-      expect(executed?.key).toBe('api.query.executed');
-      expect(executed?.level).toBe('info');
-      expect(executed?.fields).toBeDefined();
-      expect(Object.keys(executed?.fields ?? {})).toHaveLength(2);
+      const query = api!.groups.query!;
+      expect(query.kind).toBe('correlation');
+      expect(query.key).toBe('api.query');
+      expect(query.doc).toBe('API query operations');
+      expect(query.timeout).toBe(30000);
+      expect(query.lifecycleEvents.map((e) => e.key)).toEqual([
+        'api.query.start',
+        'api.query.complete',
+        'api.query.fail',
+        'api.query.timeout',
+      ]);
+      expect(Object.keys(query.events)).toEqual(['executed']);
+      expect(query.events.executed?.correlationKey).toBe('api.query');
     });
 
-    it('resolves variable reference events', async () => {
-      const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = await parseEventsFile(filePath);
+    it('skips catalogs mounted inside another exported catalog', async () => {
+      const tree = await parseEventsFile(fixture('docs-events.ts'));
 
-      // Runtime import resolves variable references (startup: startupEvent)
-      const systemGroup = tree.groups.find((g) => g.key === 'system');
-      expect(systemGroup).toBeDefined();
-      expect(Object.keys(systemGroup!.events)).toHaveLength(2);
-      expect(Object.keys(systemGroup!.events)).toContain('startup');
-      expect(Object.keys(systemGroup!.events)).toContain('shutdown');
+      expect(tree.catalogExports).toEqual(['events']);
+      expect(tree.events.filter((e) => e.key === 'billing.charge')).toHaveLength(1);
+      expect(tree.events.some((e) => e.key === 'charge')).toBe(false);
+    });
+
+    it('uses the export named by exportName (eventsExport)', async () => {
+      const tree = await parseEventsFile(fixture('docs-events.ts'), {
+        exportName: 'billingEvents',
+      });
+
+      expect(tree.errors).toHaveLength(0);
+      expect(tree.catalogExports).toEqual(['billingEvents']);
+      expect(tree.events.map((e) => e.key)).toEqual(['charge']);
+      expect(tree.rootEvents.map((e) => e.key)).toEqual(['charge']);
+    });
+
+    it('reports a missing eventsExport', async () => {
+      const tree = await parseEventsFile(fixture('valid-events.ts'), { exportName: 'nope' });
+
+      expect(tree.errors).toEqual([
+        { type: 'parse-error', message: expect.stringContaining('"nope"') as string },
+      ]);
+    });
+
+    it('reports an eventsExport that is not a catalog', async () => {
+      const tree = await parseEventsFile(fixture('no-catalog.ts'), { exportName: 'notACatalog' });
+
+      expect(tree.errors[0]?.type).toBe('parse-error');
+      expect(tree.errors[0]?.message).toContain('not an event catalog');
+    });
+
+    it('reports a clear parse error when no catalog is exported', async () => {
+      const tree = await parseEventsFile(fixture('no-catalog.ts'));
+
+      expect(tree.events).toHaveLength(0);
+      expect(tree.errors).toHaveLength(1);
+      expect(tree.errors[0]?.type).toBe('parse-error');
+      expect(tree.errors[0]?.message).toContain('No event catalog exported');
+      expect(tree.errors[0]?.message).toContain('legacyGroup');
+    });
+
+    it('surfaces INVALID_CATALOG thrown while importing as a validation error', async () => {
+      const tree = await parseEventsFile(fixture('invalid-catalog.ts'));
+
+      expect(tree.events).toHaveLength(0);
+      expect(tree.errors).toHaveLength(1);
+      expect(tree.errors[0]?.type).toBe('invalid-catalog');
+      expect(tree.errors[0]?.message).toContain('reserved name "fork"');
+    });
+  });
+
+  describe('parseEventsModule', () => {
+    it('surfaces INVALID_CATALOG from walkCatalog as a validation error', () => {
+      const catalog = defineEvents({ ok: event({ level: 'info', message: 'ok' }) });
+      // Corrupt the catalog after definition so walkCatalog rejects it.
+      (catalog as Record<string, unknown>).broken = undefined;
+
+      const tree = parseEventsModule({ events: catalog });
+
+      expect(tree.errors).toHaveLength(1);
+      expect(tree.errors[0]?.type).toBe('invalid-catalog');
+      expect(tree.errors[0]?.message).toMatch(/^events: .*"broken" is undefined/);
+    });
+
+    it('merges several root catalogs and reports keys defined in both', () => {
+      const a = defineEvents({ user: { created: event({ level: 'info', message: 'a' }) } });
+      const b = defineEvents({
+        user: { created: event({ level: 'warn', message: 'b' }) },
+        job: correlation({ events: {} }),
+      });
+
+      const tree = parseEventsModule({ a, b });
+
+      expect(tree.catalogExports).toEqual(['a', 'b']);
+      expect(tree.events.map((e) => e.key)).toEqual([
+        'user.created',
+        'job.start',
+        'job.complete',
+        'job.fail',
+        'job.timeout',
+      ]);
+      expect(tree.errors).toEqual([
+        {
+          type: 'duplicate-key',
+          message: 'Event key "user.created" in export "b" is already defined in export "a".',
+        },
+      ]);
+    });
+
+    it('uses key overrides as event keys', () => {
+      const catalog = defineEvents({
+        renamed: event({ key: 'legacy.name', level: 'info', message: 'x', doc: 'd' }),
+        job: correlation({
+          key: 'batch.job',
+          events: { step: event({ level: 'info', message: 's', fields: { n: field.number() } }) },
+        }),
+      });
+
+      const tree = parseEventsModule({ catalog });
+
+      expect(tree.rootEvents.map((e) => e.key)).toEqual(['legacy.name']);
+      expect(tree.rootEvents[0]?.path).toBe('renamed');
+      const job = tree.groups[0]!;
+      expect(job.key).toBe('batch.job');
+      expect(job.path).toBe('job');
+      expect(job.events.step?.key).toBe('batch.job.step');
+      expect(job.lifecycleEvents[0]?.key).toBe('batch.job.start');
     });
   });
 
   describe('validator', () => {
     it('passes validation for valid events', async () => {
-      const filePath = path.join(fixturesPath, 'valid-events.ts');
-      const tree = await parseEventsFile(filePath);
+      const tree = await parseEventsFile(fixture('valid-events.ts'));
+      expect(validateEventTree(tree)).toHaveLength(0);
+    });
+
+    it('reports missing docs, reserved fields and the reserved chronicler prefix', async () => {
+      const tree = await parseEventsFile(fixture('lint-events.ts'));
       const errors = validateEventTree(tree);
 
-      expect(errors).toHaveLength(0);
+      expect(errors.map((e) => e.type)).toEqual([
+        'missing-doc',
+        'reserved-field',
+        'reserved-prefix',
+        'reserved-prefix',
+      ]);
+      expect(errors[0]!.message).toContain('user.created');
+      expect(errors[1]!.message).toContain('eventKey');
+      expect(errors[2]!.message).toContain('chronicler.internal');
+      expect(errors[3]!.message).toContain('Correlation key "chronicler.job"');
+    });
+
+    it('does not validate auto-generated lifecycle events', () => {
+      const tree = makeTree({
+        events: [makeEvent({ key: 'chronicler.x.start', doc: '', lifecycle: true })],
+      });
+      expect(validateEventTree(tree)).toHaveLength(0);
     });
 
     it('detects invalid log levels', () => {
-      // Create a mock tree with invalid level
-      const tree = {
-        events: [
-          {
-            key: 'test.event',
-            level: 'invalid' as 'info',
-            message: 'test',
-            doc: 'test',
-          },
-        ],
-        groups: [],
-        errors: [],
-      };
+      const tree = makeTree({ events: [makeEvent({ level: 'invalid' as 'info' })] });
 
       const errors = validateEventTree(tree);
-      expect(errors.length).toBeGreaterThan(0);
+      expect(errors).toHaveLength(1);
       expect(errors[0]!.type).toBe('invalid-level');
     });
 
     it('detects reserved field usage', () => {
-      const tree = {
+      const tree = makeTree({
         events: [
+          makeEvent({ fields: { correlationId: { type: 'string', required: true, doc: '' } } }),
+        ],
+      });
+
+      const errors = validateEventTree(tree);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.type).toBe('reserved-field');
+      expect(errors[0]!.message).toContain('correlationId');
+    });
+
+    it('detects invalid correlation timeouts in nested groups', () => {
+      const tree = makeTree({
+        groups: [
           {
-            key: 'test.event',
-            level: 'info' as const,
-            message: 'test',
-            doc: 'test',
-            fields: {
-              eventKey: { _type: 'string', _required: true, _doc: 'bad' },
+            key: 'a',
+            path: 'a',
+            kind: 'namespace',
+            doc: '',
+            events: {},
+            lifecycleEvents: [],
+            groups: {
+              job: {
+                key: 'a.job',
+                path: 'a.job',
+                kind: 'correlation',
+                doc: '',
+                timeout: -1,
+                events: {},
+                lifecycleEvents: [],
+                groups: {},
+              },
             },
           },
         ],
-        groups: [],
-        errors: [],
-      };
+      });
 
       const errors = validateEventTree(tree);
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0]!.type).toBe('reserved-field');
-      expect(errors[0]!.message).toContain('eventKey');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.type).toBe('invalid-timeout');
+    });
+
+    it('keeps parse errors from the tree', () => {
+      const tree = makeTree({ errors: [{ type: 'parse-error', message: 'boom' }] });
+      expect(validateEventTree(tree)).toEqual([{ type: 'parse-error', message: 'boom' }]);
     });
   });
 });

@@ -1,0 +1,135 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Docs CLI end-to-end > markdown generation > matches the snapshot 1`] = `
+"# Chronicler Events
+
+> Auto-generated documentation from event definitions
+
+## Table of Contents
+
+- [system](#system)
+- [http](#http)
+- [billing](#billing)
+
+---
+
+## system
+
+System lifecycle events
+
+### system.startup
+
+**Level:** \`info\`
+**Message:** "Application started"
+
+Emitted when the application starts
+
+**Fields:**
+
+- **\`port\`** (\`number\`, required): Server port
+- **\`env\`** (\`string\`, optional): Runtime environment
+
+### system.shutdown
+
+**Level:** \`info\`
+**Message:** "Application shutdown"
+
+Emitted on graceful shutdown
+
+### system.error
+
+**Level:** \`error\`
+**Message:** "System error"
+
+Emitted on unhandled errors
+
+**Fields:**
+
+- **\`error\`** (\`error\`, required): Error details
+- **\`fatal\`** (\`boolean\`, optional): Whether error is fatal
+
+---
+
+## http
+
+HTTP server events
+
+---
+
+### http.request
+
+**Type:** Correlation
+**Timeout:** 30000ms (activity-based)
+
+HTTP request lifecycle
+
+**Auto-Generated Events:**
+
+- \`http.request.start\` (\`info\`) - Logged when correlation starts
+- \`http.request.complete\` (\`info\`) - Logged when correlation completes (includes \`duration\` field)
+- \`http.request.fail\` (\`error\`) - Logged when correlation fails (includes \`duration\` and \`error\` fields)
+- \`http.request.timeout\` (\`warn\`) - Logged when correlation times out due to inactivity
+
+#### http.request.received
+
+**Level:** \`info\`
+**Message:** "Request received"
+
+Emitted when request arrives
+
+**Fields:**
+
+- **\`method\`** (\`string\`, required): HTTP method
+- **\`path\`** (\`string\`, required): Request path
+- **\`ip\`** (\`string\`, optional): Client IP
+
+#### http.request.completed
+
+**Level:** \`info\`
+**Message:** "Request completed"
+
+Emitted when response is sent
+
+**Fields:**
+
+- **\`statusCode\`** (\`number\`, required): Response status code
+- **\`duration\`** (\`number\`, required): Duration in ms
+
+---
+
+#### http.request.cache
+
+##### http.request.cache.hit
+
+**Level:** \`debug\`
+**Message:** "Cache hit"
+
+Response served from cache
+
+---
+
+## billing
+
+### billing.charge
+
+**Level:** \`audit\`
+**Message:** "Card charged"
+
+Emitted when a payment succeeds
+
+**Fields:**
+
+- **\`amount\`** (\`number\`, required): Amount in cents
+
+---
+
+## Standalone Events
+
+### app.healthCheck
+
+**Level:** \`debug\`
+**Message:** "Health check performed"
+
+Periodic health check ping
+"
+`;

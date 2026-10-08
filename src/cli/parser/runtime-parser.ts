@@ -1,225 +1,286 @@
 /**
- * Runtime parser for extracting event definitions from TypeScript files.
+ * Runtime parser for extracting event catalogs from TypeScript files.
  * Uses esbuild to compile .ts files before importing them.
+ *
+ * The CLI bundles its own copy of the core library while the user's events module imports the
+ * published package, so catalogs are recognised only through the cross-copy-safe helpers
+ * (`isCatalog`, `isMountedCatalog` and `walkCatalog`, which rely on `Symbol.for` marks and the
+ * string `kind` discriminant) — never through `instanceof` or module identity.
  */
 
 import path from 'node:path';
 
-import type { EventDefinition } from '../../core/events';
-import type { FieldBuilder } from '../../core/fields';
+import { type CatalogEntry, isCatalog, isMountedCatalog, walkCatalog } from '../../core/events';
 import { importTsModule } from '../ts-import';
-import type { ParsedEventGroup, ParsedEventTree, ValidationError } from '../types';
+import type {
+  ParsedEvent,
+  ParsedEventGroup,
+  ParsedEventTree,
+  ParsedField,
+  ValidationError,
+} from '../types';
 
-/** Auto-generated event property names added by defineCorrelationGroup. Excluded from docs output. */
-const CORRELATION_AUTO_EVENTS = new Set(['start', 'complete', 'fail', 'timeout']);
+/** Options for {@link parseEventsFile} and {@link parseEventsModule}. */
+export interface ParseOptions {
+  /** Name of the export holding the catalog. When omitted, every root catalog export is used. */
+  readonly exportName?: string | undefined;
+}
 
-/**
- * Type guard: is the value an EventDefinition?
- */
-function isEventDefinition(value: unknown): value is EventDefinition {
+interface NamedCatalog {
+  readonly name: string;
+  readonly catalog: object;
+}
+
+type CatalogSelection = { readonly catalogs: NamedCatalog[] } | { readonly error: ValidationError };
+
+interface BuildState {
+  readonly events: ParsedEvent[];
+  readonly groups: ParsedEventGroup[];
+  readonly rootEvents: ParsedEvent[];
+  readonly errors: ValidationError[];
+  /** Event key → export it was first seen in, to detect clashes between catalogs. */
+  readonly keyOwners: Map<string, string>;
+}
+
+const parseError = (message: string): ValidationError => ({ type: 'parse-error', message });
+
+/** True for a `ChroniclerError('INVALID_CATALOG')` from any copy of the package. */
+const isCatalogError = (error: unknown): error is Error =>
+  error instanceof Error && (error as { code?: unknown }).code === 'INVALID_CATALOG';
+
+/** Heuristic for a Chronicler 1.x event group (`{ key, type: 'system' | 'correlation' }`). */
+const looksLikeV1Group = (value: unknown): boolean => {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return (
-    typeof v.key === 'string' &&
-    typeof v.level === 'string' &&
-    typeof v.message === 'string' &&
-    (v.doc === undefined || typeof v.doc === 'string')
-  );
-}
+  return typeof v.key === 'string' && (v.type === 'system' || v.type === 'correlation');
+};
 
-/**
- * Type guard: is the value a FieldBuilder?
- */
-function isFieldBuilder(value: unknown): value is FieldBuilder<string, boolean> {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return typeof v._type === 'string' && typeof v._required === 'boolean';
-}
-
-interface EventGroupLike {
-  readonly key: string;
-  readonly type: 'system' | 'correlation';
-  readonly doc?: string;
-  readonly timeout?: number;
-  readonly events?: Record<string, unknown>;
-  readonly groups?: Record<string, unknown>;
-}
-
-/**
- * Type guard: is the value an event group (system or correlation)?
- */
-function isEventGroup(value: unknown): value is EventGroupLike {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.key === 'string' &&
-    (v.type === 'system' || v.type === 'correlation') &&
-    (v.doc === undefined || typeof v.doc === 'string')
-  );
-}
-
-/**
- * Heuristic: does the value look like a partial event definition?
- * Used to report helpful parse errors for exports that are close but invalid.
- */
-function looksLikeEvent(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return typeof v.key === 'string' || typeof v.level === 'string' || typeof v.message === 'string';
-}
-
-/**
- * Extract clean field data from a FieldBuilder (strips methods, keeps data).
- */
-function extractFields(
-  fields: Record<string, unknown>,
-): Record<string, FieldBuilder<string, boolean>> | undefined {
-  const result: Record<string, FieldBuilder<string, boolean>> = {};
-  let hasFields = false;
-
-  for (const [name, value] of Object.entries(fields)) {
-    if (isFieldBuilder(value)) {
-      result[name] = {
-        _type: value._type,
-        _required: value._required,
-        _doc: value._doc,
-      } as FieldBuilder<string, boolean>;
-      hasFields = true;
-    }
+function selectNamedExport(mod: Record<string, unknown>, exportName: string): CatalogSelection {
+  if (!Object.hasOwn(mod, exportName)) {
+    return { error: parseError(`Export "${exportName}" (eventsExport) not found in events file.`) };
   }
-
-  return hasFields ? result : undefined;
-}
-
-/** Strip a raw EventDefinition down to plain data (doc defaults to empty string). */
-function cleanEvent(event: EventDefinition): EventDefinition {
-  const fields = event.fields ? extractFields(event.fields as Record<string, unknown>) : undefined;
-  return fields
-    ? { ...event, doc: event.doc ?? '', fields }
-    : { key: event.key, level: event.level, message: event.message, doc: event.doc ?? '' };
-}
-
-/**
- * Convert a runtime event group to a ParsedEventGroup (iterative).
- * Filters out auto-generated correlation events (start, complete, fail, timeout).
- */
-/* eslint-disable max-lines-per-function, complexity, max-depth -- Accepted deviation: iterative two-pass traversal */
-function convertGroup(rootGroup: EventGroupLike): ParsedEventGroup {
-  // First pass: create ParsedEventGroup shells for all groups
-  const groupMap = new Map<EventGroupLike, ParsedEventGroup>();
-  const stack: EventGroupLike[] = [rootGroup];
-
-  while (stack.length > 0) {
-    const group = stack.pop()!;
-    const events: Record<string, EventDefinition> = {};
-
-    if (group.events) {
-      for (const [name, value] of Object.entries(group.events)) {
-        if (group.type === 'correlation' && CORRELATION_AUTO_EVENTS.has(name)) continue;
-        if (isEventDefinition(value)) {
-          events[name] = cleanEvent(value);
-        }
-      }
-    }
-
-    const parsed: ParsedEventGroup = {
-      key: group.key,
-      type: group.type,
-      doc: group.doc ?? '',
-      ...(group.timeout !== undefined ? { timeout: group.timeout } : {}),
-      events,
-      groups: {},
+  const value = mod[exportName];
+  if (!isCatalog(value)) {
+    return {
+      error: parseError(
+        `Export "${exportName}" (eventsExport) is not an event catalog. Export the object returned by defineEvents().`,
+      ),
     };
-    groupMap.set(group, parsed);
-
-    if (group.groups) {
-      for (const [, value] of Object.entries(group.groups)) {
-        if (isEventGroup(value)) {
-          stack.push(value);
-        }
-      }
-    }
   }
-
-  // Second pass: wire up parent-child group relationships
-  const wireStack: EventGroupLike[] = [rootGroup];
-  while (wireStack.length > 0) {
-    const group = wireStack.pop()!;
-    const parsed = groupMap.get(group)!;
-    if (group.groups) {
-      for (const [name, value] of Object.entries(group.groups)) {
-        if (isEventGroup(value)) {
-          parsed.groups[name] = groupMap.get(value)!;
-          wireStack.push(value);
-        }
-      }
-    }
-  }
-
-  return groupMap.get(rootGroup)!;
+  return { catalogs: [{ name: exportName, catalog: value }] };
 }
-/* eslint-enable max-lines-per-function, complexity, max-depth */
+
+function noCatalogError(mod: Record<string, unknown>): ValidationError {
+  const names = Object.keys(mod);
+  const mounted = names.filter((name) => isCatalog(mod[name]));
+  const v1 = names.filter((name) => looksLikeV1Group(mod[name]));
+  let message =
+    'No event catalog exported from the events file. Export the object returned by defineEvents(), e.g. `export const events = defineEvents({ ... })`.';
+  if (mounted.length > 0) {
+    message += ` Only catalogs mounted inside another catalog were found (${mounted.join(', ')}); export the root catalog or set "eventsExport" in chronicler.config.ts.`;
+  }
+  if (v1.length > 0) {
+    message += ` Exports ${v1.join(', ')} look like Chronicler 1.x event groups; Chronicler 2.0 uses defineEvents().`;
+  }
+  return parseError(message);
+}
+
+/** Pick the catalogs to document: the named export, or every root (non-mounted) catalog export. */
+function selectCatalogs(mod: Record<string, unknown>, exportName?: string): CatalogSelection {
+  if (exportName !== undefined) return selectNamedExport(mod, exportName);
+
+  // Named exports first so `export default events` alongside `export const events` keeps its name.
+  const names = Object.keys(mod).sort((a, b) => Number(a === 'default') - Number(b === 'default'));
+  const seen = new Set<object>();
+  const catalogs: NamedCatalog[] = [];
+  for (const name of names) {
+    const value = mod[name];
+    if (!isCatalog(value) || isMountedCatalog(value) || seen.has(value)) continue;
+    seen.add(value);
+    catalogs.push({ name, catalog: value });
+  }
+  return catalogs.length > 0 ? { catalogs } : { error: noCatalogError(mod) };
+}
+
+/** Reduce a field builder (from any copy of the package) to plain data. */
+function toParsedFields(fields: unknown): Record<string, ParsedField> {
+  const result: Record<string, ParsedField> = {};
+  if (typeof fields !== 'object' || fields === null) return result;
+  for (const [name, value] of Object.entries(fields)) {
+    if (typeof value !== 'object' || value === null) continue;
+    const builder = value as { _type?: unknown; _required?: unknown; _doc?: unknown };
+    if (typeof builder._type !== 'string') continue;
+    result[name] = {
+      type: builder._type,
+      required: builder._required === true,
+      doc: typeof builder._doc === 'string' ? builder._doc : '',
+    };
+  }
+  return result;
+}
+
+function toParsedEvent(entry: Extract<CatalogEntry, { kind: 'event' }>): ParsedEvent {
+  const def = entry.definition;
+  return {
+    key: entry.key,
+    path: entry.path,
+    level: def.level,
+    message: def.message,
+    doc: def.doc ?? '',
+    fields: toParsedFields(def.fields),
+    ...(entry.correlationKey !== undefined ? { correlationKey: entry.correlationKey } : {}),
+    lifecycle: entry.lifecycle,
+  };
+}
+
+const parentPath = (entryPath: string): string => {
+  const dot = entryPath.lastIndexOf('.');
+  return dot === -1 ? '' : entryPath.slice(0, dot);
+};
+
+const lastSegment = (entryPath: string): string => entryPath.slice(entryPath.lastIndexOf('.') + 1);
+
+function makeGroup(entry: Exclude<CatalogEntry, { kind: 'event' }>): ParsedEventGroup {
+  const base = { key: entry.key, path: entry.path, events: {}, lifecycleEvents: [], groups: {} };
+  if (entry.kind === 'namespace') {
+    return { ...base, kind: 'namespace', doc: entry.doc ?? '' };
+  }
+  return {
+    ...base,
+    kind: 'correlation',
+    doc: entry.definition.doc ?? '',
+    timeout: entry.definition.timeout,
+  };
+}
+
+/** Builds the group hierarchy of one catalog from its `walkCatalog` entries. */
+class CatalogTreeBuilder {
+  private readonly byPath = new Map<string, ParsedEventGroup>();
+  private readonly byCorrelationKey = new Map<string, ParsedEventGroup>();
+
+  constructor(
+    private readonly state: BuildState,
+    private readonly exportName: string,
+  ) {}
+
+  add(entry: CatalogEntry): void {
+    if (entry.kind === 'event') {
+      this.addEvent(entry);
+      return;
+    }
+    const group = makeGroup(entry);
+    this.byPath.set(entry.path, group);
+    if (entry.kind === 'correlation') this.byCorrelationKey.set(entry.key, group);
+    const parent = this.byPath.get(parentPath(entry.path));
+    if (parent) parent.groups[lastSegment(entry.path)] = group;
+    else this.state.groups.push(group);
+  }
+
+  private addEvent(entry: Extract<CatalogEntry, { kind: 'event' }>): void {
+    const event = toParsedEvent(entry);
+    if (!this.claimKey(event.key)) return;
+    this.state.events.push(event);
+    if (entry.lifecycle) {
+      const owner = this.byCorrelationKey.get(entry.correlationKey ?? '');
+      owner?.lifecycleEvents.push(event);
+      return;
+    }
+    const parent = this.byPath.get(parentPath(entry.path));
+    if (parent) parent.events[lastSegment(entry.path)] = event;
+    else this.state.rootEvents.push(event);
+  }
+
+  /** Record the key; report a clash with another exported catalog. */
+  private claimKey(key: string): boolean {
+    const owner = this.state.keyOwners.get(key);
+    if (owner === undefined) {
+      this.state.keyOwners.set(key, this.exportName);
+      return true;
+    }
+    this.state.errors.push({
+      type: 'duplicate-key',
+      message: `Event key "${key}" in export "${this.exportName}" is already defined in export "${owner}".`,
+    });
+    return false;
+  }
+}
+
+/** Walk one catalog into the shared state, turning INVALID_CATALOG errors into validation errors. */
+function addCatalog(state: BuildState, { name, catalog }: NamedCatalog): void {
+  let entries: CatalogEntry[];
+  try {
+    entries = walkCatalog(catalog);
+  } catch (error) {
+    if (!isCatalogError(error)) throw error;
+    state.errors.push({ type: 'invalid-catalog', message: `${name}: ${error.message}` });
+    return;
+  }
+  const builder = new CatalogTreeBuilder(state, name);
+  for (const entry of entries) builder.add(entry);
+}
+
+const emptyTree = (errors: ValidationError[]): ParsedEventTree => ({
+  events: [],
+  groups: [],
+  rootEvents: [],
+  catalogExports: [],
+  errors,
+});
 
 /**
- * Iteratively collect all events from a group (including nested groups) into a flat list.
- * Uses a Set of event keys for deduplication.
+ * Build the event tree from an already-imported events module.
+ *
+ * @param mod - The module's exports
+ * @param options - Optional export name to read the catalog from
+ * @returns Parsed event tree; problems are reported in `errors`, never thrown
  */
-function collectEventsFromGroup(rootGroup: ParsedEventGroup, seen: Set<string>): EventDefinition[] {
-  const events: EventDefinition[] = [];
-  const stack: ParsedEventGroup[] = [rootGroup];
+export function parseEventsModule(
+  mod: Record<string, unknown>,
+  options: ParseOptions = {},
+): ParsedEventTree {
+  const selection = selectCatalogs(mod, options.exportName);
+  if ('error' in selection) return emptyTree([selection.error]);
 
-  while (stack.length > 0) {
-    const group = stack.pop()!;
-    for (const event of Object.values(group.events)) {
-      if (!seen.has(event.key)) {
-        seen.add(event.key);
-        events.push(event);
-      }
-    }
-    for (const nestedGroup of Object.values(group.groups)) {
-      stack.push(nestedGroup);
-    }
-  }
+  const state: BuildState = {
+    events: [],
+    groups: [],
+    rootEvents: [],
+    errors: [],
+    keyOwners: new Map(),
+  };
+  for (const named of selection.catalogs) addCatalog(state, named);
 
-  return events;
+  return {
+    events: state.events,
+    groups: state.groups,
+    rootEvents: state.rootEvents,
+    catalogExports: selection.catalogs.map((c) => c.name),
+    errors: state.errors,
+  };
 }
 
 /**
- * Parse an events file by compiling it via esbuild and inspecting exports.
+ * Parse an events file by compiling it via esbuild and inspecting its exported catalogs.
  *
  * **Security note:** This function dynamically imports a user-authored TypeScript
  * file, which executes arbitrary code. This is acceptable for a CLI tool that
  * the user invokes locally, but callers must never pass untrusted paths.
  *
  * @param filePath - Path to the TypeScript events file to parse
- * @returns Parsed event tree containing extracted events, groups, and any parse errors
+ * @param options - Optional export name to read the catalog from
+ * @returns Parsed event tree containing events, groups, and any parse/catalog errors
  */
-export async function parseEventsFile(filePath: string): Promise<ParsedEventTree> {
-  const absolutePath = path.resolve(filePath);
-  const events: EventDefinition[] = [];
-  const groups: ParsedEventGroup[] = [];
-  const errors: ValidationError[] = [];
-  const seen = new Set<string>();
-
-  const mod = await importTsModule(absolutePath);
-
-  for (const [exportName, value] of Object.entries(mod)) {
-    if (isEventGroup(value)) {
-      const parsed = convertGroup(value);
-      groups.push(parsed);
-      events.push(...collectEventsFromGroup(parsed, seen));
-    } else if (isEventDefinition(value)) {
-      if (!seen.has(value.key)) {
-        seen.add(value.key);
-        events.push(cleanEvent(value));
-      }
-    } else if (looksLikeEvent(value)) {
-      errors.push({
-        type: 'parse-error',
-        message: `Export "${exportName}" looks like an event definition but is missing required properties (key, level, message).`,
-      });
-    }
+export async function parseEventsFile(
+  filePath: string,
+  options: ParseOptions = {},
+): Promise<ParsedEventTree> {
+  let mod: Record<string, unknown>;
+  try {
+    mod = await importTsModule(path.resolve(filePath));
+  } catch (error) {
+    // defineEvents() throws INVALID_CATALOG while the module is evaluated.
+    if (!isCatalogError(error)) throw error;
+    return emptyTree([{ type: 'invalid-catalog', message: error.message }]);
   }
-
-  return { events, groups, errors };
+  return parseEventsModule(mod, options);
 }
