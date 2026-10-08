@@ -5,9 +5,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { EventDefinition } from '../../core/events';
 import type { ChroniclerCliConfig } from '../config';
-import type { ParsedEventGroup, ParsedEventTree } from '../types';
+import { applyEol } from '../eol';
+import type { ParsedEvent, ParsedEventGroup, ParsedEventTree } from '../types';
 
 /**
  * Generate documentation from parsed event tree.
@@ -60,32 +60,24 @@ export function generateDocs(tree: ParsedEventTree, config: ChroniclerCliConfig)
     throw new Error('Output directory resolves outside the project directory via symlink.');
   }
 
-  // Normalize line endings before writing. Generated content uses LF
-  // internally; convert to the configured EOL so repos that normalize the
-  // working tree to CRLF don't see spurious diffs on every regeneration.
-  const eol = config.docs?.eol ?? 'lf';
-  const normalized =
-    eol === 'crlf' ? content.replace(/\r?\n/g, '\r\n') : content.replace(/\r\n/g, '\n');
+  // Generated content uses LF internally; convert to the configured EOL so repos that
+  // normalize the working tree to CRLF don't see spurious diffs on every regeneration.
+  const normalized = applyEol(content, config.docs?.eol);
 
   // Write output
   fs.writeFileSync(resolved, normalized, 'utf-8');
 }
 
-/** Collect all event keys from groups and their nested sub-groups. */
-function collectAllGroupEventKeys(groups: ParsedEventGroup[]): Set<string> {
-  const keys = new Set<string>();
-  const stack = [...groups];
-  while (stack.length > 0) {
-    const group = stack.pop()!;
-    for (const event of Object.values(group.events)) {
-      keys.add(event.key);
-    }
-    for (const nested of Object.values(group.groups)) {
-      stack.push(nested);
-    }
-  }
-  return keys;
-}
+/** Descriptions of the auto-generated correlation lifecycle events, by suffix. */
+const LIFECYCLE_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  start: 'Logged when correlation starts',
+  complete: 'Logged when correlation completes (includes `duration` field)',
+  fail: 'Logged when correlation fails (includes `duration` and `error` fields)',
+  timeout: 'Logged when correlation times out due to inactivity',
+};
+
+const lifecycleSuffix = (event: ParsedEvent): string =>
+  event.key.slice(event.key.lastIndexOf('.') + 1);
 
 /**
  * Generate Markdown documentation
@@ -110,19 +102,16 @@ function generateMarkdown(tree: ParsedEventTree): string {
     lines.push('');
   }
 
-  // Document each group
+  // Document each top-level namespace / correlation
   tree.groups.forEach((group) => {
     lines.push(...generateGroupMarkdown(group));
   });
 
-  // Document standalone events (not in any group or nested sub-group)
-  const groupEventKeys = collectAllGroupEventKeys(tree.groups);
-  const standaloneEvents = tree.events.filter((event) => !groupEventKeys.has(event.key));
-
-  if (standaloneEvents.length > 0) {
+  // Document events defined at the catalog root (not in any namespace or correlation)
+  if (tree.rootEvents.length > 0) {
     lines.push('## Standalone Events');
     lines.push('');
-    standaloneEvents.forEach((event) => {
+    tree.rootEvents.forEach((event) => {
       lines.push(...generateEventMarkdown(event));
     });
   }
@@ -130,10 +119,46 @@ function generateMarkdown(tree: ParsedEventTree): string {
   return lines.join('\n');
 }
 
+/** Markdown for a correlation's type, timeout and doc header lines. */
+function correlationHeaderMarkdown(group: ParsedEventGroup): string[] {
+  const lines = ['**Type:** Correlation'];
+  if (group.timeout !== undefined) {
+    lines.push(
+      group.timeout === 0
+        ? '**Timeout:** Disabled'
+        : `**Timeout:** ${group.timeout}ms (activity-based)`,
+    );
+  }
+  lines.push('');
+  return lines;
+}
+
+/** Markdown list of a correlation's auto-generated lifecycle events. */
+function lifecycleMarkdown(group: ParsedEventGroup): string[] {
+  const lines = ['**Auto-Generated Events:**', ''];
+  for (const event of group.lifecycleEvents) {
+    const description = LIFECYCLE_DESCRIPTIONS[lifecycleSuffix(event)] ?? event.doc;
+    lines.push(`- \`${event.key}\` (\`${event.level}\`) - ${description}`);
+  }
+  lines.push('');
+  return lines;
+}
+
+/** Markdown for one group (without its nested groups). */
+function groupBodyMarkdown(group: ParsedEventGroup, level: number): string[] {
+  const lines = [`${'#'.repeat(Math.min(level, 6))} ${group.key}`, ''];
+  if (group.kind === 'correlation') lines.push(...correlationHeaderMarkdown(group));
+  if (group.doc) lines.push(group.doc, '');
+  if (group.kind === 'correlation') lines.push(...lifecycleMarkdown(group));
+  Object.values(group.events).forEach((event) => {
+    lines.push(...generateEventMarkdown(event, level + 1));
+  });
+  return lines;
+}
+
 /**
- * Generate Markdown for an event group and its nested groups (iterative)
+ * Generate Markdown for a namespace or correlation and its nested groups (iterative)
  */
-// eslint-disable-next-line max-lines-per-function -- Accepted deviation: iterative traversal with markdown assembly
 function generateGroupMarkdown(rootGroup: ParsedEventGroup, rootLevel = 2): string[] {
   const lines: string[] = [];
   const stack: { group: ParsedEventGroup; level: number }[] = [
@@ -142,52 +167,12 @@ function generateGroupMarkdown(rootGroup: ParsedEventGroup, rootLevel = 2): stri
 
   while (stack.length > 0) {
     const { group, level } = stack.pop()!;
-    const heading = '#'.repeat(Math.min(level, 6));
-
-    lines.push(`${heading} ${group.key}`);
-    lines.push('');
-
-    if (group.type === 'correlation') {
-      lines.push('**Type:** Correlation Group');
-      if (group.timeout !== undefined) {
-        lines.push(
-          group.timeout === 0
-            ? '**Timeout:** Disabled'
-            : `**Timeout:** ${group.timeout}ms (activity-based)`,
-        );
-      }
-      lines.push('');
-    }
-
-    if (group.doc) {
-      lines.push(group.doc);
-      lines.push('');
-    }
-
-    if (group.type === 'correlation') {
-      lines.push('**Auto-Generated Events:**');
-      lines.push('');
-      lines.push(`- \`${group.key}.start\` - Logged when correlation starts`);
-      lines.push(
-        `- \`${group.key}.complete\` - Logged when correlation completes (includes \`duration\` field)`,
-      );
-      lines.push(
-        `- \`${group.key}.fail\` - Logged when correlation fails (includes \`duration\` and \`error\` fields)`,
-      );
-      lines.push(
-        `- \`${group.key}.timeout\` - Logged when correlation times out due to inactivity`,
-      );
-      lines.push('');
-    }
-
-    Object.values(group.events).forEach((event) => {
-      lines.push(...generateEventMarkdown(event, level + 1));
-    });
+    lines.push(...groupBodyMarkdown(group, level));
 
     // Push nested groups in reverse order so they process in original order
-    const nestedEntries = Object.values(group.groups);
-    for (let i = nestedEntries.length - 1; i >= 0; i--) {
-      stack.push({ group: nestedEntries[i]!, level: level + 1 });
+    const nested = Object.values(group.groups);
+    for (let i = nested.length - 1; i >= 0; i--) {
+      stack.push({ group: nested[i]!, level: level + 1 });
     }
 
     lines.push('---');
@@ -200,7 +185,7 @@ function generateGroupMarkdown(rootGroup: ParsedEventGroup, rootLevel = 2): stri
 /**
  * Generate Markdown for a single event
  */
-function generateEventMarkdown(event: EventDefinition, level = 3): string[] {
+function generateEventMarkdown(event: ParsedEvent, level = 3): string[] {
   const lines: string[] = [];
   const heading = '#'.repeat(Math.min(level, 6));
 
@@ -214,15 +199,14 @@ function generateEventMarkdown(event: EventDefinition, level = 3): string[] {
     lines.push('');
   }
 
-  if (event.fields && Object.keys(event.fields).length > 0) {
+  const fields = Object.entries(event.fields);
+  if (fields.length > 0) {
     lines.push('**Fields:**');
     lines.push('');
-
-    Object.entries(event.fields).forEach(([name, field]) => {
-      const required = field._required ? 'required' : 'optional';
-      lines.push(`- **\`${name}\`** (\`${field._type}\`, ${required}): ${field._doc ?? ''}`);
-    });
-
+    for (const [name, field] of fields) {
+      const required = field.required ? 'required' : 'optional';
+      lines.push(`- **\`${name}\`** (\`${field.type}\`, ${required}): ${field.doc}`);
+    }
     lines.push('');
   }
 
@@ -233,77 +217,56 @@ function generateEventMarkdown(event: EventDefinition, level = 3): string[] {
  * Generate JSON documentation
  */
 function generateJSON(tree: ParsedEventTree): string {
-  const groupEventKeys = collectAllGroupEventKeys(tree.groups);
   const output = {
     generated: new Date().toISOString(),
-    eventCount: tree.events.length,
+    eventCount: tree.events.filter((event) => !event.lifecycle).length,
+    lifecycleEventCount: tree.events.filter((event) => event.lifecycle).length,
     groupCount: tree.groups.length,
     groups: tree.groups.map((group) => serializeGroup(group)),
-    standaloneEvents: tree.events
-      .filter((event) => !groupEventKeys.has(event.key))
-      .map((event) => serializeEvent(event)),
+    standaloneEvents: tree.rootEvents.map((event) => serializeEvent(event)),
   };
 
   return JSON.stringify(output, null, 2);
 }
 
 /**
- * Serialize event group to JSON (iterative)
+ * Serialize a namespace or correlation (and its nested groups) to JSON
  */
-function serializeGroup(rootGroup: ParsedEventGroup): Record<string, unknown> {
-  const resultMap = new Map<ParsedEventGroup, Record<string, unknown>>();
-  // Process bottom-up: collect all groups first, then wire children
-  const allGroups: ParsedEventGroup[] = [];
-  const traverseStack: ParsedEventGroup[] = [rootGroup];
-
-  while (traverseStack.length > 0) {
-    const group = traverseStack.pop()!;
-    allGroups.push(group);
-    for (const nestedGroup of Object.values(group.groups)) {
-      traverseStack.push(nestedGroup);
-    }
-  }
-
-  // Process in reverse (leaf-first) so children are ready when parents reference them
-  for (let i = allGroups.length - 1; i >= 0; i--) {
-    const group = allGroups[i]!;
-    resultMap.set(group, {
-      key: group.key,
-      type: group.type,
-      doc: group.doc ?? '',
-      timeout: group.timeout,
-      autoEvents:
-        group.type === 'correlation' ? ['start', 'complete', 'fail', 'timeout'] : undefined,
-      events: Object.entries(group.events).map(([name, event]) => ({
-        name,
-        ...serializeEvent(event),
-      })),
-      groups: Object.entries(group.groups).map(([name, nestedGroup]) => ({
-        name,
-        ...resultMap.get(nestedGroup)!,
-      })),
-    });
-  }
-
-  return resultMap.get(rootGroup)!;
+function serializeGroup(group: ParsedEventGroup): Record<string, unknown> {
+  const isCorrelation = group.kind === 'correlation';
+  return {
+    key: group.key,
+    path: group.path,
+    type: group.kind,
+    doc: group.doc,
+    timeout: group.timeout,
+    autoEvents: isCorrelation ? group.lifecycleEvents.map(lifecycleSuffix) : undefined,
+    lifecycleEvents: isCorrelation ? group.lifecycleEvents.map(serializeEvent) : undefined,
+    events: Object.entries(group.events).map(([name, event]) => ({
+      name,
+      ...serializeEvent(event),
+    })),
+    groups: Object.entries(group.groups).map(([name, nested]) => ({
+      name,
+      ...serializeGroup(nested),
+    })),
+  };
 }
 
 /**
  * Serialize event to JSON
  */
-function serializeEvent(event: EventDefinition): Record<string, unknown> {
+function serializeEvent(event: ParsedEvent): Record<string, unknown> {
   return {
     key: event.key,
     level: event.level,
     message: event.message,
-    doc: event.doc ?? '',
-    fields: event.fields
-      ? Object.entries(event.fields).map(([name, field]) => ({
-          name,
-          type: field._type,
-          required: field._required,
-          doc: field._doc ?? '',
-        }))
-      : [],
+    doc: event.doc,
+    fields: Object.entries(event.fields).map(([name, field]) => ({
+      name,
+      type: field.type,
+      required: field.required,
+      doc: field.doc,
+    })),
   };
 }

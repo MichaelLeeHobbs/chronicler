@@ -96,3 +96,69 @@ describe('ContextStore with maxKeys', () => {
     expect(Object.keys(store.snapshot())).toHaveLength(200);
   });
 });
+
+describe('ContextStore.add', () => {
+  it('keeps the first value on collision (first write wins)', () => {
+    const store = new ContextStore({ a: '1' });
+    const result = store.add({ a: '2', b: '3' });
+    expect(store.snapshot()).toEqual({ a: '1', b: '3' });
+    expect(result.collisionDetails).toEqual([
+      { key: 'a', existingValue: '1', attemptedValue: '2' },
+    ]);
+  });
+
+  it('silently drops reserved keys and reports them', () => {
+    const store = new ContextStore();
+    const result = store.add({ forkId: 'x', ok: true });
+    expect(store.snapshot()).toEqual({ ok: true });
+    expect(result.reserved).toEqual(['forkId']);
+  });
+
+  it('returns copies from snapshot()', () => {
+    const store = new ContextStore({ a: '1' });
+    const snap = store.snapshot();
+    (snap as Record<string, ContextValue>).a = 'mutated';
+    expect(store.snapshot()).toEqual({ a: '1' });
+  });
+});
+
+describe('ContextStore.derive', () => {
+  it('creates a child that inherits context without affecting the parent', () => {
+    const parent = new ContextStore({ a: '1' });
+    const { store: child } = parent.derive({ b: '2' });
+    child.add({ c: '3' });
+    expect(child.snapshot()).toEqual({ a: '1', b: '2', c: '3' });
+    expect(parent.snapshot()).toEqual({ a: '1' });
+  });
+
+  it('lets overrides replace inherited values', () => {
+    const parent = new ContextStore({ a: '1', b: '1' });
+    const { store, validation } = parent.derive({ a: '2' });
+    expect(store.snapshot()).toEqual({ a: '2', b: '1' });
+    expect(validation.collisionDetails).toEqual([]);
+  });
+
+  it('keeps first-write-wins inside the child after deriving', () => {
+    const { store } = new ContextStore({ a: '1' }).derive({ a: '2' });
+    const result = store.add({ a: '3' });
+    expect(store.snapshot()).toEqual({ a: '2' });
+    expect(result.collisionDetails).toHaveLength(1);
+  });
+
+  it('reports reserved keys in overrides and drops them', () => {
+    const { store, validation } = new ContextStore({ a: '1' }).derive({ eventKey: 'x' });
+    expect(store.snapshot()).toEqual({ a: '1' });
+    expect(validation.reserved).toEqual(['eventKey']);
+  });
+
+  it('applies maxKeys to the child', () => {
+    const { store, validation } = new ContextStore({ a: '1' }, 2).derive({ b: '2', c: '3' });
+    expect(Object.keys(store.snapshot())).toHaveLength(2);
+    expect(validation.dropped).toEqual(['c']);
+  });
+
+  it('defaults to no overrides', () => {
+    const { store } = new ContextStore({ a: '1' }).derive();
+    expect(store.snapshot()).toEqual({ a: '1' });
+  });
+});

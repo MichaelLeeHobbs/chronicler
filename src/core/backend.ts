@@ -30,10 +30,20 @@ const LEVEL_FALLBACK_CHAINS: Record<LogLevel, readonly LogLevel[]> = {
   trace: ['debug', 'info'],
 };
 
+/** State of a correlation that is no longer active, as reported on its later events. */
+export type CorrelationState = 'timedOut' | 'completed' | 'failed';
+
 export interface LogPayload {
   readonly eventKey: string;
   readonly fields: Record<string, unknown>;
+  /** Innermost correlation id, or `''` outside any correlation. */
   readonly correlationId: string;
+  /** Id of the enclosing correlation, when this correlation was started inside another. */
+  readonly parentCorrelationId?: string;
+  /** Id of the outermost correlation. Filter on it to see a whole request, including nested work. */
+  readonly rootCorrelationId?: string;
+  /** Present only when the correlation is no longer active (e.g. events after a timeout). */
+  readonly correlationState?: CorrelationState;
   readonly forkId: string;
   readonly metadata: Record<string, unknown>;
   readonly timestamp: string;

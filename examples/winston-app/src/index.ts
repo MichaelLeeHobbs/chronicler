@@ -4,8 +4,7 @@
 
 import { createApp } from './app.js';
 import { config } from './config/index.js';
-import { system } from './events.js';
-import { chronicle } from './services/chronicler.js';
+import { system } from './services/chronicler.js';
 
 // Create Express app
 const app = createApp();
@@ -13,7 +12,7 @@ const port = config.port;
 
 // Start server
 const server = app.listen(port, () => {
-  chronicle.event(system.events.startup, {
+  system.startup({
     port,
     env: config.environment,
   });
@@ -31,7 +30,7 @@ const server = app.listen(port, () => {
 
 // Graceful shutdown
 const shutdown = (signal: string) => {
-  chronicle.event(system.events.shutdown, {
+  system.shutdown({
     reason: signal,
   });
 
@@ -54,7 +53,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 
 // Handle uncaught errors
 process.on('uncaughtException', (error) => {
-  chronicle.event(system.events.error, {
+  system.error({
     error,
     context: 'uncaughtException',
   });
@@ -63,7 +62,7 @@ process.on('uncaughtException', (error) => {
 });
 
 process.on('unhandledRejection', (reason) => {
-  chronicle.event(system.events.error, {
+  system.error({
     error: reason instanceof Error ? reason : new Error(String(reason)),
     context: 'unhandledRejection',
   });

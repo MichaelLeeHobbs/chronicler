@@ -146,6 +146,26 @@ export class ContextStore {
   }
 
   /**
+   * Create a child store that starts from this store's context, with `overrides` replacing
+   * inherited values. Within the child, later {@link add} calls keep first-write-wins.
+   *
+   * @param overrides - Key-value pairs that take precedence over inherited values
+   * @returns The child store and the validation result for `overrides`
+   */
+  derive(overrides: ContextRecord = {}): {
+    store: ContextStore;
+    validation: ContextValidationResult;
+  } {
+    const inherited = { ...this.context };
+    for (const key of Object.keys(overrides)) {
+      if (Object.hasOwn(inherited, key)) delete inherited[key];
+    }
+    const store = new ContextStore(inherited, this.maxKeys);
+    const validation = store.add(overrides);
+    return { store, validation };
+  }
+
+  /**
    * Return a shallow copy of the current context.
    *
    * @returns A new object containing all accumulated context key-value pairs

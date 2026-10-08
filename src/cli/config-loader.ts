@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { ChroniclerCliConfig } from './config';
-import { DEFAULT_DOCS_CONFIG } from './config';
+import { DEFAULT_DOCS_CONFIG, DEFAULT_LOCKFILE } from './config';
 import { importTsModule } from './ts-import';
 
 /** Dynamically import and validate a chronicler config file. */
@@ -21,9 +21,15 @@ async function importConfigModule(configPath: string): Promise<ChroniclerCliConf
     throw new Error('eventsFile is required in chronicler.config.ts');
   }
 
+  if (config.eventsExport !== undefined && typeof config.eventsExport !== 'string') {
+    throw new Error('eventsExport in chronicler.config.ts must be a string');
+  }
+
   return {
     eventsFile: config.eventsFile,
+    ...(config.eventsExport !== undefined ? { eventsExport: config.eventsExport } : {}),
     docs: { ...DEFAULT_DOCS_CONFIG, ...config.docs },
+    keys: { lockfile: DEFAULT_LOCKFILE, ...config.keys },
   };
 }
 

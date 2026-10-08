@@ -1,57 +1,236 @@
-import { DEFAULT_CORRELATION_TIMEOUT_MS, type LogLevel } from './constants';
-import { field, type FieldBuilder, type InferFields } from './fields';
+import { DEFAULT_CORRELATION_TIMEOUT_MS, LOG_LEVELS, type LogLevel } from './constants';
+import { ChroniclerError } from './errors';
+import { field, type FieldBuilder } from './fields';
+
+/** A record of field builders, as passed to `event({ fields })`. */
+export type FieldDefs = Record<string, FieldBuilder<string, boolean>>;
+
+/** Field definitions of an event that declares no fields. */
+export type NoFields = Record<never, never>;
+
+/** Discriminant stored on every event definition. A string, so it survives two copies of the package. */
+export const EVENT_KIND = 'chronicler:event';
+/** Discriminant stored on every correlation definition. */
+export const CORRELATION_KIND = 'chronicler:correlation';
+
+/** Non-enumerable marker on objects returned by `defineEvents()`. */
+const CATALOG_MARK = Symbol.for('chronicler.catalog');
+/** Non-enumerable marker set on a catalog once another `defineEvents()` call has mounted it. */
+const MOUNTED_MARK = Symbol.for('chronicler.mounted');
+/** Non-enumerable doc string attached to a namespace by `group()`. */
+const NAMESPACE_DOC = Symbol.for('chronicler.namespaceDoc');
 
 /**
- * Event definition with compile-time type safety
+ * A single loggable event.
+ *
+ * Created with {@link event}. Its `key` is empty until the event is placed in a catalog with
+ * {@link defineEvents}, which sets it from the event's path (`admin.login`).
  */
-export interface EventDefinition<
-  Key extends string = string,
-  Fields extends Record<string, FieldBuilder<string, boolean>> = Record<
-    string,
-    FieldBuilder<string, boolean>
-  >,
-> {
-  readonly key: Key;
+export interface EventDefinition<F extends FieldDefs = FieldDefs> {
+  readonly kind: typeof EVENT_KIND;
+  /** Full dotted key, derived from the catalog path (or `keyOverride`). */
+  readonly key: string;
+  /** Explicit wire key that replaces the path-derived key, e.g. to keep a key stable across a rename. */
+  readonly keyOverride?: string;
   readonly level: LogLevel;
   readonly message: string;
   readonly doc?: string;
-  readonly fields?: Fields;
+  readonly fields: F;
 }
 
 /**
- * Helper to extract field types from an event definition
+ * A unit of work with a lifecycle (`.start`, `.complete`, `.fail`, `.timeout`).
+ *
+ * Created with {@link correlation}. `events` holds the events that belong to it.
  */
-export type EventFields<E> =
-  E extends EventDefinition<string, infer F>
-    ? F extends Record<string, FieldBuilder<string, boolean>>
-      ? InferFields<F>
-      : Record<string, never>
-    : never;
-
-export type EventRecord = Record<
-  string,
-  EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>
->;
-
-export interface SystemEventGroup {
+export interface CorrelationDefinition<
+  E extends object = object,
+  CF extends FieldDefs = NoFields,
+  FF extends FieldDefs = NoFields,
+> {
+  readonly kind: typeof CORRELATION_KIND;
   readonly key: string;
-  readonly type: 'system';
+  readonly keyOverride?: string;
   readonly doc?: string;
-  readonly events?: EventRecord;
-  readonly groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
+  /** Idle timeout in milliseconds. `0` disables it. */
+  readonly timeout: number;
+  readonly events: E;
+  /** Extra fields `complete()` accepts, logged on `<key>.complete` next to `duration`. */
+  readonly completeFields: CF;
+  /** Extra fields `fail()` accepts, logged on `<key>.fail` next to `duration` and `error`. */
+  readonly failFields: FF;
 }
 
-export interface CorrelationEventGroup {
-  readonly key: string;
-  readonly type: 'correlation';
+/** Any event definition, whatever its fields. */
+export type AnyEventDefinition = EventDefinition<FieldDefs>;
+/** Any correlation definition, whatever its events. */
+export type AnyCorrelationDefinition = CorrelationDefinition<object, FieldDefs, FieldDefs>;
+
+/**
+ * Names that can't be used for catalog entries, because the emitter tree, correlation handles
+ * or auto-generated lifecycle events already use them. `then` is reserved so a chronicle is never
+ * mistaken for a promise.
+ */
+export const RESERVED_CATALOG_NAMES = [
+  'fork',
+  'run',
+  'log',
+  'addContext',
+  'begin',
+  'start',
+  'complete',
+  'fail',
+  'timeout',
+  'correlationId',
+  'then',
+] as const;
+
+/** A name from {@link RESERVED_CATALOG_NAMES}. */
+export type ReservedCatalogName = (typeof RESERVED_CATALOG_NAMES)[number];
+
+const RESERVED_NAME_SET = new Set<string>(RESERVED_CATALOG_NAMES);
+
+type AnyFunction = (...args: never[]) => unknown;
+
+/**
+ * Compile-time check of a catalog. Each bad entry becomes `never`, so the error points at that
+ * entry instead of turning the whole catalog into `never`.
+ */
+export type CheckCatalog<C> = {
+  readonly [K in keyof C]: K extends ReservedCatalogName
+    ? never
+    : C[K] extends AnyEventDefinition | AnyCorrelationDefinition
+      ? C[K]
+      : C[K] extends AnyFunction
+        ? never
+        : C[K] extends object
+          ? CheckCatalog<C[K]>
+          : never;
+};
+
+/** Like {@link CheckCatalog}, for a correlation's events: correlations can't contain correlations. */
+export type CheckCorrelationEvents<E> = {
+  readonly [K in keyof E]: K extends ReservedCatalogName
+    ? never
+    : E[K] extends AnyEventDefinition
+      ? E[K]
+      : E[K] extends AnyCorrelationDefinition | AnyFunction
+        ? never
+        : E[K] extends object
+          ? CheckCorrelationEvents<E[K]>
+          : never;
+};
+
+interface EventOptions {
+  readonly level: LogLevel;
+  readonly message: string;
+  readonly doc?: string;
+  /** Explicit wire key, replacing the one derived from the catalog path. */
+  readonly key?: string;
+}
+
+/**
+ * Define an event. Place it in a catalog with {@link defineEvents}; its key comes from where it sits.
+ *
+ * @example
+ * ```typescript
+ * const events = defineEvents({
+ *   admin: {
+ *     login: event({
+ *       level: 'audit',
+ *       message: 'User login attempt',
+ *       doc: 'Emitted for authentication attempts',
+ *       fields: { userId: field.string(), success: field.boolean(), ip: field.string().optional() },
+ *     }),
+ *   },
+ * });
+ * ```
+ */
+export function event<const F extends FieldDefs>(
+  options: EventOptions & { readonly fields: F },
+): EventDefinition<F>;
+export function event(
+  options: EventOptions & { readonly fields?: never },
+): EventDefinition<NoFields>;
+export function event(
+  options: EventOptions & { readonly fields?: FieldDefs | undefined },
+): EventDefinition<FieldDefs> | EventDefinition<NoFields> {
+  return {
+    kind: EVENT_KIND,
+    key: '',
+    ...(options.key !== undefined ? { keyOverride: options.key } : {}),
+    level: options.level,
+    message: options.message,
+    ...(options.doc !== undefined ? { doc: options.doc } : {}),
+    fields: options.fields ?? {},
+  };
+}
+
+/**
+ * Define a correlation: a unit of work with a lifecycle and its own events.
+ *
+ * Lifecycle events `<key>.start`, `.complete`, `.fail` and `.timeout` are generated automatically.
+ * The timeout defaults to 5 minutes, resets on any activity, and `0` disables it.
+ */
+export function correlation<
+  const E extends object,
+  const CF extends FieldDefs = NoFields,
+  const FF extends FieldDefs = NoFields,
+>(options: {
   readonly doc?: string;
   readonly timeout?: number;
-  readonly events?: EventRecord;
-  readonly groups?: Record<string, SystemEventGroup | CorrelationEventGroup>;
+  readonly key?: string;
+  readonly events: E & CheckCorrelationEvents<E>;
+  /** Extra fields for `complete()`, e.g. `{ statusCode: field.number() }`. Can't redefine `duration`. */
+  readonly complete?: CF & Partial<Record<'duration', never>>;
+  /** Extra fields for `fail()`. Can't redefine `duration` or `error`. */
+  readonly fail?: FF & Partial<Record<'duration' | 'error', never>>;
+}): CorrelationDefinition<E, CF, FF> {
+  return {
+    kind: CORRELATION_KIND,
+    key: '',
+    ...(options.key !== undefined ? { keyOverride: options.key } : {}),
+    ...(options.doc !== undefined ? { doc: options.doc } : {}),
+    timeout: options.timeout ?? DEFAULT_CORRELATION_TIMEOUT_MS,
+    events: options.events,
+    completeFields: options.complete ?? ({} as CF),
+    failFields: options.fail ?? ({} as FF),
+  };
 }
 
-/** Field definitions for auto-generated correlation lifecycle events. */
-const correlationAutoFields = {
+/** Attach a doc string to a namespace. The doc appears in generated docs. */
+export const group = <const C extends object>(
+  options: { readonly doc: string },
+  children: C,
+): C => {
+  Object.defineProperty(children, NAMESPACE_DOC, { value: options.doc, enumerable: false });
+  return children;
+};
+
+/** Type guard for event definitions. Works across separate copies of the package. */
+export const isEventDefinition = (value: unknown): value is AnyEventDefinition =>
+  typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === EVENT_KIND;
+
+/** Type guard for correlation definitions. Works across separate copies of the package. */
+export const isCorrelationDefinition = (value: unknown): value is AnyCorrelationDefinition =>
+  typeof value === 'object' &&
+  value !== null &&
+  (value as { kind?: unknown }).kind === CORRELATION_KIND;
+
+/** True for objects returned by {@link defineEvents}. */
+export const isCatalog = (value: unknown): value is object =>
+  typeof value === 'object' && value !== null && Object.hasOwn(value, CATALOG_MARK);
+
+/** True for a catalog that has been mounted inside another catalog. */
+export const isMountedCatalog = (value: unknown): boolean =>
+  typeof value === 'object' && value !== null && Object.hasOwn(value, MOUNTED_MARK);
+
+/** The doc string attached to a namespace with {@link group}, if any. */
+export const namespaceDoc = (value: object): string | undefined =>
+  (value as Record<symbol, string | undefined>)[NAMESPACE_DOC];
+
+/** Field definitions for the auto-generated correlation lifecycle events. */
+const LIFECYCLE_FIELDS = {
   start: {},
   complete: {
     duration: field.number().optional().doc('Duration of the correlation in milliseconds'),
@@ -61,230 +240,324 @@ const correlationAutoFields = {
     error: field.error().optional().doc('Error that caused the failure'),
   },
   timeout: {},
-};
+} as const;
 
-export type CorrelationAutoEvents = {
-  [Key in keyof typeof correlationAutoFields]: EventDefinition<
-    string,
-    (typeof correlationAutoFields)[Key]
-  >;
-};
+/** The four auto-generated lifecycle events of a correlation. */
+export interface LifecycleEvents {
+  readonly start: AnyEventDefinition;
+  readonly complete: AnyEventDefinition;
+  readonly fail: AnyEventDefinition;
+  readonly timeout: AnyEventDefinition;
+}
 
-type WithAutoEvents<Event extends EventRecord | undefined> = (Event extends EventRecord
-  ? Event
-  : Record<never, EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>>) &
-  CorrelationAutoEvents;
-
-/** Maximum allowed length for event keys to prevent unbounded key sizes. */
-const MAX_EVENT_KEY_LENGTH = 256;
-
-const EVENT_KEY_RE = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/;
-
-/** Validate an event or group key against length and format constraints. */
-const validateEventKey = (key: string, label: string): void => {
-  if (key.length > MAX_EVENT_KEY_LENGTH) {
-    throw new Error(
-      `${label} key "${key.slice(0, 50)}..." exceeds maximum length of ${MAX_EVENT_KEY_LENGTH} characters.`,
-    );
-  }
-  if (!EVENT_KEY_RE.test(key)) {
-    throw new Error(
-      `Invalid ${label} key "${key}". Keys must be dotted camelCase identifiers (e.g. "user.created", "http.request.started").`,
-    );
-  }
-};
+/** Extra fields a correlation declares for its `.complete` and `.fail` events. */
+export interface LifecycleExtras {
+  readonly completeFields?: FieldDefs;
+  readonly failFields?: FieldDefs;
+}
 
 /**
- * Define an event with compile-time type safety.
+ * Build the lifecycle events for a correlation key.
  *
- * `as const` is **not required** — `defineEvent` uses TypeScript `const` generic
- * parameters (TS 5.0+), so literal types and field builders are narrowed automatically.
- * You may still add `as const` if you prefer, but it has no effect.
- *
- * @example
- * ```typescript
- * const userCreated = defineEvent({
- *   key: 'user.created',
- *   level: 'info',
- *   message: 'User created',
- *   doc: 'Emitted when a new user is created',
- *   fields: {
- *     userId: field.string().doc('User ID'),
- *     email: field.string(),
- *     age: field.number().optional(),
- *   },
- * });
- * ```
- *
- * @param event - Event definition with key, level, message, optional doc and fields
- * @returns The same event definition, typed for compile-time inference
- * @throws {Error} If the event key does not match the required dotted camelCase format
+ * @param correlationKey - Full key of the correlation (e.g. `http.request`)
+ * @param extras - Extra fields declared with `correlation({ complete, fail })`
+ * @returns Event definitions for `.start`, `.complete`, `.fail` and `.timeout`
  */
-export const defineEvent = <
-  const Key extends string,
-  const Fields extends Record<string, FieldBuilder<string, boolean>>,
->(
-  event: EventDefinition<Key, Fields>,
-): EventDefinition<Key, Fields> => {
-  validateEventKey(event.key, 'Event');
-  return event;
-};
-
-/**
- * Auto-prefix event keys in a group's events with `${groupKey}.${propertyName}`
- * when the event's key doesn't already start with `${groupKey}.`.
- * Existing fully-qualified keys pass through unchanged.
- *
- * @param groupKey - The parent group's key used as prefix
- * @param events - Record of events to prefix (may be undefined)
- * @returns New event record with prefixed keys, or undefined if input was undefined
- */
-const prefixEventKeys = (
-  groupKey: string,
-  events: EventRecord | undefined,
-): EventRecord | undefined => {
-  if (!events) return events;
-  const result: EventRecord = {};
-  for (const [name, event] of Object.entries(events)) {
-    if (event.key.startsWith(`${groupKey}.`)) {
-      result[name] = event;
-    } else {
-      result[name] = { ...event, key: `${groupKey}.${name}` };
-    }
-  }
-  return result;
-};
-
-/**
- * Define a system or correlation event group for organizational purposes.
- *
- * Groups provide a namespace hierarchy for events. For correlation groups,
- * prefer {@link defineCorrelationGroup} which adds automatic lifecycle events.
- *
- * @param group - Event group definition (system or correlation)
- * @returns The same group definition, typed for compile-time inference
- */
-export const defineEventGroup = <Group extends SystemEventGroup | CorrelationEventGroup>(
-  group: Group,
-): Group => {
-  validateEventKey(group.key, 'Group');
-  const prefixed = prefixEventKeys(group.key, group.events);
-  if (prefixed !== group.events) {
-    return { ...group, events: prefixed } as Group;
-  }
-  return group;
-};
-
-/** Build the four auto-generated lifecycle events for a correlation group. */
-const buildAutoEvents = (groupKey: string): CorrelationAutoEvents => ({
+export const lifecycleEvents = (
+  correlationKey: string,
+  extras: LifecycleExtras = {},
+): LifecycleEvents => ({
   start: {
-    key: `${groupKey}.start`,
+    kind: EVENT_KIND,
+    key: `${correlationKey}.start`,
     level: 'info',
-    message: `${groupKey} started`,
+    message: `${correlationKey} started`,
     doc: 'Auto-generated correlation start event',
+    fields: LIFECYCLE_FIELDS.start,
   },
   complete: {
-    key: `${groupKey}.complete`,
+    kind: EVENT_KIND,
+    key: `${correlationKey}.complete`,
     level: 'info',
-    message: `${groupKey} completed`,
+    message: `${correlationKey} completed`,
     doc: 'Auto-generated correlation completion event',
-    fields: correlationAutoFields.complete,
+    fields: { ...extras.completeFields, ...LIFECYCLE_FIELDS.complete },
   },
   fail: {
-    key: `${groupKey}.fail`,
+    kind: EVENT_KIND,
+    key: `${correlationKey}.fail`,
     level: 'error',
-    message: `${groupKey} failed`,
+    message: `${correlationKey} failed`,
     doc: 'Auto-generated correlation failure event',
-    fields: correlationAutoFields.fail,
+    fields: { ...extras.failFields, ...LIFECYCLE_FIELDS.fail },
   },
   timeout: {
-    key: `${groupKey}.timeout`,
+    kind: EVENT_KIND,
+    key: `${correlationKey}.timeout`,
     level: 'warn',
-    message: `${groupKey} timed out`,
+    message: `${correlationKey} timed out`,
     doc: 'Auto-generated correlation timeout event',
+    fields: LIFECYCLE_FIELDS.timeout,
   },
 });
 
+/** Maximum allowed length for event keys. */
+const MAX_EVENT_KEY_LENGTH = 256;
+const NAME_RE = /^[a-z][a-zA-Z0-9]*$/;
+const KEY_RE = /^[a-z][a-zA-Z0-9]*(\.[a-z][a-zA-Z0-9]*)*$/;
+
+const catalogError = (message: string): ChroniclerError =>
+  new ChroniclerError('INVALID_CATALOG', message);
+
+const describePath = (path: string): string => (path === '' ? 'the catalog root' : `"${path}"`);
+
+const checkName = (name: string, parentPath: string): void => {
+  const where = parentPath === '' ? name : `${parentPath}.${name}`;
+  if (RESERVED_NAME_SET.has(name)) {
+    throw catalogError(
+      `Catalog entry "${where}" uses the reserved name "${name}". Reserved names: ${RESERVED_CATALOG_NAMES.join(', ')}.`,
+    );
+  }
+  if (!NAME_RE.test(name)) {
+    throw catalogError(
+      `Catalog entry "${where}" has an invalid name. Names must be camelCase identifiers starting with a lowercase letter.`,
+    );
+  }
+};
+
+const checkKey = (key: string): void => {
+  if (key.length > MAX_EVENT_KEY_LENGTH) {
+    throw catalogError(
+      `Event key "${key.slice(0, 50)}..." exceeds the maximum length of ${MAX_EVENT_KEY_LENGTH} characters.`,
+    );
+  }
+  if (!KEY_RE.test(key)) {
+    throw catalogError(
+      `Invalid event key "${key}". Keys must be dotted camelCase identifiers (e.g. "user.created").`,
+    );
+  }
+};
+
+/** One entry yielded by {@link walkCatalog}. */
+export type CatalogEntry =
+  | {
+      readonly kind: 'event';
+      readonly key: string;
+      readonly path: string;
+      readonly definition: AnyEventDefinition;
+      /** Key of the correlation this event belongs to, if any. */
+      readonly correlationKey?: string;
+      /** True for auto-generated lifecycle events. */
+      readonly lifecycle: boolean;
+    }
+  | {
+      readonly kind: 'correlation';
+      readonly key: string;
+      readonly path: string;
+      readonly definition: AnyCorrelationDefinition;
+    }
+  | {
+      readonly kind: 'namespace';
+      readonly key: string;
+      readonly path: string;
+      readonly doc?: string;
+      /** Key of the correlation this namespace sits in, if any. */
+      readonly correlationKey?: string;
+    };
+
+interface WalkState {
+  readonly entries: CatalogEntry[];
+  readonly keys: Map<string, string>;
+}
+
+const claimKey = (state: WalkState, key: string, path: string): void => {
+  checkKey(key);
+  const existing = state.keys.get(key);
+  if (existing !== undefined) {
+    throw catalogError(
+      `Duplicate event key "${key}" at ${describePath(path)} (already used at ${describePath(existing)}).`,
+    );
+  }
+  state.keys.set(key, path);
+};
+
+interface Placement {
+  readonly path: string;
+  readonly derivedKey: string;
+  readonly correlationKey: string | undefined;
+}
+
+const walkEvent = (state: WalkState, def: AnyEventDefinition, at: Placement): void => {
+  const { path, correlationKey } = at;
+  if (!Object.hasOwn(LOG_LEVELS, def.level)) {
+    throw catalogError(`Event ${describePath(path)} has an invalid level "${String(def.level)}".`);
+  }
+  const key = def.keyOverride ?? at.derivedKey;
+  claimKey(state, key, path);
+  state.entries.push({
+    kind: 'event',
+    key,
+    path,
+    definition: { ...def, key },
+    ...(correlationKey !== undefined ? { correlationKey } : {}),
+    lifecycle: false,
+  });
+};
+
+const checkLifecycleExtras = (def: AnyCorrelationDefinition, path: string): void => {
+  const clashes = [
+    ...Object.keys(def.completeFields ?? {}).filter((name) => name === 'duration'),
+    ...Object.keys(def.failFields ?? {}).filter((name) => name === 'duration' || name === 'error'),
+  ];
+  if (clashes.length > 0) {
+    throw catalogError(
+      `Correlation ${describePath(path)} redefines built-in lifecycle field(s): ${clashes.join(', ')}.`,
+    );
+  }
+};
+
+const walkCorrelation = (
+  state: WalkState,
+  def: AnyCorrelationDefinition,
+  path: string,
+  derivedKey: string,
+): void => {
+  if (!Number.isFinite(def.timeout) || def.timeout < 0) {
+    throw catalogError(
+      `Correlation ${describePath(path)} has an invalid timeout ${def.timeout}. It must be a non-negative number.`,
+    );
+  }
+  const key = def.keyOverride ?? derivedKey;
+  checkKey(key);
+  checkLifecycleExtras(def, path);
+  state.entries.push({ kind: 'correlation', key, path, definition: { ...def, key } });
+  const { start, complete, fail, timeout } = lifecycleEvents(key, def);
+  for (const life of [start, complete, fail, timeout]) {
+    claimKey(state, life.key, `${path} (lifecycle)`);
+    state.entries.push({
+      kind: 'event',
+      key: life.key,
+      path: life.key,
+      definition: life,
+      correlationKey: key,
+      lifecycle: true,
+    });
+  }
+  walkChildren(state, def.events, { path, derivedKey: key, correlationKey: key });
+};
+
+const walkNode = (state: WalkState, node: unknown, at: Placement): void => {
+  const { path, derivedKey: keyPrefix, correlationKey } = at;
+  if (typeof node !== 'object' || node === null) {
+    throw catalogError(
+      `Catalog entry ${describePath(path)} is ${node === undefined ? 'undefined' : 'not an object'}. ` +
+        'If it is imported from another module, check for a circular import between your events module and the module that calls createChronicle().',
+    );
+  }
+  if (isEventDefinition(node)) {
+    walkEvent(state, node, at);
+    return;
+  }
+  if (isCorrelationDefinition(node)) {
+    if (correlationKey !== undefined) {
+      throw catalogError(
+        `Correlation ${describePath(path)} is defined inside correlation "${correlationKey}". Correlations can't contain correlations; start one inside another at runtime instead.`,
+      );
+    }
+    walkCorrelation(state, node, path, keyPrefix);
+    return;
+  }
+  const doc = namespaceDoc(node);
+  state.entries.push({
+    kind: 'namespace',
+    key: keyPrefix,
+    path,
+    ...(doc !== undefined ? { doc } : {}),
+    ...(correlationKey !== undefined ? { correlationKey } : {}),
+  });
+  walkChildren(state, node, at);
+};
+
+const walkChildren = (state: WalkState, node: object, at: Placement): void => {
+  const { path, derivedKey, correlationKey } = at;
+  for (const [name, child] of Object.entries(node)) {
+    checkName(name, path);
+    walkNode(state, child as unknown, {
+      path: path === '' ? name : `${path}.${name}`,
+      derivedKey: derivedKey === '' ? name : `${derivedKey}.${name}`,
+      correlationKey,
+    });
+  }
+};
+
 /**
- * Define a correlation event group with automatic lifecycle events
+ * Walk a catalog and list every namespace, correlation and event with its resolved key.
+ * Lifecycle events of each correlation are included with `lifecycle: true`.
  *
- * **What is a correlation group?**
- * A correlation represents a logical unit of work with a defined lifecycle
- * (start, complete, timeout). Common examples: HTTP requests, batch jobs, workflows.
+ * @param catalog - A catalog object (from {@link defineEvents} or a plain nested object)
+ * @returns Entries in definition order
+ * @throws {ChroniclerError} `INVALID_CATALOG` for undefined entries (often a circular import),
+ *   reserved or invalid names, invalid levels or timeouts, nested correlation definitions and duplicate keys
+ */
+export const walkCatalog = (catalog: object): CatalogEntry[] => {
+  const state: WalkState = { entries: [], keys: new Map() };
+  walkChildren(state, catalog, { path: '', derivedKey: '', correlationKey: undefined });
+  return state.entries;
+};
+
+const childKey = (prefix: string, name: string): string =>
+  prefix === '' ? name : `${prefix}.${name}`;
+
+/** Rebuild a namespace with every definition's `key` set from its path. */
+const stampNamespace = (node: object, keyPrefix: string): object => {
+  if (keyPrefix !== '' && isCatalog(node) && !isMountedCatalog(node)) {
+    Object.defineProperty(node, MOUNTED_MARK, { value: true, enumerable: false });
+  }
+  const out: Record<string, object> = {};
+  for (const [name, child] of Object.entries(node)) {
+    out[name] = stamp(child as object, childKey(keyPrefix, name));
+  }
+  const doc = namespaceDoc(node);
+  if (doc !== undefined) {
+    Object.defineProperty(out, NAMESPACE_DOC, { value: doc, enumerable: false });
+  }
+  return out;
+};
+
+/** Rebuild a catalog subtree with every definition's `key` set from its path. */
+const stamp = (node: object, keyPrefix: string): object => {
+  if (isEventDefinition(node)) {
+    return { ...node, key: node.keyOverride ?? keyPrefix };
+  }
+  if (isCorrelationDefinition(node)) {
+    const key = node.keyOverride ?? keyPrefix;
+    return { ...node, key, events: stampNamespace(node.events, key) };
+  }
+  return stampNamespace(node, keyPrefix);
+};
+
+/**
+ * Define an event catalog: a nested object whose leaves are {@link event} and
+ * {@link correlation} definitions. Each definition's `key` is set from its path, so
+ * `events.admin.login.key === 'admin.login'`.
  *
- * **Automatic events added:**
- * - `{key}.start` - Emitted when startCorrelation() is called
- * - `{key}.complete` - Emitted when complete() is called (includes duration)
- * - `{key}.fail` - Emitted when fail() is called (includes duration and error)
- * - `{key}.timeout` - Emitted if no activity within timeout period
- *
- * **Timeout behavior:**
- * - Defaults to 5 minutes (300,000ms) if not specified
- * - Timer resets on ANY activity (log events, fork creation)
- * - Set to 0 to disable timeout
- *
- * **Type safety:**
- * TypeScript will infer all event keys and field types. The return type
- * includes both your events and the auto-generated lifecycle events.
- *
- * @param group - Correlation group definition
- * @returns Normalized group with auto-events and default timeout
+ * Catalogs compose: a catalog can be mounted inside another, and keys are re-derived from the
+ * outer path.
  *
  * @example
  * ```typescript
- * const requestGroup = defineCorrelationGroup({
- *   key: 'api.request',
- *   doc: 'HTTP request lifecycle',
- *   timeout: 30_000, // 30 seconds
- *   events: {
- *     validated: defineEvent({
- *       key: 'api.request.validated',
- *       level: 'debug',
- *       message: 'Request validated',
- *       doc: 'Validation passed',
- *     }),
- *     processed: defineEvent({
- *       key: 'api.request.processed',
- *       level: 'info',
- *       message: 'Request processed',
- *       doc: 'Processing complete',
- *       fields: { statusCode: { type: 'number', required: true } },
- *     }),
+ * export const events = defineEvents({
+ *   admin: {
+ *     login: event({ level: 'audit', message: 'User login attempt', fields: { userId: field.string() } }),
  *   },
  * });
- *
- * // Auto-events available:
- * // - requestGroup.events.start
- * // - requestGroup.events.complete
- * // - requestGroup.events.timeout
- * // - requestGroup.events.validated (your event)
- * // - requestGroup.events.processed (your event)
  * ```
+ *
+ * @throws {ChroniclerError} `INVALID_CATALOG` when the catalog is malformed (see {@link walkCatalog})
  */
-export const defineCorrelationGroup = <Group extends CorrelationEventGroup>(
-  group: Group,
-): Omit<Group, 'events' | 'timeout'> & {
-  events: WithAutoEvents<Group['events']>;
-  timeout: number;
-} => {
-  validateEventKey(group.key, 'Group');
-  const autoEvents = buildAutoEvents(group.key);
-  const prefixed = prefixEventKeys(group.key, group.events) ?? {};
-
-  const autoKeys = Object.keys(autoEvents);
-  const conflicts = autoKeys.filter((k) => Object.hasOwn(prefixed, k));
-  if (conflicts.length > 0) {
-    throw new Error(
-      `Correlation group "${group.key}" defines events that collide with auto-generated lifecycle events: ${conflicts.join(', ')}. Rename these events to avoid the conflict.`,
-    );
-  }
-
-  return {
-    ...group,
-    timeout: group.timeout ?? DEFAULT_CORRELATION_TIMEOUT_MS,
-    events: {
-      ...prefixed,
-      ...autoEvents,
-    } as WithAutoEvents<Group['events']>,
-  };
-};
+export function defineEvents<const C extends object>(catalog: C & CheckCatalog<C>): C {
+  walkCatalog(catalog);
+  const stamped = stamp(catalog, '');
+  Object.defineProperty(stamped, CATALOG_MARK, { value: true, enumerable: false });
+  return stamped as C;
+}

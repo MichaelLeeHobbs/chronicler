@@ -1,12 +1,10 @@
 /**
- * Valid event definitions for testing CLI parser.
+ * Valid event catalog for testing the CLI parser.
  */
 
-import { defineCorrelationGroup, defineEvent, defineEventGroup } from '../../../src/core/events';
-import { field } from '../../../src/core/fields';
+import { correlation, defineEvents, event, field, group } from '../../../src/index';
 
-export const startupEvent = defineEvent({
-  key: 'system.startup',
+const startup = event({
   level: 'info',
   message: 'Application started',
   doc: 'Logged when the application starts',
@@ -14,40 +12,38 @@ export const startupEvent = defineEvent({
     port: field.number().doc('Server port'),
     mode: field.string().optional().doc('Runtime mode'),
   },
-} as const);
-
-export const shutdownEvent = defineEvent({
-  key: 'system.shutdown',
-  level: 'info',
-  message: 'Application shutdown',
-  doc: 'Logged when the application shuts down',
 });
 
-export const systemEvents = defineEventGroup({
-  key: 'system',
-  type: 'system',
-  doc: 'System-level events',
-  events: {
-    startup: startupEvent,
-    shutdown: shutdownEvent,
-  },
-});
-
-export const queryEvents = defineCorrelationGroup({
-  key: 'api.query',
-  type: 'correlation',
-  doc: 'API query operations',
-  timeout: 30000,
-  events: {
-    executed: defineEvent({
-      key: 'api.query.executed',
-      level: 'info',
-      message: 'Query executed',
-      doc: 'Logged when query completes',
-      fields: {
-        duration: field.number().doc('Query duration in ms'),
-        resultCount: field.number().doc('Number of results'),
+export const events = defineEvents({
+  system: group(
+    { doc: 'System-level events' },
+    {
+      startup,
+      shutdown: event({
+        level: 'info',
+        message: 'Application shutdown',
+        doc: 'Logged when the application shuts down',
+      }),
+    },
+  ),
+  api: {
+    query: correlation({
+      doc: 'API query operations',
+      timeout: 30000,
+      events: {
+        executed: event({
+          level: 'info',
+          message: 'Query executed',
+          doc: 'Logged when query completes',
+          fields: {
+            duration: field.number().doc('Query duration in ms'),
+            resultCount: field.number().doc('Number of results'),
+          },
+        }),
       },
-    } as const),
+    }),
   },
 });
+
+// The same catalog exported twice must only be documented once.
+export default events;

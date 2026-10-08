@@ -1,7 +1,7 @@
 {
   "name": "@ubercode/chronicler-cli",
   "version": "1.0.0",
-  "description": "CLI for Chronicler: validate event definitions and generate event documentation",
+  "description": "CLI for Chronicler: validate event catalogs, generate event documentation and lock event keys",
   "keywords": [
     "logging",
     "structured-logging",
@@ -40,7 +40,7 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@ubercode/chronicler": ">=1.0.0"
+    "@ubercode/chronicler": ">=2.0.0"
   },
   "dependencies": {
     "commander": "14.0.2",
