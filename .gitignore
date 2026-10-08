@@ -10,6 +10,8 @@ yarn-error.log*
 
 .vscode/*
 /dist
+/packages/*/dist
+/packages/*/node_modules
 /coverage
 /.husky/_
 /.changeset/*.md

@@ -35,9 +35,6 @@
     },
     "./package.json": "./package.json"
   },
-  "bin": {
-    "chronicler": "./dist/cli.js"
-  },
   "files": [
     "dist",
     "README.md",
@@ -58,7 +55,7 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "dev": "tsup --watch",
-    "build": "pnpm run clean && tsup",
+    "build": "pnpm run clean && tsup && pnpm --filter @ubercode/chronicler-cli run build",
     "check": "pnpm run lint && pnpm run typecheck && pnpm run test",
     "prepare": "husky",
     "prepublishOnly": "pnpm run check && pnpm run build",
@@ -91,6 +88,8 @@
     "@typescript-eslint/eslint-plugin": "8.46.4",
     "@typescript-eslint/parser": "8.46.4",
     "@vitest/coverage-v8": "4.0.9",
+    "commander": "14.0.2",
+    "esbuild": "^0.28.1",
     "eslint": "9.39.1",
     "eslint-config-prettier": "10.1.8",
     "eslint-import-resolver-typescript": "4.4.4",
@@ -103,10 +102,6 @@
     "tsup": "8.5.1",
     "typescript": "5.9.3",
     "vitest": "4.0.9"
-  },
-  "dependencies": {
-    "commander": "14.0.2",
-    "esbuild": "^0.27.3"
   },
   "packageManager": "pnpm@10.18.0",
   "pnpm": {

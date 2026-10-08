@@ -1,0 +1,54 @@
+{
+  "name": "@ubercode/chronicler-cli",
+  "version": "1.0.0",
+  "description": "CLI for Chronicler: validate event definitions and generate event documentation",
+  "keywords": [
+    "logging",
+    "structured-logging",
+    "chronicler",
+    "cli",
+    "documentation"
+  ],
+  "license": "MIT",
+  "author": "MichaelLeeHobbs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MichaelLeeHobbs/chronicler.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/MichaelLeeHobbs/chronicler/issues"
+  },
+  "homepage": "https://github.com/MichaelLeeHobbs/chronicler#cli",
+  "type": "module",
+  "bin": {
+    "chronicler": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "pnpm run clean && tsup"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@ubercode/chronicler": ">=1.0.0"
+  },
+  "dependencies": {
+    "commander": "14.0.2",
+    "esbuild": "^0.28.1"
+  },
+  "devDependencies": {
+    "@ubercode/chronicler": "workspace:*",
+    "rimraf": "6.1.0",
+    "tsup": "8.5.1"
+  }
+}
