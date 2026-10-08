@@ -1,6 +1,6 @@
 /**
  * Event key lockfile: a sorted, stable snapshot of every event key in the catalog (including
- * correlation lifecycle keys) with its level and fields, used to catch accidental breaking
+ * span lifecycle keys) with its level and fields, used to catch accidental breaking
  * changes to the wire contract (`chronicler keys --write` / `--check`).
  */
 
@@ -8,15 +8,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { applyEol, type EolStyle } from './eol';
-import type { ParsedEventTree } from './types';
+import type { ParsedEventTree, ParsedField } from './types';
 
 /** Lockfile format version. */
 export const LOCKFILE_VERSION = 1;
 
 /** A field as recorded in the lockfile. */
 export interface LockedField {
+  /** Field type; arrays are recorded as `<item type>[]` (`string[]`, `enum[]`). */
   readonly type: string;
   readonly required: boolean;
+  /** Allowed values of an enum field or of an array of enums. Removing one is breaking. */
+  readonly values?: readonly string[];
+  /** Present when the field is redacted. Adding or removing it is breaking. */
+  readonly sensitive?: true;
 }
 
 /** An event as recorded in the lockfile. */
@@ -45,7 +50,7 @@ export interface KeyDiff {
   readonly removed: string[];
   /** Keys whose level changed, or whose fields were removed or changed type or required-ness (breaking). */
   readonly changed: KeyChange[];
-  /** Keys whose only change is new fields (non-breaking). */
+  /** Keys whose only changes are new fields or new enum values (non-breaking). */
   readonly extended: KeyChange[];
 }
 
@@ -53,6 +58,13 @@ const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0
 
 const sortedEntries = <T>(record: Readonly<Record<string, T>>): [string, T][] =>
   Object.entries(record).sort(([a], [b]) => byCodeUnit(a, b));
+
+const lockField = (field: ParsedField): LockedField => ({
+  type: field.type === 'array' ? `${field.items ?? 'unknown'}[]` : field.type,
+  required: field.required,
+  ...(field.values !== undefined ? { values: [...field.values].sort(byCodeUnit) } : {}),
+  ...(field.sensitive ? { sensitive: true as const } : {}),
+});
 
 /**
  * Build the lockfile contents for a parsed catalog. Keys and field names are sorted.
@@ -66,7 +78,7 @@ export function buildLockfile(tree: ParsedEventTree): KeyLockfile {
   for (const event of sorted) {
     const fields: Record<string, LockedField> = {};
     for (const [name, field] of sortedEntries(event.fields)) {
-      fields[name] = { type: field.type, required: field.required };
+      fields[name] = lockField(field);
     }
     events[event.key] = { level: event.level, fields };
   }
@@ -87,7 +99,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isLockedField = (value: unknown): value is LockedField =>
-  isRecord(value) && typeof value.type === 'string' && typeof value.required === 'boolean';
+  isRecord(value) &&
+  typeof value.type === 'string' &&
+  typeof value.required === 'boolean' &&
+  (value.values === undefined ||
+    (Array.isArray(value.values) && value.values.every((v) => typeof v === 'string'))) &&
+  (value.sensitive === undefined || value.sensitive === true);
 
 const isLockedEvent = (value: unknown): value is LockedEvent =>
   isRecord(value) &&
@@ -133,7 +150,28 @@ export function writeLockfile(filePath: string, lockfile: KeyLockfile, eol?: Eol
 }
 
 const describeField = (field: LockedField): string =>
-  `${field.type}${field.required ? '' : ', optional'}`;
+  `${field.type}${field.required ? '' : ', optional'}${field.sensitive ? ', sensitive' : ''}`;
+
+const quoted = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(', ');
+
+/** Compare one field present in both; returns [breaking, additive] descriptions. */
+function diffField(name: string, before: LockedField, after: LockedField): [string[], string[]] {
+  if (
+    after.type !== before.type ||
+    after.required !== before.required ||
+    after.sensitive !== before.sensitive
+  ) {
+    return [[`field "${name}": ${describeField(before)} → ${describeField(after)}`], []];
+  }
+  const beforeValues = before.values ?? [];
+  const afterValues = after.values ?? [];
+  const removed = beforeValues.filter((v) => !afterValues.includes(v));
+  const added = afterValues.filter((v) => !beforeValues.includes(v));
+  return [
+    removed.length > 0 ? [`field "${name}": values removed (${quoted(removed)})`] : [],
+    added.length > 0 ? [`field "${name}": values added (${quoted(added)})`] : [],
+  ];
+}
 
 /** Describe the field changes of one key; returns [breaking, additive] descriptions. */
 function diffFields(locked: LockedEvent, current: LockedEvent): [string[], string[]] {
@@ -143,8 +181,10 @@ function diffFields(locked: LockedEvent, current: LockedEvent): [string[], strin
     const after = current.fields[name];
     if (!after) {
       breaking.push(`field "${name}" removed`);
-    } else if (after.type !== before.type || after.required !== before.required) {
-      breaking.push(`field "${name}": ${describeField(before)} → ${describeField(after)}`);
+    } else {
+      const [fieldBreaking, fieldAdditive] = diffField(name, before, after);
+      breaking.push(...fieldBreaking);
+      additive.push(...fieldAdditive);
     }
   }
   for (const [name, after] of sortedEntries(current.fields)) {

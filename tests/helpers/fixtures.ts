@@ -1,6 +1,6 @@
 import type { ChroniclerConfig } from '../../src/core/chronicle';
 import { createChronicle } from '../../src/core/chronicle';
-import { correlation, defineEvents, event, group } from '../../src/core/events';
+import { defineEvents, event, group, span } from '../../src/core/events';
 import { field } from '../../src/core/fields';
 import { MockLoggerBackend } from './mock-logger';
 
@@ -36,7 +36,7 @@ export const events = defineEvents({
     },
   ),
   http: {
-    request: correlation({
+    request: span({
       doc: 'HTTP request lifecycle',
       timeout: 100,
       complete: { status: field.number().optional() },
@@ -49,7 +49,7 @@ export const events = defineEvents({
     }),
   },
   job: {
-    batch: correlation({
+    batch: span({
       timeout: 0,
       events: { step: event({ level: 'info', message: 'step', fields: { n: field.number() } }) },
     }),
@@ -58,17 +58,18 @@ export const events = defineEvents({
 
 export type Events = typeof events;
 
-/** Correlation id generator producing `c1`, `c2`, ... */
-export const sequentialIds = (): (() => string) => {
+/** Span id generator producing `c1`, `c2`, ... */
+export const sequentialIds = (prefix = 'c'): (() => string) => {
   let n = 0;
-  return () => `c${++n}`;
+  return () => `${prefix}${++n}`;
 };
 
-/** A chronicle over {@link events} with a mock backend and predictable correlation ids. */
+/** A chronicle over {@link events} with a mock backend and predictable span ids. */
 export const setup = (config: Omit<ChroniclerConfig<Events>, 'events' | 'backend'> = {}) => {
   const mock = new MockLoggerBackend();
   const chronicle = createChronicle({
-    correlationIdGenerator: sequentialIds(),
+    traceIdGenerator: sequentialIds('t'),
+    spanIdGenerator: sequentialIds(),
     ...config,
     events,
     backend: mock.backend,

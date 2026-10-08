@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { LogBackend } from '../../src/core/backend';
 import { createChronicle } from '../../src/core/chronicle';
 import { ChroniclerError } from '../../src/core/errors';
-import { correlation, defineEvents, event } from '../../src/core/events';
+import { defineEvents, event, span } from '../../src/core/events';
 import { field } from '../../src/core/fields';
 import { events, setup } from '../helpers/fixtures';
 import { MockLoggerBackend } from '../helpers/mock-logger';
@@ -31,7 +31,7 @@ describe('createChronicle', () => {
 
   it('throws when metadata uses reserved keys', () => {
     const mock = new MockLoggerBackend();
-    for (const key of ['eventKey', 'rootCorrelationId', 'correlationState']) {
+    for (const key of ['eventKey', 'traceId', 'spanState']) {
       expect(() =>
         createChronicle({ events, backend: mock.backend, metadata: { [key]: 'bad' } }),
       ).toThrow(`Reserved fields cannot be used in metadata: ${key}`);
@@ -72,7 +72,7 @@ describe('createChronicle', () => {
 });
 
 describe('emitter tree', () => {
-  it('mirrors the catalog: events are functions, correlations are starters', () => {
+  it('mirrors the catalog: events are functions, spans are starters', () => {
     const { chronicle } = setup();
     expect(typeof chronicle.admin.login).toBe('function');
     expect(typeof chronicle.http.request.begin).toBe('function');
@@ -117,7 +117,7 @@ describe('emitter tree', () => {
       events: {
         auth: {
           login: event({ level: 'info', message: 'x', key: 'legacy.login' }),
-          flow: correlation({
+          flow: span({
             key: 'legacy.flow',
             events: { step: event({ level: 'info', message: 's' }) },
           }),
@@ -186,36 +186,35 @@ describe('emitter tree', () => {
 });
 
 describe('payload shape', () => {
-  it('has exactly the base fields outside a correlation', () => {
+  it('has exactly the base fields outside a span', () => {
     const { mock, chronicle } = setup({ metadata: { svc: 'api' } });
     chronicle.admin.heartbeat();
     const payload = mock.getLastPayload()!;
     expect(Object.keys(payload).sort()).toEqual(
-      ['correlationId', 'eventKey', 'fields', 'forkId', 'metadata', 'timestamp'].sort(),
+      ['eventKey', 'fields', 'forkId', 'metadata', 'timestamp'].sort(),
     );
     expect(payload).toMatchObject({
       eventKey: 'admin.heartbeat',
-      correlationId: '',
       forkId: '0',
       fields: {},
       metadata: { svc: 'api' },
     });
   });
 
-  it('adds rootCorrelationId (but not parent or state) in an active top-level correlation', () => {
+  it('adds traceId (but not parent or state) in an active top-level span', () => {
     const { mock, chronicle } = setup();
     const req = chronicle.http.request.begin();
     req.ping();
     const payload = mock.getLastPayload()!;
-    expect(payload.correlationId).toBe('c1');
-    expect(payload.rootCorrelationId).toBe('c1');
-    expect(payload).not.toHaveProperty('parentCorrelationId');
-    expect(payload).not.toHaveProperty('correlationState');
+    expect(payload.spanId).toBe('c1');
+    expect(payload.traceId).toBe('t1');
+    expect(payload).not.toHaveProperty('parentSpanId');
+    expect(payload).not.toHaveProperty('spanState');
     expect(payload).not.toHaveProperty('_validation');
     req.complete();
   });
 
-  it('adds parentCorrelationId only for nested correlations', () => {
+  it('adds parentSpanId only for nested spans', () => {
     const { mock, chronicle } = setup();
     chronicle.http.request.run((req) => {
       chronicle.job.batch.run((batch) => {
@@ -226,19 +225,19 @@ describe('payload shape', () => {
     });
     const step = mock.findByKey('job.batch.step')!;
     expect(step).toMatchObject({
-      correlationId: 'c2',
-      parentCorrelationId: 'c1',
-      rootCorrelationId: 'c1',
+      spanId: 'c2',
+      parentSpanId: 'c1',
+      traceId: 't1',
     });
   });
 
-  it('adds correlationState only once a correlation is no longer active', () => {
+  it('adds spanState only once a span is no longer active', () => {
     const { mock, chronicle } = setup();
     const req = chronicle.http.request.begin();
     req.complete();
     req.ping();
-    expect(mock.findByKey('http.request.complete')).not.toHaveProperty('correlationState');
-    expect(mock.findByKey('http.request.ping')?.correlationState).toBe('completed');
+    expect(mock.findByKey('http.request.complete')).not.toHaveProperty('spanState');
+    expect(mock.findByKey('http.request.ping')?.spanState).toBe('completed');
   });
 
   it('adds _validation only when there is something to report', () => {
@@ -402,7 +401,7 @@ describe('strict mode', () => {
     expect(mock.getLastPayload()?._validation).toEqual({ unknownFields: ['extra'] });
   });
 
-  it('applies to correlation events', () => {
+  it('applies to span events', () => {
     const { chronicle } = setup({ strict: true });
     const req = chronicle.http.request.begin();
     expect(() => req.received({} as never)).toThrow(ChroniclerError);
@@ -462,7 +461,6 @@ describe('log() escape hatch', () => {
     expect(entry?.payload).toMatchObject({
       eventKey: '',
       fields: { foo: 'bar' },
-      correlationId: '',
       forkId: '0',
       metadata: { app: 'test' },
     });
@@ -481,15 +479,15 @@ describe('log() escape hatch', () => {
     expect(mock.getLastPayload()?.fields).toEqual({ s: 'a\\nb', n: 1 });
   });
 
-  it('works on forks and correlation handles', () => {
+  it('works on forks and span handles', () => {
     const { mock, chronicle } = setup();
     chronicle.fork().log('info', 'from fork');
     const req = chronicle.http.request.begin();
-    req.log('info', 'from correlation');
-    req.fork().log('info', 'from correlation fork');
+    req.log('info', 'from span');
+    req.fork().log('info', 'from span fork');
     const logs = mock.getPayloads().filter((p) => p.eventKey === '');
-    expect(logs.map((p) => [p.forkId, p.correlationId])).toEqual([
-      ['1', ''],
+    expect(logs.map((p) => [p.forkId, p.spanId])).toEqual([
+      ['1', undefined],
       ['0', 'c1'],
       ['1', 'c1'],
     ]);
@@ -517,14 +515,16 @@ describe('backend errors', () => {
   });
 });
 
-describe('correlationIdGenerator', () => {
-  it('defaults to random UUIDs', () => {
+describe('id generators', () => {
+  it('defaults to random W3C trace and span ids', () => {
     const mock = new MockLoggerBackend();
     const chronicle = createChronicle({ events, backend: mock.backend });
     const a = chronicle.http.request.begin();
     const b = chronicle.http.request.begin();
-    expect(a.correlationId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(a.correlationId).not.toBe(b.correlationId);
+    expect(a.spanId).toMatch(/^[0-9a-f]{16}$/);
+    expect(a.traceId).toMatch(/^[0-9a-f]{32}$/);
+    expect(a.spanId).not.toBe(b.spanId);
+    expect(a.traceId).not.toBe(b.traceId);
     a.complete();
     b.complete();
   });
@@ -532,17 +532,19 @@ describe('correlationIdGenerator', () => {
   it('uses a custom generator', () => {
     const chronicle = createChronicle({
       events: defineEvents({
-        j: correlation({
+        j: span({
           events: {
             s: event({ level: 'info', message: 's', fields: { n: field.number().optional() } }),
           },
         }),
       }),
       backend: new MockLoggerBackend().backend,
-      correlationIdGenerator: () => 'fixed',
+      traceIdGenerator: () => 'trace',
+      spanIdGenerator: () => 'fixed',
     });
     const handle = chronicle.j.begin();
-    expect(handle.correlationId).toBe('fixed');
+    expect(handle.spanId).toBe('fixed');
+    expect(handle.traceId).toBe('trace');
     handle.complete();
   });
 });

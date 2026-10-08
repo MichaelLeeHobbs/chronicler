@@ -14,7 +14,7 @@ export const performAdminAction = (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Action is required' });
   }
 
-  // Context added here applies to the rest of this request's correlation
+  // Context added here applies to the rest of this request's span
   chronicle.addContext({ userId });
 
   // Simulate admin action

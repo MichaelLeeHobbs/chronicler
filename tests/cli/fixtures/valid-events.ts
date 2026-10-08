@@ -2,7 +2,7 @@
  * Valid event catalog for testing the CLI parser.
  */
 
-import { correlation, defineEvents, event, field, group } from '../../../src/index';
+import { defineEvents, event, field, group, span } from '../../../src/index';
 
 const startup = event({
   level: 'info',
@@ -27,7 +27,7 @@ export const events = defineEvents({
     },
   ),
   api: {
-    query: correlation({
+    query: span({
       doc: 'API query operations',
       timeout: 30000,
       events: {

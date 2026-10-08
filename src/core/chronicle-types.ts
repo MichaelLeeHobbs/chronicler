@@ -1,6 +1,6 @@
 import type { LogLevel } from './constants';
 import type { ContextRecord, ContextValidationResult } from './context';
-import type { CorrelationDefinition, EventDefinition, FieldDefs, NoFields } from './events';
+import type { EventDefinition, FieldDefs, NoFields, SpanDefinition } from './events';
 import type { InferFields } from './fields';
 
 /**
@@ -19,7 +19,7 @@ export interface Emitter<F extends FieldDefs> {
   readonly key: string;
 }
 
-/** Methods every scope (the root chronicle, a fork, a correlation) has next to its emitters. */
+/** Methods every scope (the root chronicle, a fork, a span) has next to its emitters. */
 export interface ScopeMethods<Self> {
   /**
    * Create a child scope with its own fork id. `context` overrides inherited values.
@@ -30,7 +30,7 @@ export interface ScopeMethods<Self> {
   /**
    * Run `fn` with this scope as the ambient scope: emitters of the root chronicle called inside
    * `fn`, including after `await`, log to this scope. On the root chronicle, `run` clears any
-   * ambient correlation; use it for background work started during a request.
+   * ambient span; use it for background work started during a request.
    */
   run<T>(fn: () => T): T;
   /** Untyped escape hatch: log at any level without a defined event. */
@@ -40,18 +40,18 @@ export interface ScopeMethods<Self> {
 }
 
 /**
- * The emitter tree for a catalog: every event becomes a function and every correlation a
- * {@link CorrelationStarter}, at the same path as in the catalog.
+ * The emitter tree for a catalog: every event becomes a function and every span a
+ * {@link SpanStarter}, at the same path as in the catalog.
  */
 export type Emitters<C> = {
   readonly [K in keyof C]: C[K] extends EventDefinition<infer F extends FieldDefs>
     ? Emitter<F>
-    : C[K] extends CorrelationDefinition<
+    : C[K] extends SpanDefinition<
           infer E extends object,
           infer CF extends FieldDefs,
           infer FF extends FieldDefs
         >
-      ? CorrelationStarter<E, CF, FF>
+      ? SpanStarter<E, CF, FF>
       : Emitters<C[K]>;
 };
 
@@ -62,54 +62,69 @@ export type Emitters<C> = {
  */
 export type Chronicle<C> = Emitters<C> & ScopeMethods<Chronicle<C>>;
 
-/** A fork inside a correlation: the correlation's own events, sharing its correlation id. */
-export type CorrelationFork<E> = Emitters<E> &
-  ScopeMethods<CorrelationFork<E>> & {
-    /** Id of the correlation, e.g. to propagate to downstream services. */
-    readonly correlationId: string;
+/** A fork inside a span: the span's own events, sharing its trace and span ids. */
+export type SpanFork<E> = Emitters<E> &
+  ScopeMethods<SpanFork<E>> & {
+    /** W3C trace id of the span, e.g. to propagate to downstream services. */
+    readonly traceId: string;
+    /** W3C span id of the span. */
+    readonly spanId: string;
+    /**
+     * W3C `traceparent` header for this span (`00-<traceId>-<spanId>-01`). Send it on outgoing
+     * requests so the next service continues the trace.
+     */
+    readonly traceparent: string;
   };
 
+/** Options for starting a span. */
+export interface SpanOptions {
+  /**
+   * Incoming W3C `traceparent` header, e.g. `req.get('traceparent')`. A top-level span joins that
+   * trace: it takes the header's trace id, and the header's span id becomes its `parentSpanId`.
+   * Ignored inside another span. An invalid header starts a new trace and sets
+   * `_validation.invalidTraceparent` on the start event; `undefined` is ignored.
+   */
+  readonly traceparent?: string | undefined;
+}
+
 /**
- * A running correlation: its events, scope methods and lifecycle. `CF` and `FF` are the extra
- * fields declared with `correlation({ complete, fail })`.
+ * A running span: its events, scope methods and lifecycle. `CF` and `FF` are the extra
+ * fields declared with `span({ complete, fail })`.
  */
-export type CorrelationHandle<
+export type SpanHandle<
   E,
   CF extends FieldDefs = NoFields,
   FF extends FieldDefs = NoFields,
-> = CorrelationFork<E> & {
-  /** End the correlation successfully. Emits `<key>.complete` with `duration` and the declared fields. */
+> = SpanFork<E> & {
+  /** End the span successfully. Emits `<key>.complete` with `duration` and the declared fields. */
   complete(...fields: EmitterArgs<CF>): void;
-  /** End the correlation with a failure. Emits `<key>.fail` with `duration`, `error` and the declared fields. */
+  /** End the span with a failure. Emits `<key>.fail` with `duration`, `error` and the declared fields. */
   fail(error?: unknown, ...fields: EmitterArgs<FF>): void;
 };
 
-/** Starts a correlation. Found in the emitter tree where the catalog has a `correlation()`. */
-export interface CorrelationStarter<
-  E,
-  CF extends FieldDefs = NoFields,
-  FF extends FieldDefs = NoFields,
-> {
-  /** Full dotted key of the correlation. */
+/** Starts a span. Found in the emitter tree where the catalog has a `span()`. */
+export interface SpanStarter<E, CF extends FieldDefs = NoFields, FF extends FieldDefs = NoFields> {
+  /** Full dotted key of the span. */
   readonly key: string;
   /**
-   * Start the correlation and return its handle. Never throws: past
-   * `limits.maxActiveCorrelations` the correlation still works but is not counted, and its start
-   * event is flagged in `_validation`. Started inside another correlation, it is nested: its
-   * events carry `parentCorrelationId` and `rootCorrelationId`.
+   * Start the span and return its handle. Never throws: past `limits.maxActiveSpans` the span
+   * still works but is not counted, and its start event is flagged in `_validation`. Started
+   * inside another span, it is nested: its events share the parent's `traceId` and carry the
+   * parent's span id as `parentSpanId`.
    */
-  begin(context?: ContextRecord): CorrelationHandle<E, CF, FF>;
+  begin(context?: ContextRecord, options?: SpanOptions): SpanHandle<E, CF, FF>;
   /**
-   * Start the correlation and run `fn` with it as the ambient scope. The correlation is not
+   * Start the span and run `fn` with it as the ambient scope. The span is not
    * completed when `fn` returns (call `complete()`); it is failed if `fn` throws or rejects.
    */
-  run<T>(fn: (correlation: CorrelationHandle<E, CF, FF>) => T): T;
-  run<T>(context: ContextRecord, fn: (correlation: CorrelationHandle<E, CF, FF>) => T): T;
+  run<T>(fn: (span: SpanHandle<E, CF, FF>) => T): T;
+  run<T>(context: ContextRecord, fn: (span: SpanHandle<E, CF, FF>) => T): T;
+  run<T>(context: ContextRecord, options: SpanOptions, fn: (span: SpanHandle<E, CF, FF>) => T): T;
 }
 
-/** The handle type of a correlation starter: `HandleOf<typeof chronicle.http.request>`. */
+/** The handle type of a span starter: `HandleOf<typeof chronicle.http.request>`. */
 export type HandleOf<S> =
-  S extends CorrelationStarter<infer E, infer CF, infer FF> ? CorrelationHandle<E, CF, FF> : never;
+  S extends SpanStarter<infer E, infer CF, infer FF> ? SpanHandle<E, CF, FF> : never;
 
 /** The fields object of an event definition or emitter. */
 export type FieldsOf<T> =

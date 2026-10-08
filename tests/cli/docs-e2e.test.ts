@@ -13,7 +13,7 @@ import type { ParsedEventTree } from '../../src/cli/types';
  * End-to-end test for the docs CLI pipeline:
  *   fixture file → parseEventsFile → generateDocs → verify output
  *
- * This uses a fixture with every field builder, namespaces with group() docs, a correlation
+ * This uses a fixture with every field builder, namespaces with group() docs, a span
  * with a nested namespace, a mounted catalog, a key override and a root-level event.
  */
 describe('Docs CLI end-to-end', () => {
@@ -75,11 +75,17 @@ describe('Docs CLI end-to-end', () => {
 
     it('extracts field builder chains into plain field data', () => {
       const startup = tree.events.find((e) => e.key === 'system.startup');
-      expect(startup?.fields.port).toEqual({ type: 'number', required: true, doc: 'Server port' });
+      expect(startup?.fields.port).toEqual({
+        type: 'number',
+        required: true,
+        doc: 'Server port',
+        sensitive: false,
+      });
       expect(startup?.fields.env).toEqual({
         type: 'string',
         required: false,
         doc: 'Runtime environment',
+        sensitive: false,
       });
     });
 
@@ -108,21 +114,21 @@ describe('Docs CLI end-to-end', () => {
       expect(completed?.fields.duration?.doc).toBe('Duration in ms');
     });
 
-    it('extracts the correlation with its timeout', () => {
+    it('extracts the span with its timeout', () => {
       const request = tree.groups.find((g) => g.key === 'http')!.groups.request;
-      expect(request?.kind).toBe('correlation');
+      expect(request?.kind).toBe('span');
       expect(request?.timeout).toBe(30000);
       expect(request?.doc).toBe('HTTP request lifecycle');
     });
 
-    it('extracts events inside namespaces and correlations', () => {
+    it('extracts events inside namespaces and spans', () => {
       const systemGroup = tree.groups.find((g) => g.key === 'system');
       expect(Object.keys(systemGroup!.events)).toEqual(['startup', 'shutdown', 'error']);
 
       const request = tree.groups.find((g) => g.key === 'http')!.groups.request!;
       expect(Object.keys(request.events)).toEqual(['received', 'completed']);
       expect(request.groups.cache?.events.hit?.key).toBe('http.request.cache.hit');
-      expect(request.groups.cache?.events.hit?.correlationKey).toBe('http.request');
+      expect(request.groups.cache?.events.hit?.spanKey).toBe('http.request');
     });
 
     it('includes the mounted catalog once, under its mount point', () => {
@@ -197,15 +203,15 @@ describe('Docs CLI end-to-end', () => {
       expect(markdown).toContain('**`fatal`** (`boolean`, optional): Whether error is fatal');
     });
 
-    // ── Correlation group ───────────────────────────────────────
+    // ── Span group ───────────────────────────────────────
 
-    it('documents the correlation type and timeout under its namespace', () => {
+    it('documents the span type and timeout under its namespace', () => {
       expect(markdown).toContain(
-        '### http.request\n\n**Type:** Correlation\n**Timeout:** 30000ms (activity-based)\n\nHTTP request lifecycle',
+        '### http.request\n\n**Type:** Span\n**Timeout:** 30000ms (activity-based)\n\nHTTP request lifecycle',
       );
     });
 
-    it('lists auto-generated correlation events', () => {
+    it('lists auto-generated span events', () => {
       expect(markdown).toContain('**Auto-Generated Events:**');
       expect(markdown).toContain('`http.request.start` (`info`)');
       expect(markdown).toContain('`http.request.complete` (`info`)');
@@ -215,7 +221,7 @@ describe('Docs CLI end-to-end', () => {
       expect(markdown).not.toContain('#### http.request.start');
     });
 
-    it('documents correlation events with fields', () => {
+    it('documents span events with fields', () => {
       expect(markdown).toContain('#### http.request.received');
       expect(markdown).toContain('**`method`** (`string`, required): HTTP method');
       expect(markdown).toContain('**`ip`** (`string`, optional): Client IP');
@@ -225,7 +231,7 @@ describe('Docs CLI end-to-end', () => {
       expect(markdown).toContain('**`duration`** (`number`, required): Duration in ms');
     });
 
-    it('documents namespaces nested inside a correlation', () => {
+    it('documents namespaces nested inside a span', () => {
       expect(markdown).toContain('#### http.request.cache');
       expect(markdown).toContain('##### http.request.cache.hit');
     });
@@ -320,8 +326,14 @@ describe('Docs CLI end-to-end', () => {
       expect(startup.doc).toBe('Emitted when the application starts');
       expect(startup.fields).toEqual(
         expect.arrayContaining([
-          { name: 'port', type: 'number', required: true, doc: 'Server port' },
-          { name: 'env', type: 'string', required: false, doc: 'Runtime environment' },
+          { name: 'port', type: 'number', required: true, doc: 'Server port', sensitive: false },
+          {
+            name: 'env',
+            type: 'string',
+            required: false,
+            doc: 'Runtime environment',
+            sensitive: false,
+          },
         ]),
       );
     });
@@ -337,22 +349,28 @@ describe('Docs CLI end-to-end', () => {
       const errorEvent = systemGroup.events.find((e) => e.name === 'error')!;
       expect(errorEvent.fields).toEqual(
         expect.arrayContaining([
-          { name: 'error', type: 'error', required: true, doc: 'Error details' },
-          { name: 'fatal', type: 'boolean', required: false, doc: 'Whether error is fatal' },
+          { name: 'error', type: 'error', required: true, doc: 'Error details', sensitive: false },
+          {
+            name: 'fatal',
+            type: 'boolean',
+            required: false,
+            doc: 'Whether error is fatal',
+            sensitive: false,
+          },
         ]),
       );
     });
 
-    // ── Correlation group ───────────────────────────────────────
+    // ── Span group ───────────────────────────────────────
 
     const findRequest = () =>
       json.groups.find((g) => g.key === 'http')!.groups.find((g) => g.name === 'request')!;
 
-    it('serializes the correlation with timeout and auto-events', () => {
+    it('serializes the span with timeout and auto-events', () => {
       const httpGroup = findRequest();
       expect(httpGroup.key).toBe('http.request');
       expect(httpGroup.path).toBe('http.request');
-      expect(httpGroup.type).toBe('correlation');
+      expect(httpGroup.type).toBe('span');
       expect(httpGroup.doc).toBe('HTTP request lifecycle');
       expect(httpGroup.timeout).toBe(30000);
       expect(httpGroup.autoEvents).toEqual(['start', 'complete', 'fail', 'timeout']);
@@ -362,14 +380,21 @@ describe('Docs CLI end-to-end', () => {
             name: 'duration',
             type: 'number',
             required: false,
-            doc: 'Duration of the correlation in milliseconds',
+            doc: 'Duration of the span in milliseconds',
+            sensitive: false,
           },
-          { name: 'error', type: 'error', required: false, doc: 'Error that caused the failure' },
+          {
+            name: 'error',
+            type: 'error',
+            required: false,
+            doc: 'Error that caused the failure',
+            sensitive: false,
+          },
         ],
       );
     });
 
-    it('serializes correlation events with fields', () => {
+    it('serializes span events with fields', () => {
       const httpGroup = findRequest();
       expect(httpGroup.events.length).toBe(2);
 
@@ -377,9 +402,9 @@ describe('Docs CLI end-to-end', () => {
       expect(received.key).toBe('http.request.received');
       expect(received.fields).toEqual(
         expect.arrayContaining([
-          { name: 'method', type: 'string', required: true, doc: 'HTTP method' },
-          { name: 'path', type: 'string', required: true, doc: 'Request path' },
-          { name: 'ip', type: 'string', required: false, doc: 'Client IP' },
+          { name: 'method', type: 'string', required: true, doc: 'HTTP method', sensitive: false },
+          { name: 'path', type: 'string', required: true, doc: 'Request path', sensitive: false },
+          { name: 'ip', type: 'string', required: false, doc: 'Client IP', sensitive: false },
         ]),
       );
     });
@@ -394,7 +419,7 @@ describe('Docs CLI end-to-end', () => {
       expect(json.standaloneEvents[0]!.fields).toEqual([]);
     });
 
-    it('serializes namespaces nested inside a correlation', () => {
+    it('serializes namespaces nested inside a span', () => {
       const cache = findRequest().groups.find((g) => g.name === 'cache')!;
       expect(cache.type).toBe('namespace');
       expect(cache.events.map((e) => e.key)).toEqual(['http.request.cache.hit']);

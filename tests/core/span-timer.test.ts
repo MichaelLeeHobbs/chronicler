@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { CorrelationTimer } from '../../src/core/correlation-timer';
+import { SpanTimer } from '../../src/core/span-timer';
 
-describe('CorrelationTimer', () => {
+describe('SpanTimer', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -14,7 +14,7 @@ describe('CorrelationTimer', () => {
       [Symbol.dispose]: vi.fn(),
     } as unknown as NodeJS.Timeout);
 
-    const timer = new CorrelationTimer(5000, vi.fn());
+    const timer = new SpanTimer(5000, vi.fn());
     timer.start();
 
     expect(unrefSpy).toHaveBeenCalledOnce();
@@ -24,7 +24,7 @@ describe('CorrelationTimer', () => {
   it('invokes onTimeout callback when timer expires', () => {
     vi.useFakeTimers();
     const onTimeout = vi.fn();
-    const timer = new CorrelationTimer(100, onTimeout);
+    const timer = new SpanTimer(100, onTimeout);
 
     timer.start();
     vi.advanceTimersByTime(100);
@@ -35,7 +35,7 @@ describe('CorrelationTimer', () => {
   it('resets timer on touch()', () => {
     vi.useFakeTimers();
     const onTimeout = vi.fn();
-    const timer = new CorrelationTimer(100, onTimeout);
+    const timer = new SpanTimer(100, onTimeout);
 
     timer.start();
     vi.advanceTimersByTime(80);
@@ -51,7 +51,7 @@ describe('CorrelationTimer', () => {
   it('does not start timer when timeout is 0', () => {
     vi.useFakeTimers();
     const onTimeout = vi.fn();
-    const timer = new CorrelationTimer(0, onTimeout);
+    const timer = new SpanTimer(0, onTimeout);
 
     timer.start();
     vi.advanceTimersByTime(10000);
@@ -62,7 +62,7 @@ describe('CorrelationTimer', () => {
   it('clear() prevents callback', () => {
     vi.useFakeTimers();
     const onTimeout = vi.fn();
-    const timer = new CorrelationTimer(100, onTimeout);
+    const timer = new SpanTimer(100, onTimeout);
 
     timer.start();
     timer.clear();

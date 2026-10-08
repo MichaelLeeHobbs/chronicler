@@ -2,14 +2,15 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 import {
   callBackendMethod,
-  type CorrelationState,
   createConsoleBackend,
   type LogBackend,
   type LogPayload,
+  type SpanState,
 } from './backend';
-import type { Chronicle, CorrelationHandle } from './chronicle-types';
+import type { Chronicle, SpanHandle, SpanOptions } from './chronicle-types';
 import {
-  DEFAULT_MAX_ACTIVE_CORRELATIONS,
+  DEFAULT_MAX_ACTIVE_SPANS,
+  DEFAULT_MAX_ARRAY_LENGTH,
   DEFAULT_MAX_CONTEXT_KEYS,
   DEFAULT_MAX_FORK_DEPTH,
   DEFAULT_REQUIRED_LEVELS,
@@ -19,20 +20,22 @@ import {
   ROOT_FORK_ID,
 } from './constants';
 import { type ContextRecord, ContextStore } from './context';
-import { CorrelationTimer } from './correlation-timer';
 import { ChroniclerError } from './errors';
 import {
-  type AnyCorrelationDefinition,
   type AnyEventDefinition,
+  type AnySpanDefinition,
   type CheckCatalog,
   defineEvents,
   type FieldDefs,
-  isCorrelationDefinition,
   isEventDefinition,
+  isSpanDefinition,
   type LifecycleEvents,
   lifecycleEvents,
 } from './events';
+import { createRedactor, type RedactionConfig, type Redactor } from './redaction';
 import { assertNoReservedKeys } from './reserved';
+import { SpanTimer } from './span-timer';
+import { formatTraceparent, parseTraceparent } from './traceparent';
 import {
   buildValidationMetadata,
   sanitizeLogFields,
@@ -49,10 +52,15 @@ export interface ChroniclerLimits {
    */
   readonly maxForkDepth?: number;
   /**
-   * Number of active correlations to track. Past it, new correlations still work but aren't
-   * counted, and their start event is flagged with `_validation.correlationLimitExceeded`.
+   * Number of active spans to track. Past it, new spans still work but aren't
+   * counted, and their start event is flagged with `_validation.spanLimitExceeded`.
    */
-  readonly maxActiveCorrelations?: number;
+  readonly maxActiveSpans?: number;
+  /**
+   * Maximum number of items logged for an array field. Longer arrays are truncated and listed
+   * in `_validation.truncatedFields`. Defaults to {@link DEFAULT_MAX_ARRAY_LENGTH}.
+   */
+  readonly maxArrayLength?: number;
 }
 
 export interface ChroniclerConfig<C extends object = object> {
@@ -65,8 +73,24 @@ export interface ChroniclerConfig<C extends object = object> {
   readonly backend?: LogBackend | (() => LogBackend);
   /** Context attached to every event. */
   readonly metadata?: ContextRecord;
-  readonly correlationIdGenerator?: () => string;
+  /**
+   * Creates the trace id of each top-level span. Defaults to a random W3C trace id
+   * (32 lowercase hex characters).
+   */
+  readonly traceIdGenerator?: () => string;
+  /**
+   * Creates the span id of each span. Defaults to a random W3C span id
+   * (16 lowercase hex characters).
+   */
+  readonly spanIdGenerator?: () => string;
   readonly limits?: ChroniclerLimits;
+  /**
+   * How sensitive values are redacted: fields marked `.sensitive()`, and any field or context key
+   * listed in `keys`. Redaction happens before the backend sees the payload.
+   *
+   * @throws {ChroniclerError} `INVALID_CONFIG` from `createChronicle` for `'hash'` without `hashKey`
+   */
+  readonly redact?: RedactionConfig;
   /**
    * When `true`, throws a `ChroniclerError` with code `FIELD_VALIDATION`
    * for field validation errors (missing required fields, type mismatches).
@@ -85,35 +109,37 @@ interface ResolvedConfig {
   readonly backend: () => LogBackend;
   readonly maxContextKeys: number;
   readonly maxForkDepth: number;
-  readonly maxActiveCorrelations: number;
+  readonly maxActiveSpans: number;
+  readonly maxArrayLength: number;
+  readonly redactor: Redactor;
   readonly minLevel: number;
   readonly strict: boolean;
-  readonly correlationIdGenerator: () => string;
+  readonly traceIdGenerator: () => string;
+  readonly spanIdGenerator: () => string;
 }
 
-type CorrelationStatus = 'active' | CorrelationState;
+type SpanStatus = 'active' | SpanState;
 
-interface Correlation {
-  readonly id: string;
-  readonly parentId: string | undefined;
-  readonly rootId: string;
+interface Span {
+  readonly spanId: string;
+  readonly parentSpanId: string | undefined;
+  readonly traceId: string;
   readonly lifecycle: LifecycleEvents;
   readonly startedAt: number;
-  /** Scope the correlation was started from; the ambient fallback once it has finished. */
+  /** Scope the span was started from; the ambient fallback once it has finished. */
   readonly outer: Scope;
-  timer: CorrelationTimer | undefined;
-  status: CorrelationStatus;
-  /** Whether this correlation counts toward `maxActiveCorrelations`. */
+  timer: SpanTimer | undefined;
+  status: SpanStatus;
+  /** Whether this span counts toward `maxActiveSpans`. */
   tracked: boolean;
 }
 
-const isFinished = (correlation: Correlation): boolean =>
-  correlation.status === 'completed' || correlation.status === 'failed';
+const isFinished = (span: Span): boolean => span.status === 'completed' || span.status === 'failed';
 
-/** Shared state of one chronicle: config, the ambient store and the correlation counter. */
+/** Shared state of one chronicle: config, the ambient store and the span counter. */
 class Runtime {
   private als: AsyncLocalStorage<Scope> | undefined;
-  activeCorrelations = 0;
+  activeSpans = 0;
   /** Backend that replaces the configured one, set by `captureEvents()` in tests. */
   backendOverride: LogBackend | undefined;
 
@@ -131,14 +157,14 @@ class Runtime {
 
   /**
    * The scope that ambient emitters log to: the ambient scope, or `root`. Finished
-   * correlations are skipped and reported as `staleId`.
+   * spans are skipped and reported as `staleId`.
    */
   current(root: Scope): ResolvedScope {
     let scope = this.als?.getStore() ?? root;
     let staleId: string | undefined;
-    while (scope.correlation !== undefined && isFinished(scope.correlation)) {
-      staleId ??= scope.correlation.id;
-      scope = scope.correlation.outer;
+    while (scope.span !== undefined && isFinished(scope.span)) {
+      staleId ??= scope.span.spanId;
+      scope = scope.span.outer;
     }
     return staleId === undefined ? { scope } : { scope, staleId };
   }
@@ -150,7 +176,7 @@ interface ResolvedScope {
 }
 
 const staleMetadata = (staleId: string | undefined): ValidationMetadata | undefined =>
-  staleId === undefined ? undefined : { staleCorrelationId: staleId };
+  staleId === undefined ? undefined : { staleSpanId: staleId };
 
 const mergeValidation = (
   a: ValidationMetadata | undefined,
@@ -177,8 +203,8 @@ const assertValid = (def: AnyEventDefinition, result: ReturnType<typeof validate
 };
 
 /**
- * One logging scope: a context store, a fork id and an optional correlation.
- * The root chronicle, forks and correlations are all scopes.
+ * One logging scope: a context store, a fork id and an optional span.
+ * The root chronicle, forks and spans are all scopes.
  */
 class Scope {
   private forkCounter = 0;
@@ -187,7 +213,7 @@ class Scope {
     readonly runtime: Runtime,
     readonly context: ContextStore,
     readonly forkId: string,
-    readonly correlation: Correlation | undefined,
+    readonly span: Span | undefined,
   ) {}
 
   /** Log an event defined in the catalog. */
@@ -195,15 +221,16 @@ class Scope {
     def: AnyEventDefinition,
     fields: Record<string, unknown> | undefined,
     extra?: ValidationMetadata,
-    reportedStatus: CorrelationStatus | undefined = this.correlation?.status,
+    reportedStatus: SpanStatus | undefined = this.span?.status,
   ): void {
     const { config } = this.runtime;
     if (LOG_LEVELS[def.level] > config.minLevel) return;
-    const result = validateFields(def, fields);
+    const result = validateFields(def, fields, config.maxArrayLength);
     if (config.strict) assertValid(def, result);
     const validation = mergeValidation(buildValidationMetadata(result), extra);
+    const redacted = config.redactor.fields(def.fields, result.normalizedFields);
     const payload: LogPayload = {
-      ...this.basePayload(def.key, result.normalizedFields, reportedStatus),
+      ...this.basePayload(def.key, redacted, reportedStatus),
       ...(validation ? { _validation: validation } : {}),
     };
     callBackendMethod(this.runtime.backend(), def.level, def.message, payload);
@@ -216,7 +243,7 @@ class Scope {
     if (LOG_LEVELS[level] > config.minLevel) return;
     const validation = staleMetadata(staleId);
     const payload: LogPayload = {
-      ...this.basePayload('', sanitizeLogFields(fields), this.correlation?.status),
+      ...this.basePayload('', config.redactor.record(sanitizeLogFields(fields)), this.span?.status),
       ...(validation ? { _validation: validation } : {}),
     };
     callBackendMethod(this.runtime.backend(), level, message, payload);
@@ -240,24 +267,28 @@ class Scope {
     }
     const { store } = this.context.derive(context);
     this.touch();
-    return new Scope(this.runtime, store, childForkId, this.correlation);
+    return new Scope(this.runtime, store, childForkId, this.span);
   }
 
-  /** Start a correlation from this scope. Nested when this scope is inside an unfinished correlation. */
-  startCorrelation(def: AnyCorrelationDefinition, context: ContextRecord = {}): Scope {
+  /** Start a span from this scope. Nested when this scope is inside an unfinished span. */
+  // eslint-disable-next-line complexity -- local parent, remote parent and limit checks
+  startSpan(def: AnySpanDefinition, context: ContextRecord = {}, options: SpanOptions = {}): Scope {
     const runtime = this.runtime;
     const { config } = runtime;
-    const parent =
-      this.correlation !== undefined && !isFinished(this.correlation)
-        ? this.correlation
+    const parent = this.span !== undefined && !isFinished(this.span) ? this.span : undefined;
+    // A local parent wins: it is already part of the trace the header would continue.
+    const remote =
+      parent === undefined && options.traceparent !== undefined
+        ? parseTraceparent(options.traceparent)
         : undefined;
-    const tracked = runtime.activeCorrelations < config.maxActiveCorrelations;
-    if (tracked) runtime.activeCorrelations++;
-    const id = config.correlationIdGenerator();
-    const correlation: Correlation = {
-      id,
-      parentId: parent?.id,
-      rootId: parent?.rootId ?? id,
+    const invalidTraceparent =
+      parent === undefined && options.traceparent !== undefined && remote === undefined;
+    const tracked = runtime.activeSpans < config.maxActiveSpans;
+    if (tracked) runtime.activeSpans++;
+    const span: Span = {
+      spanId: config.spanIdGenerator(),
+      parentSpanId: parent?.spanId ?? remote?.parentSpanId,
+      traceId: parent?.traceId ?? remote?.traceId ?? config.traceIdGenerator(),
       lifecycle: lifecycleEvents(def.key, def),
       startedAt: Date.now(),
       outer: this,
@@ -265,79 +296,85 @@ class Scope {
       status: 'active',
       tracked,
     };
-    const scope = new Scope(runtime, this.context.derive(context).store, this.forkId, correlation);
-    correlation.timer = new CorrelationTimer(def.timeout, () => scope.endCorrelation('timedOut'));
-    correlation.timer.start();
+    const scope = new Scope(runtime, this.context.derive(context).store, this.forkId, span);
+    span.timer = new SpanTimer(def.timeout, () => scope.endSpan('timedOut'));
+    span.timer.start();
+    const startValidation: ValidationMetadata = {
+      ...(tracked ? {} : { spanLimitExceeded: true as const }),
+      ...(invalidTraceparent ? { invalidTraceparent: true as const } : {}),
+    };
     scope.emit(
-      correlation.lifecycle.start,
+      span.lifecycle.start,
       {},
-      tracked ? undefined : { correlationLimitExceeded: true },
+      Object.keys(startValidation).length > 0 ? startValidation : undefined,
     );
     return scope;
   }
 
   /**
-   * End this scope's correlation. `complete()` and `fail()` are accepted once, also after a
+   * End this scope's span. `complete()` and `fail()` are accepted once, also after a
    * timeout (a late end reports the real duration); a timeout only fires while active.
    */
-  endCorrelation(status: CorrelationState, error?: unknown, fields: Record<string, unknown> = {}) {
-    const correlation = this.correlation;
-    const previous = correlation && this.release(correlation, status);
-    if (correlation === undefined || previous === undefined) return;
-    const { lifecycle } = correlation;
+  endSpan(status: SpanState, error?: unknown, fields: Record<string, unknown> = {}) {
+    const span = this.span;
+    const previous = span && this.release(span, status);
+    if (span === undefined || previous === undefined) return;
+    const { lifecycle } = span;
     if (status === 'timedOut') {
       this.emit(lifecycle.timeout, {}, undefined, previous);
       return;
     }
-    const duration = Date.now() - correlation.startedAt;
+    const duration = Date.now() - span.startedAt;
     const errorField =
       status === 'failed' && error !== undefined ? { error: describeError(error) } : {};
     const def = status === 'completed' ? lifecycle.complete : lifecycle.fail;
     this.emit(def, { duration, ...errorField, ...fields }, undefined, previous);
   }
 
-  /** Move a correlation to `status`. Returns its previous status, or `undefined` if the move isn't allowed. */
-  private release(
-    correlation: Correlation,
-    status: CorrelationState,
-  ): CorrelationStatus | undefined {
-    if (isFinished(correlation)) return undefined;
-    if (status === 'timedOut' && correlation.status !== 'active') return undefined;
-    const previous = correlation.status;
-    correlation.timer?.clear();
-    if (correlation.tracked) {
-      this.runtime.activeCorrelations--;
-      correlation.tracked = false;
+  /** Move a span to `status`. Returns its previous status, or `undefined` if the move isn't allowed. */
+  private release(span: Span, status: SpanState): SpanStatus | undefined {
+    if (isFinished(span)) return undefined;
+    if (status === 'timedOut' && span.status !== 'active') return undefined;
+    const previous = span.status;
+    span.timer?.clear();
+    if (span.tracked) {
+      this.runtime.activeSpans--;
+      span.tracked = false;
     }
-    correlation.status = status;
+    span.status = status;
     return previous;
   }
 
   private touch(): void {
-    if (this.correlation?.status === 'active') this.correlation.timer?.touch();
+    if (this.span?.status === 'active') this.span.timer?.touch();
   }
 
   private basePayload(
     eventKey: string,
     fields: Record<string, unknown>,
-    status: CorrelationStatus | undefined,
+    status: SpanStatus | undefined,
   ): LogPayload {
-    const correlation = this.correlation;
+    const span = this.span;
     return {
       eventKey,
       fields,
-      correlationId: correlation?.id ?? '',
-      ...(correlation?.parentId !== undefined ? { parentCorrelationId: correlation.parentId } : {}),
-      ...(correlation !== undefined ? { rootCorrelationId: correlation.rootId } : {}),
-      ...(status !== undefined && status !== 'active' ? { correlationState: status } : {}),
+      ...(span !== undefined ? { traceId: span.traceId, spanId: span.spanId } : {}),
+      ...(span?.parentSpanId !== undefined ? { parentSpanId: span.parentSpanId } : {}),
+      ...(status !== undefined && status !== 'active' ? { spanState: status } : {}),
       forkId: this.forkId,
-      metadata: this.context.snapshot(),
+      metadata: this.runtime.config.redactor.record(this.context.snapshot()),
       timestamp: new Date().toISOString(),
     };
   }
 }
 
 type Resolve = () => ResolvedScope;
+
+/** `bytes` random bytes as lowercase hex, the format of W3C trace and span ids. */
+const randomHex = (bytes: number): string =>
+  Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('');
 
 /** Turn any thrown value into something the `error` field accepts, so the reason isn't lost. */
 const describeError = (error: unknown): Error | string => {
@@ -349,7 +386,7 @@ const describeError = (error: unknown): Error | string => {
   }
 };
 
-/** Fail a correlation from an error path; never let logging replace or add to the caller's error. */
+/** Fail a span from an error path; never let logging replace or add to the caller's error. */
 const failQuietly = (handle: Handle, err: unknown): void => {
   try {
     handle.fail(err);
@@ -372,10 +409,10 @@ const makeEmitter = (def: AnyEventDefinition, resolve: Resolve) => {
   return emitter;
 };
 
-type Handle = CorrelationHandle<object, FieldDefs, FieldDefs>;
+type Handle = SpanHandle<object, FieldDefs, FieldDefs>;
 
-/** Run `fn` with the correlation ambient; fail the correlation if `fn` throws or rejects. */
-const runCorrelation = <T>(handle: Handle, fn: (handle: Handle) => T): T => {
+/** Run `fn` with the span ambient; fail the span if `fn` throws or rejects. */
+const runSpan = <T>(handle: Handle, fn: (handle: Handle) => T): T => {
   let result: T;
   try {
     result = handle.run(() => fn(handle));
@@ -389,35 +426,35 @@ const runCorrelation = <T>(handle: Handle, fn: (handle: Handle) => T): T => {
   return result;
 };
 
-const makeStarter = (def: AnyCorrelationDefinition, resolve: Resolve) => {
-  const begin = (context?: ContextRecord): Handle =>
-    makeCorrelationTree(def, resolve().scope.startCorrelation(def, context), true) as Handle;
+type SpanFn<T> = (handle: Handle) => T;
+
+const makeStarter = (def: AnySpanDefinition, resolve: Resolve) => {
+  const begin = (context?: ContextRecord, options?: SpanOptions): Handle =>
+    makeSpanTree(def, resolve().scope.startSpan(def, context, options), true) as Handle;
   return {
     key: def.key,
     begin,
-    run: <T>(
-      contextOrFn: ContextRecord | ((handle: Handle) => T),
-      maybeFn?: (handle: Handle) => T,
-    ): T => {
-      const [context, fn] =
-        typeof contextOrFn === 'function' ? [undefined, contextOrFn] : [contextOrFn, maybeFn];
-      if (fn === undefined) {
+    run: <T>(a: ContextRecord | SpanFn<T>, b?: SpanOptions | SpanFn<T>, c?: SpanFn<T>): T => {
+      const args = [a, b, c].filter((arg) => arg !== undefined);
+      const fn = args.pop();
+      if (typeof fn !== 'function') {
         throw new TypeError('run() requires a function');
       }
-      return runCorrelation(begin(context), fn);
+      const [context, options] = args as [ContextRecord?, SpanOptions?];
+      return runSpan(begin(context, options), fn);
     },
   };
 };
 
 /**
- * Bind every event and correlation under `node` into `target`. Namespaces are bound lazily, on
+ * Bind every event and span under `node` into `target`. Namespaces are bound lazily, on
  * first access, so forks of a large catalog stay cheap.
  */
 const bindNode = (node: object, resolve: Resolve, target: Record<string, unknown>): void => {
   for (const [name, child] of Object.entries(node as Record<string, unknown>)) {
     if (isEventDefinition(child)) {
       target[name] = makeEmitter(child, resolve);
-    } else if (isCorrelationDefinition(child)) {
+    } else if (isSpanDefinition(child)) {
       target[name] = makeStarter(child, resolve);
     } else {
       Object.defineProperty(target, name, {
@@ -452,26 +489,30 @@ const addScopeMethods = (
   tree.addContext = (context: ContextRecord) => resolve().scope.context.add(context);
 };
 
-const makeCorrelationTree = (
-  def: AnyCorrelationDefinition,
+const makeSpanTree = (
+  def: AnySpanDefinition,
   scope: Scope,
   withLifecycle: boolean,
 ): Record<string, unknown> => {
   const resolve: Resolve = () => ({ scope });
   const tree: Record<string, unknown> = {};
   bindNode(def.events, resolve, tree);
-  tree.correlationId = scope.correlation?.id ?? '';
+  const traceId = scope.span?.traceId ?? '';
+  const spanId = scope.span?.spanId ?? '';
+  tree.traceId = traceId;
+  tree.spanId = spanId;
+  tree.traceparent = formatTraceparent(traceId, spanId);
   addScopeMethods(
     tree,
     resolve,
     () => scope,
-    (from, context) => makeCorrelationTree(def, from.fork(context), false),
+    (from, context) => makeSpanTree(def, from.fork(context), false),
   );
   if (withLifecycle) {
     tree.complete = (fields?: Record<string, unknown>) =>
-      scope.endCorrelation('completed', undefined, fields);
+      scope.endSpan('completed', undefined, fields);
     tree.fail = (error?: unknown, fields?: Record<string, unknown>) =>
-      scope.endCorrelation('failed', error, fields);
+      scope.endSpan('failed', error, fields);
   }
   return tree;
 };
@@ -550,10 +591,13 @@ const resolveConfig = (config: ChroniclerConfig): ResolvedConfig => {
     backend: resolveBackend(config.backend),
     maxContextKeys: config.limits?.maxContextKeys ?? DEFAULT_MAX_CONTEXT_KEYS,
     maxForkDepth: config.limits?.maxForkDepth ?? DEFAULT_MAX_FORK_DEPTH,
-    maxActiveCorrelations: config.limits?.maxActiveCorrelations ?? DEFAULT_MAX_ACTIVE_CORRELATIONS,
+    maxActiveSpans: config.limits?.maxActiveSpans ?? DEFAULT_MAX_ACTIVE_SPANS,
+    maxArrayLength: config.limits?.maxArrayLength ?? DEFAULT_MAX_ARRAY_LENGTH,
+    redactor: createRedactor(config.redact),
     minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],
     strict: config.strict ?? false,
-    correlationIdGenerator: config.correlationIdGenerator ?? (() => crypto.randomUUID()),
+    traceIdGenerator: config.traceIdGenerator ?? (() => randomHex(16)),
+    spanIdGenerator: config.spanIdGenerator ?? (() => randomHex(8)),
   };
 };
 

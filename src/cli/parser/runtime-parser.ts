@@ -48,11 +48,11 @@ const parseError = (message: string): ValidationError => ({ type: 'parse-error',
 const isCatalogError = (error: unknown): error is Error =>
   error instanceof Error && (error as { code?: unknown }).code === 'INVALID_CATALOG';
 
-/** Heuristic for a Chronicler 1.x event group (`{ key, type: 'system' | 'correlation' }`). */
+/** Heuristic for a Chronicler 1.x event group (`{ key, type: 'system' | 'span' }`). */
 const looksLikeV1Group = (value: unknown): boolean => {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return typeof v.key === 'string' && (v.type === 'system' || v.type === 'correlation');
+  return typeof v.key === 'string' && (v.type === 'system' || v.type === 'span');
 };
 
 function selectNamedExport(mod: Record<string, unknown>, exportName: string): CatalogSelection {
@@ -102,19 +102,41 @@ function selectCatalogs(mod: Record<string, unknown>, exportName?: string): Cata
   return catalogs.length > 0 ? { catalogs } : { error: noCatalogError(mod) };
 }
 
-/** Reduce a field builder (from any copy of the package) to plain data. */
+interface BuilderLike {
+  readonly _type?: unknown;
+  readonly _required?: unknown;
+  readonly _doc?: unknown;
+  readonly _sensitive?: unknown;
+  readonly _values?: unknown;
+  readonly _items?: BuilderLike;
+}
+
+const stringArray = (value: unknown): string[] | undefined =>
+  Array.isArray(value) && value.every((v) => typeof v === 'string') ? [...value] : undefined;
+
+/** Reduce one field builder to plain data. */
+function toParsedField(builder: BuilderLike & { _type: string }): ParsedField {
+  const items = builder._items;
+  const values = stringArray(builder._values) ?? stringArray(items?._values);
+  return {
+    type: builder._type,
+    required: builder._required === true,
+    doc: typeof builder._doc === 'string' ? builder._doc : '',
+    sensitive: builder._sensitive === true,
+    ...(values !== undefined ? { values } : {}),
+    ...(typeof items?._type === 'string' ? { items: items._type } : {}),
+  };
+}
+
+/** Reduce field builders (from any copy of the package) to plain data. */
 function toParsedFields(fields: unknown): Record<string, ParsedField> {
   const result: Record<string, ParsedField> = {};
   if (typeof fields !== 'object' || fields === null) return result;
   for (const [name, value] of Object.entries(fields)) {
     if (typeof value !== 'object' || value === null) continue;
-    const builder = value as { _type?: unknown; _required?: unknown; _doc?: unknown };
+    const builder = value as BuilderLike;
     if (typeof builder._type !== 'string') continue;
-    result[name] = {
-      type: builder._type,
-      required: builder._required === true,
-      doc: typeof builder._doc === 'string' ? builder._doc : '',
-    };
+    result[name] = toParsedField(builder as BuilderLike & { _type: string });
   }
   return result;
 }
@@ -128,7 +150,7 @@ function toParsedEvent(entry: Extract<CatalogEntry, { kind: 'event' }>): ParsedE
     message: def.message,
     doc: def.doc ?? '',
     fields: toParsedFields(def.fields),
-    ...(entry.correlationKey !== undefined ? { correlationKey: entry.correlationKey } : {}),
+    ...(entry.spanKey !== undefined ? { spanKey: entry.spanKey } : {}),
     lifecycle: entry.lifecycle,
   };
 }
@@ -147,7 +169,7 @@ function makeGroup(entry: Exclude<CatalogEntry, { kind: 'event' }>): ParsedEvent
   }
   return {
     ...base,
-    kind: 'correlation',
+    kind: 'span',
     doc: entry.definition.doc ?? '',
     timeout: entry.definition.timeout,
   };
@@ -156,7 +178,7 @@ function makeGroup(entry: Exclude<CatalogEntry, { kind: 'event' }>): ParsedEvent
 /** Builds the group hierarchy of one catalog from its `walkCatalog` entries. */
 class CatalogTreeBuilder {
   private readonly byPath = new Map<string, ParsedEventGroup>();
-  private readonly byCorrelationKey = new Map<string, ParsedEventGroup>();
+  private readonly bySpanKey = new Map<string, ParsedEventGroup>();
 
   constructor(
     private readonly state: BuildState,
@@ -170,7 +192,7 @@ class CatalogTreeBuilder {
     }
     const group = makeGroup(entry);
     this.byPath.set(entry.path, group);
-    if (entry.kind === 'correlation') this.byCorrelationKey.set(entry.key, group);
+    if (entry.kind === 'span') this.bySpanKey.set(entry.key, group);
     const parent = this.byPath.get(parentPath(entry.path));
     if (parent) parent.groups[lastSegment(entry.path)] = group;
     else this.state.groups.push(group);
@@ -181,7 +203,7 @@ class CatalogTreeBuilder {
     if (!this.claimKey(event.key)) return;
     this.state.events.push(event);
     if (entry.lifecycle) {
-      const owner = this.byCorrelationKey.get(entry.correlationKey ?? '');
+      const owner = this.bySpanKey.get(entry.spanKey ?? '');
       owner?.lifecycleEvents.push(event);
       return;
     }

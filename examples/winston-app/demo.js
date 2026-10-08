@@ -296,7 +296,7 @@ async function runDemo() {
     log.section('Demo Complete');
     log.info('All API calls completed successfully');
     log.info('Check the logs above to see:');
-    console.log(`  ${colors.dim}• HTTP request correlations with duration tracking${colors.reset}`);
+    console.log(`  ${colors.dim}• HTTP request spans with duration tracking${colors.reset}`);
     console.log(`  ${colors.dim}• Business events (user creation) in main stream${colors.reset}`);
     console.log(
       `  ${colors.dim}• Audit events (login, admin actions) in audit stream${colors.reset}`,

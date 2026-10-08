@@ -7,7 +7,7 @@
  * this catalog, and a circular import would hand `createChronicle()` an undefined entry.
  */
 
-import { correlation, defineEvents, event, field, group } from '@ubercode/chronicler';
+import { span, defineEvents, event, field, group } from '@ubercode/chronicler';
 
 export const events = defineEvents({
   system: group(
@@ -54,7 +54,7 @@ export const events = defineEvents({
   http: group(
     { doc: 'HTTP traffic' },
     {
-      request: correlation({
+      request: span({
         doc: 'HTTP request lifecycle tracking',
         timeout: 30_000,
         events: {
@@ -128,7 +128,7 @@ export const events = defineEvents({
         doc: 'Emitted when a new user is created',
         fields: {
           userId: field.string().doc('New user ID'),
-          email: field.string().optional().doc('User email'),
+          email: field.string().optional().sensitive().doc('User email (redacted in logs)'),
         },
       }),
       dataProcessed: event({
