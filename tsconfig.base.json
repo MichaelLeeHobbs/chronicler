@@ -26,6 +26,6 @@
     "noEmit": false,
     "baseUrl": "."
   },
-  "include": ["src", "tests", "vitest.config.ts", "tsup.config.ts"],
+  "include": ["src", "tests", "vitest.config.ts", "tsup.config.ts", "packages/cli/tsup.config.ts"],
   "exclude": ["dist", "node_modules"]
 }

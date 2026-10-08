@@ -48,7 +48,7 @@ The central API flow: `createChronicle(config)` → `Chronicler` interface → `
 
 ### CLI (`src/cli/`)
 
-Commander.js-based CLI with `validate` and `docs` commands. Uses AST parsing to analyze event definition files.
+Commander.js-based CLI with `validate` and `docs` commands. Uses AST parsing to analyze event definition files. Published separately as `@ubercode/chronicler-cli` from `packages/cli/`, whose tsup config bundles `src/cli/index.ts`; the core package must keep no runtime dependencies, so CLI-only deps (`esbuild`, `commander`) belong in `packages/cli/package.json` (and root devDependencies for tests).
 
 ### Public API (`src/index.ts`)
 

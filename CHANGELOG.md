@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** the CLI moved to its own package, `@ubercode/chronicler-cli`. `@ubercode/chronicler` no longer has runtime dependencies (`esbuild` and `commander` are gone) and no longer provides the `chronicler` binary. Projects that run `chronicler validate` or `chronicler docs` should add `@ubercode/chronicler-cli` as a devDependency ([#11](https://github.com/MichaelLeeHobbs/chronicler/issues/11))
+- The CLI now depends on `esbuild` `^0.28.1`, which includes the fix for [GHSA-g7r4-m6w7-qqqr](https://github.com/advisories/GHSA-g7r4-m6w7-qqqr) ([#11](https://github.com/MichaelLeeHobbs/chronicler/issues/11))
+
 ## [1.0.4] - 2026-02-19
 
 ### Fixed

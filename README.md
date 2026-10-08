@@ -334,7 +334,13 @@ const chronicle = createChronicle({
 
 ## CLI
 
-After installing, use the CLI to validate event definitions and generate documentation:
+The CLI ships as a separate package, `@ubercode/chronicler-cli`, so the library itself has no runtime dependencies. Install it as a devDependency:
+
+```bash
+npm install --save-dev @ubercode/chronicler-cli
+```
+
+Then use it to validate event definitions and generate documentation:
 
 ```bash
 # Validate all event definitions
