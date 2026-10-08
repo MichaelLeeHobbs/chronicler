@@ -41,7 +41,7 @@ export const createUser = (req: Request, res: Response) => {
   const user = { id, email, name };
   users.set(id, user);
 
-  // Log business event (carries the request's span id)
+  // Log business event (carries the request's trace id; email is redacted)
   business.userCreated({
     userId: id,
     email,

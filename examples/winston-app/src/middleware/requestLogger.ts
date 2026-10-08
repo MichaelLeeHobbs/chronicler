@@ -14,7 +14,7 @@ import { http } from '../services/chronicler.js';
  *
  * `http.request.run()` starts the span and makes it ambient for everything downstream,
  * including async handlers. Controllers call `admin.login(...)` etc. and their events carry
- * this request's span id without receiving anything from the request object.
+ * this request's trace id without receiving anything from the request object.
  *
  * `run()` never completes the span on its own (the response is sent later), so it is
  * completed when the response finishes. If the client disconnects first, it is failed.
@@ -22,7 +22,8 @@ import { http } from '../services/chronicler.js';
 export function requestLogger(req: Request, res: Response, next: NextFunction) {
   const requestId = req.get('x-request-id') ?? `req-${randomUUID()}`;
 
-  http.request.run({ requestId }, (request) => {
+  // Continue the caller's trace when it sent a W3C traceparent header
+  http.request.run({ requestId }, { traceparent: req.get('traceparent') }, (request) => {
     const startTime = Date.now();
 
     request.started({
@@ -32,8 +33,8 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
       userAgent: req.get('user-agent') ?? 'unknown',
     });
 
-    // Let clients and downstream services quote the span id
-    res.setHeader('x-span-id', request.spanId);
+    // Let clients quote the trace id in bug reports
+    res.setHeader('x-trace-id', request.traceId);
 
     res.on('finish', () => {
       if (res.statusCode >= 400) {

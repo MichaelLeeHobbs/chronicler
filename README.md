@@ -129,7 +129,7 @@ Rules for the catalog:
 
   The CLI's [`chronicler keys`](#cli) command keeps a lockfile of keys so an accidental rename fails CI.
 
-- **Reserved names.** `fork`, `run`, `log`, `addContext`, `begin`, `start`, `complete`, `fail`, `timeout`, `spanId` and `then` can't be used as names at any level, because the emitter tree and span handles use them. This is a compile error and a runtime `ChroniclerError` with code `INVALID_CATALOG`.
+- **Reserved names.** `fork`, `run`, `log`, `addContext`, `begin`, `start`, `complete`, `fail`, `timeout`, `traceId`, `spanId`, `traceparent` and `then` can't be used as names at any level, because the emitter tree and span handles use them. This is a compile error and a runtime `ChroniclerError` with code `INVALID_CATALOG`.
 - **Catalogs compose.** Split a large catalog by area and mount the pieces: `defineEvents({ billing: billingEvents, auth: authEvents })`. Keys are re-derived from the outer path.
 - **Keep catalog files free of logger imports.** The module that calls `createChronicle()` imports the catalog; if a catalog file imports that module back (say, to log something), the circular import hands `createChronicle()` an `undefined` entry. Chronicler throws `INVALID_CATALOG` with a hint when it sees one, but the fix is to keep `events.ts` a pure definitions module.
 
@@ -176,10 +176,10 @@ ERROR Database query failed     { table: 'orders' }       ← which request?
 INFO  Response sent             { status: 200 }           ← which request??
 ```
 
-With spans, every log entry for a single request shares a span ID, and you get automatic lifecycle events. Define one with `span()`:
+With spans, every log entry for a single request shares a trace ID (`traceId`), and you get automatic lifecycle events. The ids follow the [W3C Trace Context](https://www.w3.org/TR/trace-context/) format that OpenTelemetry uses, so log tools can link these entries to your traces. Define one with `span()`:
 
 ```ts
-import { span, defineEvents, event, field } from '@ubercode/chronicler';
+import { defineEvents, event, field, span } from '@ubercode/chronicler';
 
 export const events = defineEvents({
   http: {
@@ -213,7 +213,7 @@ request.complete();
 // Auto-emits: http.request.complete { duration: 142 }
 ```
 
-The handle has the span's own events (`request.validated`), its `spanId`, `complete(fields?)`, `fail(error?, fields?)`, `fork(context?)`, `run(fn)`, `log()` and `addContext()`.
+The handle has the span's own events (`request.validated`), its `traceId`, `spanId` and `traceparent`, `complete(fields?)`, `fail(error?, fields?)`, `fork(context?)`, `run(fn)`, `log()` and `addContext()`.
 
 #### `run()`: an ambient span
 
@@ -229,9 +229,10 @@ import { http } from './logger';
 export function requestLogger(req: Request, res: Response, next: NextFunction) {
   const requestId = req.get('x-request-id') ?? randomUUID();
 
-  http.request.run({ requestId }, (request) => {
+  // Continue the caller's trace when it sent a traceparent header.
+  http.request.run({ requestId }, { traceparent: req.get('traceparent') }, (request) => {
     request.validated({ method: req.method, path: req.path });
-    res.setHeader('x-span-id', request.spanId);
+    res.setHeader('x-trace-id', request.traceId);
 
     res.on('finish', () => request.complete());
     res.on('close', () => {
@@ -247,7 +248,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 // A controller: no request-scoped logger to thread through.
 export const login = async (req: Request, res: Response) => {
   const success = await authenticate(req.body);
-  admin.login({ userId: req.body.userId, success }); // carries the request's spanId and requestId
+  admin.login({ userId: req.body.userId, success }); // carries the request's traceId and requestId
   res.json({ success });
 };
 ```
@@ -261,7 +262,7 @@ await jobs.nightly.run(async (job) => {
 }); // a throw inside emits jobs.nightly.fail with the error
 ```
 
-Now filter by `spanId` in your log aggregator and see the entire request in order. Auto-generated events give you:
+Now filter by `traceId` in your log aggregator and see the entire request in order. Auto-generated events give you:
 
 | Auto-event       | When                                 | Includes            |
 | ---------------- | ------------------------------------ | ------------------- |
@@ -273,14 +274,17 @@ Now filter by `spanId` in your log aggregator and see the entire request in orde
 To log more on `.complete` or `.fail`, declare the extra fields on the span. They're typed and validated like any event's fields:
 
 ```ts
-request: (span({
+request: span({
   events: {
     /* ... */
   },
   complete: { statusCode: field.number() },
   fail: { statusCode: field.number().optional() },
 }),
-  request.complete({ statusCode: 200 })); // http.request.complete { duration, statusCode }
+```
+
+```ts
+request.complete({ statusCode: 200 }); // http.request.complete { duration, statusCode }
 request.fail(err, { statusCode: 502 }); // http.request.fail { duration, error, statusCode }
 request.complete({ status: 200 }); // compile error: not declared
 ```
@@ -289,12 +293,12 @@ They can't redefine `duration` or `error`. Without declarations, `complete()` ta
 
 #### Nested spans
 
-A span started while another is active (it's ambient, or you start it from a `chronicle.fork()` taken inside it) is **nested**. Its events carry its own `spanId`, its parent's id as `parentSpanId`, and the outermost id as `traceId`:
+A span started while another is active (it's ambient, or you start it from a `chronicle.fork()` taken inside it) is **nested**. Its events carry its own `spanId`, its parent's span id as `parentSpanId`, and the trace id it shares with its parent as `traceId`:
 
 ```ts
 http.request.run({ requestId }, async (request) => {
   await db.query.run(async (query) => {
-    // spanId: query's id, parentSpanId: request's id, traceId: request's id
+    // spanId: query's id, parentSpanId: request's spanId, traceId: request's traceId
     query.executed({ table: 'users' });
     query.complete();
   });
@@ -302,7 +306,32 @@ http.request.run({ requestId }, async (request) => {
 });
 ```
 
-Every correlated event has `traceId`; filter on it to see a whole request including nested work. Each nested span has its own lifecycle events and timeout. Spans can't be _defined_ inside spans (that's a compile and `INVALID_CATALOG` error); they nest at runtime.
+Every event logged inside a span has `traceId`; filter on it to see a whole request including nested work. Each nested span has its own lifecycle events and timeout. Spans can't be _defined_ inside spans (that's a compile and `INVALID_CATALOG` error); they nest at runtime.
+
+#### Across services: `traceparent`
+
+Spans speak the [W3C `traceparent`](https://www.w3.org/TR/trace-context/#traceparent-header) header, so one trace can follow a request through several services:
+
+- **Incoming:** pass the header to `begin(context, { traceparent })` or `run(context, { traceparent }, fn)`. A top-level span then joins that trace: it takes the header's trace id, and the caller's span id becomes its `parentSpanId`. A missing (`undefined`) header is ignored. An invalid one starts a new trace and sets `_validation.invalidTraceparent` on the `.start` event. Inside another span the header is ignored, because the span is already part of a trace.
+- **Outgoing:** every handle and span fork has `traceparent` (`00-<traceId>-<spanId>-01`). Send it on calls to other services.
+
+```ts
+await fetch(url, { headers: { traceparent: request.traceparent } });
+```
+
+**With OpenTelemetry:** to log under the trace OpenTelemetry already started, hand its context to the span. Chronicler stays dependency-free; you call the OpenTelemetry API:
+
+```ts
+import { context, propagation } from '@opentelemetry/api';
+
+const carrier: Record<string, string> = {};
+propagation.inject(context.active(), carrier);
+http.request.run({ requestId }, { traceparent: carrier.traceparent }, (request) => {
+  // traceId matches the OpenTelemetry trace; parentSpanId is the active OpenTelemetry span
+});
+```
+
+Chronicler only reads and writes the header. It doesn't export spans, sample, or patch HTTP clients; that's what a tracer is for.
 
 #### Background work: `chronicle.run(fn)`
 
@@ -323,7 +352,7 @@ If you forget, Chronicler catches it: an emitter whose ambient span has already 
 
 Each span has an idle `timeout` (default 5 minutes; `0` disables it). It resets on every event logged in the span. When it fires, `{key}.timeout` is emitted and the span is **timed out**:
 
-- Events logged to it afterwards still carry its `spanId`, plus `spanState: 'timedOut'`.
+- Events logged to it afterwards still carry its `traceId` and `spanId`, plus `spanState: 'timedOut'`.
 - A late `complete()` or `fail()` is still accepted once and reports the real `duration`.
 
 Handles and forks of a span that has completed or failed also keep logging with its ids, marked `spanState: 'completed'` or `'failed'`. `spanState` is absent while the span is active, so `ispresent(spanState)` finds late events.
@@ -484,11 +513,52 @@ field.string(); // required string
 field.number().optional(); // optional number
 field.boolean().doc('...'); // required boolean with documentation
 field.error(); // Error | string, serialized to stack trace
+field.enum(['success', 'failure', 'locked']); // 'success' | 'failure' | 'locked'
+field.array(field.string()); // readonly string[]
+field.array(field.enum(['read', 'write'])); // readonly ('read' | 'write')[]
+field.string().sensitive(); // redacted before it reaches the backend
 ```
 
 Error fields accept `Error` objects or strings and serialize to the stack trace (or message if no stack). Safe to ship to any log sink.
 
-All string values are automatically sanitized: ANSI escape sequences are stripped and newlines are replaced with `\n` to prevent log injection.
+**Enums** take a fixed list of strings. The field's type is their union, and a value outside the list is dropped and listed in `_validation.invalidValues`.
+
+**Arrays** hold strings, numbers, booleans or enum values; every item is checked. Arrays longer than `limits.maxArrayLength` (default 100) are cut to that length and listed in `_validation.truncatedFields`. Nested objects and arrays of objects aren't supported: they're hard to query in most log tools, so prefer flat fields (`shippingCity`, `shippingZip`).
+
+All string values, including array items, are automatically sanitized: ANSI escape sequences are stripped and newlines are replaced with `\n` to prevent log injection.
+
+### Sensitive fields
+
+Mark a field `.sensitive()` and its value is redacted before the payload reaches the backend, whatever the backend is. Validation still checks the real value. Choose how with the chronicle's `redact` option:
+
+```ts
+const events = defineEvents({
+  user: {
+    created: event({
+      level: 'info',
+      message: 'User created',
+      fields: { userId: field.string(), email: field.string().sensitive() },
+    }),
+  },
+});
+
+createChronicle({ events }); // email: '[REDACTED]'
+createChronicle({ events, redact: { mode: 'hash', hashKey: process.env.LOG_HASH_KEY } }); // email: 'hmac:3f1c…'
+createChronicle({ events, redact: { mode: 'drop' } }); // no email field
+```
+
+- `'mask'` (default) writes `[REDACTED]`.
+- `'hash'` writes an HMAC-SHA256 of the value with your `hashKey`, so you can still find every event for the same email without the email being readable. `createChronicle` throws `INVALID_CONFIG` if `hashKey` is missing.
+- `'drop'` removes the field.
+
+`redact.keys` redacts names that aren't declared as sensitive fields: context keys, untyped `log()` fields and undeclared fields. Request context is where personal data most often leaks:
+
+```ts
+const chronicle = createChronicle({ events, redact: { keys: ['email', 'authorization'] } });
+chronicle.addContext({ email: user.email }); // metadata.email: '[REDACTED]'
+```
+
+The CLI's docs mark sensitive fields, and the key lockfile records them, so removing `.sensitive()` fails `chronicler keys --check`.
 
 Use `FieldsOf` to name an event's fields type:
 
@@ -575,29 +645,31 @@ While capturing, every emitter, fork and span of that chronicle records in memor
 
 Every event reaches the backend as `(message, payload)`, where `payload` is a `LogPayload`:
 
-| Field          | Type                                     | Description                                                               |
-| -------------- | ---------------------------------------- | ------------------------------------------------------------------------- |
-| `eventKey`     | `string`                                 | The event's key, e.g. `admin.login`. Empty for `log()`.                   |
-| `fields`       | `Record<string, unknown>`                | The event's fields, validated and sanitized.                              |
-| `spanId`       | `string`                                 | Innermost span id, or `''` outside any span.                              |
-| `parentSpanId` | `string?`                                | Id of the enclosing span. Only on nested spans.                           |
-| `traceId`      | `string?`                                | Id of the outermost span. On every correlated event.                      |
-| `spanState`    | `'timedOut' \| 'completed' \| 'failed'?` | Only when the span is no longer active.                                   |
-| `forkId`       | `string`                                 | `0` for the root, then `1`, `2`, `2.1`, ...                               |
-| `metadata`     | `Record<string, unknown>`                | Context: `metadata` from config plus fork, span and `addContext` context. |
-| `timestamp`    | `string`                                 | ISO 8601.                                                                 |
-| `_validation`  | `ValidationMetadata?`                    | Present only when something needs attention (below).                      |
+| Field          | Type                                     | Description                                                                       |
+| -------------- | ---------------------------------------- | --------------------------------------------------------------------------------- |
+| `eventKey`     | `string`                                 | The event's key, e.g. `admin.login`. Empty for `log()`.                           |
+| `fields`       | `Record<string, unknown>`                | The event's fields, validated and sanitized.                                      |
+| `traceId`      | `string?`                                | W3C trace id, shared by a span and every span nested in it. Absent outside spans. |
+| `spanId`       | `string?`                                | W3C span id of the innermost span. Absent outside spans.                          |
+| `parentSpanId` | `string?`                                | Span id of the enclosing span, or of the caller from an incoming `traceparent`.   |
+| `spanState`    | `'timedOut' \| 'completed' \| 'failed'?` | Only when the span is no longer active.                                           |
+| `forkId`       | `string`                                 | `0` for the root, then `1`, `2`, `2.1`, ...                                       |
+| `metadata`     | `Record<string, unknown>`                | Context: `metadata` from config plus fork, span and `addContext` context.         |
+| `timestamp`    | `string`                                 | ISO 8601.                                                                         |
+| `_validation`  | `ValidationMetadata?`                    | Present only when something needs attention (below).                              |
 
 `_validation` keys:
 
-| Key                 | Meaning                                                                   |
-| ------------------- | ------------------------------------------------------------------------- |
-| `missingFields`     | Required fields that were not provided.                                   |
-| `typeErrors`        | Fields whose value has the wrong type.                                    |
-| `invalidValues`     | Fields with an invalid value of the right type (e.g. `NaN` for a number). |
-| `unknownFields`     | Fields not in the event definition. They're still logged.                 |
-| `staleSpanId`       | The ambient span had already finished; the event was logged outside it.   |
-| `spanLimitExceeded` | On a `.start` event: the span was started past `limits.maxActiveSpans`.   |
+| Key                  | Meaning                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------- |
+| `missingFields`      | Required fields that were not provided.                                                               |
+| `typeErrors`         | Fields whose value has the wrong type.                                                                |
+| `invalidValues`      | Fields with an invalid value of the right type (e.g. `NaN` for a number, or a value outside an enum). |
+| `truncatedFields`    | Array fields cut to `limits.maxArrayLength` items.                                                    |
+| `unknownFields`      | Fields not in the event definition. They're still logged.                                             |
+| `staleSpanId`        | The ambient span had already finished; the event was logged outside it.                               |
+| `spanLimitExceeded`  | On a `.start` event: the span was started past `limits.maxActiveSpans`.                               |
+| `invalidTraceparent` | On a `.start` event: the `traceparent` passed in wasn't valid, so a new trace was started.            |
 
 See [`docs/CloudWatch.md`](docs/CloudWatch.md) for CloudWatch Logs Insights queries over these fields.
 
@@ -640,14 +712,14 @@ See [`packages/cli/README.md`](packages/cli/README.md) for all commands and opti
 
 ### Defining events
 
-| Function                                             | Description                                                                                  |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `defineEvents(catalog)`                              | Validate a catalog and stamp each definition's `key`. Throws `INVALID_CATALOG` if malformed. |
-| `event({ level, message, doc?, fields?, key? })`     | Define an event.                                                                             |
-| `span({ events, doc?, timeout?, key? })`             | Define a span. `timeout` in ms, default 5 minutes, `0` disables.                             |
-| `group({ doc }, children)`                           | Document a namespace.                                                                        |
-| `walkCatalog(catalog)`                               | List every namespace, span and event (including lifecycle events) with its resolved key.     |
-| `isEventDefinition`, `isSpanDefinition`, `isCatalog` | Type guards, e.g. for tooling.                                                               |
+| Function                                                   | Description                                                                                  |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `defineEvents(catalog)`                                    | Validate a catalog and stamp each definition's `key`. Throws `INVALID_CATALOG` if malformed. |
+| `event({ level, message, doc?, fields?, key? })`           | Define an event.                                                                             |
+| `span({ events, doc?, timeout?, key?, complete?, fail? })` | Define a span. `timeout` in ms, default 5 minutes, `0` disables.                             |
+| `group({ doc }, children)`                                 | Document a namespace.                                                                        |
+| `walkCatalog(catalog)`                                     | List every namespace, span and event (including lifecycle events) with its resolved key.     |
+| `isEventDefinition`, `isSpanDefinition`, `isCatalog`       | Type guards, e.g. for tooling.                                                               |
 
 ### `createChronicle(config)`
 
@@ -661,7 +733,10 @@ See [`packages/cli/README.md`](packages/cli/README.md) for all commands and opti
 | `limits.maxContextKeys` | `number`                                              | `100`           | Max context entries per scope             |
 | `limits.maxForkDepth`   | `number`                                              | `10`            | Max fork nesting depth                    |
 | `limits.maxActiveSpans` | `number`                                              | `1000`          | Active spans tracked before flagging      |
-| `spanIdGenerator`       | `() => string`                                        | `randomUUID`    | Custom span ID generator                  |
+| `limits.maxArrayLength` | `number`                                              | `100`           | Array items logged before truncating      |
+| `redact`                | `{ mode?, hashKey?, keys? }`                          | `mask`          | How sensitive values are redacted         |
+| `traceIdGenerator`      | `() => string`                                        | 32 random hex   | Custom trace ID generator                 |
+| `spanIdGenerator`       | `() => string`                                        | 16 random hex   | Custom span ID generator                  |
 
 ### `Chronicle<typeof events>` (returned by `createChronicle`)
 
@@ -675,44 +750,47 @@ The emitter tree for the catalog: an `Emitter` function for each event and a `Sp
 ### `SpanStarter`
 
 - `key`: the span's key
-- `begin(context?)`: start the span and return its `SpanHandle`
-- `run(fn)` / `run(context, fn)`: start it, run `fn(handle)` with it ambient; fails it if `fn` throws or rejects, never completes it
+- `begin(context?, options?)`: start the span and return its `SpanHandle`. `options.traceparent` continues an incoming trace
+- `run(fn)` / `run(context, fn)` / `run(context, options, fn)`: start it, run `fn(handle)` with it ambient; fails it if `fn` throws or rejects, never completes it
 
 ### `SpanHandle` (returned by `begin`, passed to `run`)
 
 - The span's own events as emitters
-- `spanId`: for propagation to downstream services
+- `traceId`, `spanId`: the span's ids
+- `traceparent`: W3C header to send to downstream services
 - `complete(fields?)`: emit `{key}.complete` with `duration` and the fields declared in `span({ complete })`
 - `fail(error?, fields?)`: emit `{key}.fail` with `duration`, `error` and the fields declared in `span({ fail })`
-- `fork(context?)`: a `SpanFork` (the span's events, `spanId`, `fork`, `run`, `log`, `addContext`)
+- `fork(context?)`: a `SpanFork` (the span's events, `traceId`, `spanId`, `traceparent`, `fork`, `run`, `log`, `addContext`)
 - `run(fn)`, `log(...)`, `addContext(...)`
 
 Use `HandleOf<typeof chronicle.http.request>` to type a parameter that receives a handle.
 
 ### Errors
 
-Configuration and programming errors throw `ChroniclerError` with a `code`: `INVALID_CATALOG`, `RESERVED_FIELD`, `UNSUPPORTED_LOG_LEVEL`, `BACKEND_METHOD`, `FORK_DEPTH_EXCEEDED`, and `FIELD_VALIDATION` (strict mode only). Everything else is reported in `_validation` and never throws.
+Configuration and programming errors throw `ChroniclerError` with a `code`: `INVALID_CATALOG`, `RESERVED_FIELD`, `UNSUPPORTED_LOG_LEVEL`, `BACKEND_METHOD`, `FORK_DEPTH_EXCEEDED`, `INVALID_CONFIG`, and `FIELD_VALIDATION` (strict mode only). Everything else is reported in `_validation` and never throws.
 
 ## Migrating from 1.x
 
 2.0 replaces standalone event definitions and `chronicle.event(def, fields)` with a catalog and typed emitters. There is no compatibility shim.
 
-| 1.x                                                                       | 2.0                                                                                                            |
-| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `defineEvent({ key: 'admin.login', level, message, fields })`             | `event({ level, message, fields })` placed at `admin.login` in `defineEvents({...})`                           |
-| `defineEventGroup({ key: 'admin', type: 'system', doc, events })`         | A nested object, or `group({ doc }, { ... })` for a documented namespace                                       |
-| `defineSpanGroup({ key: 'http.request', type: 'span', timeout, events })` | `span({ timeout, events })` placed at `http.request`                                                           |
-| A key that doesn't match where the definition now sits                    | `event({ key: 'old.key', ... })` / `span({ key: 'old.key', ... })`                                             |
-| `createChronicle({ backend, metadata })`                                  | `createChronicle({ events, backend, metadata })` (`metadata` is now optional)                                  |
-| `chronicle.event(admin.events.login, { userId, success })`                | `chronicle.admin.login({ userId, success })`, or `admin.login(...)` after `export const { admin } = chronicle` |
-| `chronicle.event(def, {})` for an event without fields                    | `admin.heartbeat()`                                                                                            |
-| `const corr = chronicle.startSpan(httpRequest, ctx)`                      | `const corr = chronicle.http.request.begin(ctx)`, or `http.request.run(ctx, fn)` for an ambient span           |
-| `corr.event(httpRequest.events.validated, fields)`                        | `corr.validated(fields)`                                                                                       |
-| Attaching the span to `req` (`(req as any).chronicle = corr`)             | `http.request.run(...)` in middleware; handlers call `admin.login(...)` directly                               |
-| `SPAN_LIMIT_EXCEEDED` thrown by `startSpan`                               | Never throws; `_validation.spanLimitExceeded` on the `.start` event                                            |
-| `Chronicler`, `SpanChronicle` types                                       | `Chronicle<typeof events>`, `SpanHandle`, `SpanFork`, `HandleOf`                                               |
-| `EventFields<typeof def>`                                                 | `FieldsOf<typeof events.admin.login>`                                                                          |
-| Tests with a hand-rolled mock backend                                     | `createTestChronicle(events)` from `@ubercode/chronicler/testing`                                              |
+| 1.x                                                                                     | 2.0                                                                                                            |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `defineEvent({ key: 'admin.login', level, message, fields })`                           | `event({ level, message, fields })` placed at `admin.login` in `defineEvents({...})`                           |
+| `defineEventGroup({ key: 'admin', type: 'system', doc, events })`                       | A nested object, or `group({ doc }, { ... })` for a documented namespace                                       |
+| `defineCorrelationGroup({ key: 'http.request', type: 'correlation', timeout, events })` | `span({ timeout, events })` placed at `http.request`                                                           |
+| A key that doesn't match where the definition now sits                                  | `event({ key: 'old.key', ... })` / `span({ key: 'old.key', ... })`                                             |
+| `createChronicle({ backend, metadata })`                                                | `createChronicle({ events, backend, metadata })` (`metadata` is now optional)                                  |
+| `chronicle.event(admin.events.login, { userId, success })`                              | `chronicle.admin.login({ userId, success })`, or `admin.login(...)` after `export const { admin } = chronicle` |
+| `chronicle.event(def, {})` for an event without fields                                  | `admin.heartbeat()`                                                                                            |
+| `const corr = chronicle.startCorrelation(httpRequest, ctx)`                             | `const corr = chronicle.http.request.begin(ctx)`, or `http.request.run(ctx, fn)` for an ambient span           |
+| `corr.event(httpRequest.events.validated, fields)`                                      | `corr.validated(fields)`                                                                                       |
+| Attaching the correlation to `req` (`(req as any).chronicle = corr`)                    | `http.request.run(...)` in middleware; handlers call `admin.login(...)` directly                               |
+| `CORRELATION_LIMIT_EXCEEDED` thrown by `startCorrelation`                               | Never throws; `_validation.spanLimitExceeded` on the `.start` event                                            |
+| `Chronicler`, `CorrelationChronicle` types                                              | `Chronicle<typeof events>`, `SpanHandle`, `SpanFork`, `HandleOf`                                               |
+| `EventFields<typeof def>`                                                               | `FieldsOf<typeof events.admin.login>`                                                                          |
+| Tests with a hand-rolled mock backend                                                   | `createTestChronicle(events)` from `@ubercode/chronicler/testing`                                              |
+| `correlationId` in payloads                                                             | `traceId` (filter on it to see a request) and `spanId`                                                         |
+| `correlationIdGenerator`                                                                | `traceIdGenerator` and `spanIdGenerator`                                                                       |
 
 Behavior changes to check:
 
@@ -720,7 +798,8 @@ Behavior changes to check:
 - **Catalog names are validated.** Names must be camelCase and can't be [reserved](#events-and-the-catalog).
 - **Forks of a span** expose only that span's events and can't start unrelated spans. Forks and handles used after the span ends still log, but now carry `spanState`.
 - **Child scope context overrides.** Context passed to `fork()`, `begin()` or `run()` now replaces inherited values with the same key. `addContext()` is still first-write-wins.
-- **New payload fields**: `traceId`, `parentSpanId` and `spanState`. They're reserved, so they can't be used as context keys.
+- **Correlations are now spans**, and payload ids follow OpenTelemetry: `correlationId` is gone; use `traceId` to group a request and `spanId` for one unit of work. Ids are W3C hex strings instead of UUIDs, and are absent (not `''`) outside spans. Update dashboards and alerts that filter on `correlationId`.
+- **New payload fields**: `traceId`, `spanId`, `parentSpanId` and `spanState`. They're reserved, so they can't be used as context keys.
 
 ## License
 

@@ -33,19 +33,21 @@ Package manager is **pnpm 10.18.0**. Lint enforces zero warnings (`--max-warning
 
 ### Core (`src/core/`)
 
-The central API flow: `defineEvents({...})` catalog → `createChronicle({ events, backend?, metadata? })` → `Chronicle<C>` emitter tree. Events are functions (`admin.login(fields)`); spans are starters (`http.request.begin(ctx?)` / `.run(ctx?, fn)`) that return a `SpanHandle` with the span's own events plus `complete()` / `fail()` / `fork()`. `span({ complete, fail })` declares typed extra fields for the lifecycle events. Every scope also has `fork(ctx?)`, `run(fn)`, `log(level, msg, fields?)` and `addContext(ctx)`.
+The central API flow: `defineEvents({...})` catalog → `createChronicle({ events, backend?, metadata? })` → `Chronicle<C>` emitter tree. Events are functions (`admin.login(fields)`); spans are starters (`http.request.begin(ctx?, options?)` / `.run(ctx?, options?, fn)`, where `options.traceparent` continues an incoming W3C trace) that return a `SpanHandle` with the span's own events plus `complete()` / `fail()` / `fork()`. `span({ complete, fail })` declares typed extra fields for the lifecycle events. Every scope also has `fork(ctx?)`, `run(fn)`, `log(level, msg, fields?)` and `addContext(ctx)`.
 
 - **events.ts** — `event()`, `span()`, `group()` and `defineEvents()`. `defineEvents` walks the catalog (`walkCatalog()`), validates names/levels/timeouts/duplicate keys (throws `INVALID_CATALOG`), and stamps each definition's `key` from its path (or its `key` override). Definitions carry a string `kind` discriminant (`chronicler:event` / `chronicler:span`). `lifecycleEvents()` builds the auto `.start` / `.complete` / `.fail` / `.timeout` events. `RESERVED_CATALOG_NAMES` and the `CheckCatalog` type reject reserved names and nested span definitions at compile time.
-- **chronicle.ts** — `createChronicle`. A `Runtime` holds resolved config, the lazily created `AsyncLocalStorage` (first `run()`), and the active-span count. A `Scope` (context store + forkId + optional `Span`) does validation, payload assembly and backend calls; the root, forks and spans are all scopes. Root-tree emitters resolve the ambient scope (skipping finished spans and flagging `staleSpanId`); fork trees and handles are bound to their own scope. Spans started from a scope inside an unfinished span are nested (`parentSpanId` / `traceId`).
+- **chronicle.ts** — `createChronicle`. A `Runtime` holds resolved config, the lazily created `AsyncLocalStorage` (first `run()`), and the active-span count. A `Scope` (context store + forkId + optional `Span`) does validation, payload assembly and backend calls; the root, forks and spans are all scopes. Root-tree emitters resolve the ambient scope (skipping finished spans and flagging `staleSpanId`); fork trees and handles are bound to their own scope. Spans started from a scope inside an unfinished span are nested (share `traceId`, parent's id as `parentSpanId`); top-level spans take `traceId`/`parentSpanId` from a valid `traceparent` option. Ids default to W3C hex (`traceIdGenerator` / `spanIdGenerator`). Emitted fields pass through the `Redactor` and context snapshots through `redact.keys`.
 - **chronicle-types.ts** — Public types: `Chronicle`, `Emitters`, `Emitter`, `EmitterArgs`, `SpanStarter`, `SpanHandle`, `SpanFork`, `HandleOf`, `FieldsOf`, `ScopeMethods`.
-- **fields.ts** — Field builder system via `field` (`field.string()`, `field.number()`, `field.boolean()`, `field.error()`). Builders chain `.optional()` and `.doc()`. `InferFields<F>` derives TypeScript types from field definitions at compile time.
-- **validation.ts** — Validates required fields and types at runtime. Results go in `_validation` (`ValidationMetadata`: `missingFields`, `typeErrors`, `invalidValues`, `unknownFields`, `staleSpanId`, `spanLimitExceeded`), never thrown except in strict mode.
+- **fields.ts** — Field builder system via `field` (`string`, `number`, `boolean`, `error`, `enum([...])`, `array(item)`). Builders chain `.optional()`, `.doc()` and `.sensitive()`. `FieldBuilder<T, R, V>` carries the value type `V`; `InferFields<F>` derives TypeScript types from it. Arrays hold primitives or enums only (no nested objects, by design: they query badly in log tools).
+- **redaction.ts** — `createRedactor(config.redact)`: `mask` (default) / `hash` (HMAC-SHA256, needs `hashKey`, else `INVALID_CONFIG`) / `drop` for `.sensitive()` fields and `redact.keys` names.
+- **traceparent.ts** — Parse/format W3C `traceparent` headers.
+- **validation.ts** — Validates required fields and types at runtime. Results go in `_validation` (`ValidationMetadata`: `missingFields`, `typeErrors`, `invalidValues`, `unknownFields`, `truncatedFields`, `staleSpanId`, `spanLimitExceeded`, `invalidTraceparent`), never thrown except in strict mode.
 - **context.ts** — `ContextStore`: immutable snapshots; `add()` is first-write-wins (collisions keep the original, reported in `ContextValidationResult`); `derive(overrides)` creates a child store where overrides replace inherited values. Reserved fields are dropped.
-- **backend.ts** — `LogBackend` is a `Record<LogLevel, (message, payload) => void>`; `LogPayload` (eventKey, fields, spanId, parentSpanId?, traceId?, spanState?, forkId, metadata, timestamp, \_validation?). `createConsoleBackend`, `createBackend` (fallback chains), `createRouterBackend`. Nine log levels: fatal(0) through trace(8).
+- **backend.ts** — `LogBackend` is a `Record<LogLevel, (message, payload) => void>`; `LogPayload` (eventKey, fields, traceId?, spanId?, parentSpanId?, spanState?, forkId, metadata, timestamp, \_validation?). `createConsoleBackend`, `createBackend` (fallback chains), `createRouterBackend`. Nine log levels: fatal(0) through trace(8).
 - **span-timer.ts** — Auto-reset idle timeout for a span (`0` disables).
 - **constants.ts** — Log level priority map, default timeout (5min), default limits, root fork id (`0`), fork ID separator (`.`).
 - **reserved.ts** — Reserved top-level payload fields. O(1) lookups via Set.
-- **errors.ts** — Single `ChroniclerError` class with `code` discriminator (`UNSUPPORTED_LOG_LEVEL`, `RESERVED_FIELD`, `BACKEND_METHOD`, `FORK_DEPTH_EXCEEDED`, `FIELD_VALIDATION`, `INVALID_CATALOG`).
+- **errors.ts** — Single `ChroniclerError` class with `code` discriminator (`UNSUPPORTED_LOG_LEVEL`, `RESERVED_FIELD`, `BACKEND_METHOD`, `FORK_DEPTH_EXCEEDED`, `FIELD_VALIDATION`, `INVALID_CATALOG`, `INVALID_CONFIG`).
 
 ### Testing entry (`src/testing.ts`)
 
@@ -53,7 +55,7 @@ Published as `@ubercode/chronicler/testing`. `createTestChronicle(events, config
 
 ### CLI (`src/cli/`, published from `packages/cli`)
 
-Commander.js-based CLI (`@ubercode/chronicler-cli`) with `validate`, `docs` and `keys` commands. Loads the catalog from `eventsFile` (export named by `eventsExport`) and walks it with core `walkCatalog()`.
+Commander.js-based CLI (`@ubercode/chronicler-cli`) with `validate`, `docs` and `keys` commands. The key lockfile records field type, required-ness, enum values and `sensitive`; removed values or a sensitivity change are breaking, added values are not. Loads the catalog from `eventsFile` (export named by `eventsExport`) and walks it with core `walkCatalog()`.
 
 ### Public API (`src/index.ts`)
 

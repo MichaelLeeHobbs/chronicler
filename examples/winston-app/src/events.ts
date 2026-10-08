@@ -128,7 +128,7 @@ export const events = defineEvents({
         doc: 'Emitted when a new user is created',
         fields: {
           userId: field.string().doc('New user ID'),
-          email: field.string().optional().doc('User email'),
+          email: field.string().optional().sensitive().doc('User email (redacted in logs)'),
         },
       }),
       dataProcessed: event({

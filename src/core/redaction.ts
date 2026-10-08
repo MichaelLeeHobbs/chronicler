@@ -15,7 +15,7 @@ export interface RedactionConfig {
    */
   readonly mode?: RedactionMode;
   /** Secret key for `'hash'` mode. Keep it out of the logs and stable across deploys. */
-  readonly hashKey?: string;
+  readonly hashKey?: string | undefined;
   /**
    * Names to redact wherever they appear at the top level of `fields` (including untyped
    * `log()` fields and undeclared fields) or of the context in `metadata`, e.g. `['email']`.

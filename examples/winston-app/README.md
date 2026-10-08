@@ -49,7 +49,7 @@ export const { system, http, admin, business } = chronicle;
 
 This approach gives you:
 
-- **One chronicle** — shared context, metadata, and span IDs across all streams
+- **One chronicle** — shared context, metadata, and trace IDs across all streams
 - **Event-key routing** — controllers just call `admin.login(...)` without knowing which stream receives it
 - **Stream isolation** — query specific log types independently in CloudWatch
 - **Different retention** — apply different retention policies per stream
@@ -233,10 +233,10 @@ Controllers import the namespaces they need (`import { admin } from '../services
 export function requestLogger(req: Request, res: Response, next: NextFunction) {
   const requestId = req.get('x-request-id') ?? `req-${randomUUID()}`;
 
-  http.request.run({ requestId }, (request) => {
+  http.request.run({ requestId }, { traceparent: req.get('traceparent') }, (request) => {
     const startTime = Date.now();
     request.started({ method: req.method, path: req.path });
-    res.setHeader('x-span-id', request.spanId);
+    res.setHeader('x-trace-id', request.traceId);
 
     res.on('finish', () => {
       request.completed({ statusCode: res.statusCode, duration: Date.now() - startTime });
@@ -251,12 +251,12 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 }
 ```
 
-Everything downstream of `next()`, including async handlers, logs inside that span. A controller calling `admin.login({ ... })` gets the request's `spanId` and `requestId` without being passed anything. `run()` never completes the span by itself (the response is sent later), so the middleware completes it on `finish`, and fails it if the client disconnects first.
+Everything downstream of `next()`, including async handlers, logs inside that span. A controller calling `admin.login({ ... })` gets the request's `traceId` and `requestId` without being passed anything. `run()` never completes the span by itself (the response is sent later), so the middleware completes it on `finish`, and fails it if the client disconnects first.
 
 The example also shows:
 
 - **Context** — `admin.controller.ts` calls `chronicle.addContext({ userId })`, which applies to the rest of that request's events.
-- **Forks** — `health.controller.ts` probes dependencies in parallel, each from `chronicle.fork({ dependency })`, so their events share the request's span id with distinct `forkId`s.
+- **Forks** — `health.controller.ts` probes dependencies in parallel, each from `chronicle.fork({ dependency })`, so their events share the request's trace and span ids with distinct `forkId`s.
 - **Background work** — `user.controller.ts` wraps a timer in `chronicle.run(...)` so the `business.dataProcessed` event it logs later is not attributed to the already-finished request.
 
 ## Event Documentation
@@ -272,7 +272,7 @@ This creates `logs.md` with all event definitions, fields, and auto-events.
 ## Key Features
 
 - **Router Backend** — Single chronicle routes events to multiple Winston streams
-- **Span Tracking** — HTTP requests tracked end-to-end with shared span IDs
+- **Span Tracking** — HTTP requests tracked end-to-end with a shared trace ID, continuing an incoming `traceparent` header
 - **Structured Events** — Type-safe event definitions with field validation
 - **Error Handling** — Centralized error logging with full context
 - **Audit Trail** — Security actions automatically routed to audit stream

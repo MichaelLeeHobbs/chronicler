@@ -3,8 +3,8 @@
 These queries assume Chronicler emits structured JSON logs with top-level fields like:
 
 - eventKey, level, message
-- spanId, forkId
-- parentSpanId (nested spans only), traceId (any correlated event)
+- traceId, spanId (events logged inside a span; W3C hex ids), forkId
+- parentSpanId (nested spans, or spans continuing an incoming `traceparent`)
 - spanState (only on events logged after the span timed out, completed or failed)
 - timestamp
 - metadata (object)
@@ -24,12 +24,12 @@ fields @timestamp, eventKey, level, message
 | limit 50
 ```
 
-Find errors with spanId:
+Find errors in one request (trace):
 
 ```
 fields @timestamp, eventKey, message, spanId
 | filter level in ['error','critical','fatal']
-| filter spanId = 'abc-123'
+| filter traceId = '4bf92f3577b34da6a3ce929d0e0e4736'
 | sort @timestamp asc
 ```
 
@@ -39,7 +39,7 @@ All events for a span in order with durations:
 
 ```
 fields @timestamp, eventKey, message, spanId, fields.duration
-| filter spanId = 'abc-123'
+| filter spanId = '00f067aa0ba902b7'
 | sort @timestamp asc
 ```
 
@@ -65,7 +65,7 @@ A whole request, including spans nested inside it (database queries, jobs it sta
 
 ```
 fields @timestamp, eventKey, spanId, parentSpanId, forkId
-| filter traceId = 'abc-123'
+| filter traceId = '4bf92f3577b34da6a3ce929d0e0e4736'
 | sort @timestamp asc
 ```
 
@@ -93,6 +93,14 @@ fields @timestamp, eventKey
 | stats count() by eventKey
 ```
 
+Spans that received an invalid `traceparent` header:
+
+```
+fields @timestamp, eventKey
+| filter ispresent(_validation.invalidTraceparent)
+| stats count() by eventKey
+```
+
 ## Field Validation
 
 Missing required fields:
@@ -109,6 +117,22 @@ Type errors:
 fields @timestamp, eventKey, _validation.typeErrors, fields
 | filter ispresent(_validation.typeErrors)
 | sort @timestamp desc
+```
+
+Values outside an enum (and other invalid values):
+
+```
+fields @timestamp, eventKey, _validation.invalidValues
+| filter ispresent(_validation.invalidValues)
+| stats count() by eventKey
+```
+
+Truncated arrays (raise `limits.maxArrayLength` or log less):
+
+```
+fields @timestamp, eventKey, _validation.truncatedFields
+| filter ispresent(_validation.truncatedFields)
+| stats count() by eventKey
 ```
 
 ## Audit & Levels
@@ -136,6 +160,6 @@ Find logs from a specific fork:
 
 ```
 fields @timestamp, eventKey, forkId
-| filter spanId = 'abc-123' and forkId like /^1(\.|$)/
+| filter spanId = '00f067aa0ba902b7' and forkId like /^1(\.|$)/
 | sort @timestamp asc
 ```
