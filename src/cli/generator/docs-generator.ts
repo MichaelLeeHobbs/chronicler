@@ -7,7 +7,12 @@ import path from 'node:path';
 
 import type { ChroniclerCliConfig } from '../config';
 import { applyEol } from '../eol';
-import type { ParsedEvent, ParsedEventGroup, ParsedEventTree } from '../types';
+import {
+  formatFieldType,
+  type ParsedEvent,
+  type ParsedEventGroup,
+  type ParsedEventTree,
+} from '../types';
 
 /**
  * Generate documentation from parsed event tree.
@@ -204,8 +209,13 @@ function generateEventMarkdown(event: ParsedEvent, level = 3): string[] {
     lines.push('**Fields:**');
     lines.push('');
     for (const [name, field] of fields) {
-      const required = field.required ? 'required' : 'optional';
-      lines.push(`- **\`${name}\`** (\`${field.type}\`, ${required}): ${field.doc}`);
+      const flags = [
+        field.required ? 'required' : 'optional',
+        ...(field.sensitive ? ['sensitive'] : []),
+      ];
+      lines.push(
+        `- **\`${name}\`** (\`${formatFieldType(field)}\`, ${flags.join(', ')}): ${field.doc}`,
+      );
     }
     lines.push('');
   }
@@ -267,6 +277,9 @@ function serializeEvent(event: ParsedEvent): Record<string, unknown> {
       type: field.type,
       required: field.required,
       doc: field.doc,
+      sensitive: field.sensitive,
+      ...(field.values !== undefined ? { values: field.values } : {}),
+      ...(field.items !== undefined ? { items: field.items } : {}),
     })),
   };
 }

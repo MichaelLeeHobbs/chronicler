@@ -35,8 +35,8 @@ describe('Documentation Generator', () => {
     message: 'Application started',
     doc: 'Logged when the application starts',
     fields: {
-      port: { type: 'number', required: true, doc: 'Server port' },
-      mode: { type: 'string', required: false, doc: 'Runtime mode' },
+      port: { type: 'number', required: true, doc: 'Server port', sensitive: false },
+      mode: { type: 'string', required: false, doc: 'Runtime mode', sensitive: false },
     },
     lifecycle: false,
   };

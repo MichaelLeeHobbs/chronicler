@@ -51,6 +51,7 @@ export {
   walkCatalog,
 } from './core/events';
 export {
+  type ArrayItemType,
   field,
   type FieldBuilder,
   type InferFields,
@@ -58,4 +59,5 @@ export {
   type OptionalFieldBuilder,
   type RequiredFieldBuilder,
 } from './core/fields';
+export { REDACTED, type RedactionConfig, type RedactionMode } from './core/redaction';
 export type { ValidationMetadata } from './core/validation';

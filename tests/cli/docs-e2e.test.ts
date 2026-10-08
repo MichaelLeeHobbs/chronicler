@@ -75,11 +75,17 @@ describe('Docs CLI end-to-end', () => {
 
     it('extracts field builder chains into plain field data', () => {
       const startup = tree.events.find((e) => e.key === 'system.startup');
-      expect(startup?.fields.port).toEqual({ type: 'number', required: true, doc: 'Server port' });
+      expect(startup?.fields.port).toEqual({
+        type: 'number',
+        required: true,
+        doc: 'Server port',
+        sensitive: false,
+      });
       expect(startup?.fields.env).toEqual({
         type: 'string',
         required: false,
         doc: 'Runtime environment',
+        sensitive: false,
       });
     });
 
@@ -320,8 +326,14 @@ describe('Docs CLI end-to-end', () => {
       expect(startup.doc).toBe('Emitted when the application starts');
       expect(startup.fields).toEqual(
         expect.arrayContaining([
-          { name: 'port', type: 'number', required: true, doc: 'Server port' },
-          { name: 'env', type: 'string', required: false, doc: 'Runtime environment' },
+          { name: 'port', type: 'number', required: true, doc: 'Server port', sensitive: false },
+          {
+            name: 'env',
+            type: 'string',
+            required: false,
+            doc: 'Runtime environment',
+            sensitive: false,
+          },
         ]),
       );
     });
@@ -337,8 +349,14 @@ describe('Docs CLI end-to-end', () => {
       const errorEvent = systemGroup.events.find((e) => e.name === 'error')!;
       expect(errorEvent.fields).toEqual(
         expect.arrayContaining([
-          { name: 'error', type: 'error', required: true, doc: 'Error details' },
-          { name: 'fatal', type: 'boolean', required: false, doc: 'Whether error is fatal' },
+          { name: 'error', type: 'error', required: true, doc: 'Error details', sensitive: false },
+          {
+            name: 'fatal',
+            type: 'boolean',
+            required: false,
+            doc: 'Whether error is fatal',
+            sensitive: false,
+          },
         ]),
       );
     });
@@ -363,8 +381,15 @@ describe('Docs CLI end-to-end', () => {
             type: 'number',
             required: false,
             doc: 'Duration of the span in milliseconds',
+            sensitive: false,
           },
-          { name: 'error', type: 'error', required: false, doc: 'Error that caused the failure' },
+          {
+            name: 'error',
+            type: 'error',
+            required: false,
+            doc: 'Error that caused the failure',
+            sensitive: false,
+          },
         ],
       );
     });
@@ -377,9 +402,9 @@ describe('Docs CLI end-to-end', () => {
       expect(received.key).toBe('http.request.received');
       expect(received.fields).toEqual(
         expect.arrayContaining([
-          { name: 'method', type: 'string', required: true, doc: 'HTTP method' },
-          { name: 'path', type: 'string', required: true, doc: 'Request path' },
-          { name: 'ip', type: 'string', required: false, doc: 'Client IP' },
+          { name: 'method', type: 'string', required: true, doc: 'HTTP method', sensitive: false },
+          { name: 'path', type: 'string', required: true, doc: 'Request path', sensitive: false },
+          { name: 'ip', type: 'string', required: false, doc: 'Client IP', sensitive: false },
         ]),
       );
     });

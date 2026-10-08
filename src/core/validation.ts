@@ -1,10 +1,13 @@
 import type { AnyEventDefinition } from './events';
+import type { FieldBuilder } from './fields';
 
 export interface ValidationMetadata {
   readonly missingFields?: string[];
   readonly typeErrors?: string[];
   readonly invalidValues?: string[];
   readonly unknownFields?: string[];
+  /** Array fields cut to `limits.maxArrayLength` items. */
+  readonly truncatedFields?: string[];
   /**
    * Set when the ambient span had already completed or failed, so the event was logged
    * outside it. Holds that span's span id. Usually a timer, pool or listener created during a request outliving the request.
@@ -24,6 +27,7 @@ interface FieldValidationResult {
   readonly typeErrors: string[];
   readonly invalidValues: string[];
   readonly unknownFields: string[];
+  readonly truncatedFields: string[];
   readonly normalizedFields: Record<string, unknown>;
 }
 
@@ -55,10 +59,21 @@ export const sanitizeLogFields = (fields: Record<string, unknown>): Record<strin
 /** Result of checking a runtime value against an expected field type. */
 type TypeCheckResult = 'ok' | 'type_error' | 'invalid_value';
 
+const checkArray = (value: unknown, items: FieldBuilder | undefined): TypeCheckResult => {
+  if (!Array.isArray(value) || items === undefined) return 'type_error';
+  let result: TypeCheckResult = 'ok';
+  for (const item of value as unknown[]) {
+    const check = checkFieldType(item, items);
+    if (check === 'type_error') return check;
+    if (check === 'invalid_value') result = check;
+  }
+  return result;
+};
+
 /** Check if a runtime value matches the expected field type. */
 // eslint-disable-next-line complexity -- switch arms for each field type are inherently branchy
-const checkFieldType = (value: unknown, type: string): TypeCheckResult => {
-  switch (type) {
+const checkFieldType = (value: unknown, builder: FieldBuilder): TypeCheckResult => {
+  switch (builder._type) {
     case 'error':
       return value instanceof Error || typeof value === 'string' ? 'ok' : 'type_error';
     case 'string':
@@ -68,6 +83,11 @@ const checkFieldType = (value: unknown, type: string): TypeCheckResult => {
       return Number.isFinite(value) ? 'ok' : 'invalid_value';
     case 'boolean':
       return typeof value === 'boolean' ? 'ok' : 'type_error';
+    case 'enum':
+      if (typeof value !== 'string') return 'type_error';
+      return builder._values?.includes(value) === true ? 'ok' : 'invalid_value';
+    case 'array':
+      return checkArray(value, builder._items);
     default:
       // Unknown field type — always fail validation so new types
       // surface as type errors until this switch is updated.
@@ -80,12 +100,14 @@ const checkFieldType = (value: unknown, type: string): TypeCheckResult => {
  *
  * @param event - Event definition containing field schemas to validate against
  * @param payload - User-provided field values to validate
+ * @param maxArrayLength - Arrays longer than this are truncated and listed in `truncatedFields`
  * @returns Validation result with missing fields, type errors, unknown fields, and normalized values
  */
 /* eslint-disable max-lines-per-function, complexity -- field validation checks missing/type/unknown/sanitization in one pass */
 export const validateFields = (
   event: AnyEventDefinition,
   payload: Record<string, unknown> | undefined,
+  maxArrayLength: number = Number.POSITIVE_INFINITY,
 ): FieldValidationResult => {
   const providedFields = payload ?? {};
   const normalizedFields: Record<string, unknown> = {};
@@ -93,6 +115,7 @@ export const validateFields = (
   const typeErrors: string[] = [];
   const invalidValues: string[] = [];
   const unknownFields: string[] = [];
+  const truncatedFields: string[] = [];
 
   const fieldBuilders = event.fields;
   const definedFieldNames = new Set(Object.keys(fieldBuilders));
@@ -111,7 +134,7 @@ export const validateFields = (
       continue;
     }
 
-    const typeCheck = checkFieldType(value, fieldType);
+    const typeCheck = checkFieldType(value, builder);
     if (typeCheck === 'type_error') {
       typeErrors.push(name);
       continue;
@@ -133,8 +156,13 @@ export const validateFields = (
       } catch {
         normalizedFields[name] = '[unserializable error]';
       }
-    } else if (fieldType === 'string' && typeof value === 'string') {
+    } else if (typeof value === 'string') {
       normalizedFields[name] = sanitizeString(value);
+    } else if (Array.isArray(value)) {
+      if (value.length > maxArrayLength) truncatedFields.push(name);
+      normalizedFields[name] = (value as unknown[])
+        .slice(0, maxArrayLength)
+        .map((item) => (typeof item === 'string' ? sanitizeString(item) : item));
     } else {
       normalizedFields[name] = value;
     }
@@ -155,7 +183,14 @@ export const validateFields = (
     }
   }
 
-  return { missingFields, typeErrors, invalidValues, unknownFields, normalizedFields };
+  return {
+    missingFields,
+    typeErrors,
+    invalidValues,
+    unknownFields,
+    truncatedFields,
+    normalizedFields,
+  };
 };
 /* eslint-enable max-lines-per-function, complexity */
 
@@ -173,6 +208,7 @@ export const buildValidationMetadata = (
     typeErrors: fieldValidation.typeErrors,
     invalidValues: fieldValidation.invalidValues,
     unknownFields: fieldValidation.unknownFields,
+    truncatedFields: fieldValidation.truncatedFields,
   }).filter(([, v]) => Array.isArray(v) && v.length > 0);
 
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;

@@ -42,11 +42,17 @@ describe('Runtime Parser', () => {
       expect(startup).toBeDefined();
       expect(startup?.level).toBe('info');
       expect(startup?.message).toBe('Application started');
-      expect(startup?.fields.port).toEqual({ type: 'number', required: true, doc: 'Server port' });
+      expect(startup?.fields.port).toEqual({
+        type: 'number',
+        required: true,
+        doc: 'Server port',
+        sensitive: false,
+      });
       expect(startup?.fields.mode).toEqual({
         type: 'string',
         required: false,
         doc: 'Runtime mode',
+        sensitive: false,
       });
     });
 
@@ -257,7 +263,11 @@ describe('Runtime Parser', () => {
 
     it('detects reserved field usage', () => {
       const tree = makeTree({
-        events: [makeEvent({ fields: { spanId: { type: 'string', required: true, doc: '' } } })],
+        events: [
+          makeEvent({
+            fields: { spanId: { type: 'string', required: true, doc: '', sensitive: false } },
+          }),
+        ],
       });
 
       const errors = validateEventTree(tree);

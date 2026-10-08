@@ -59,3 +59,8 @@ export const DEFAULT_MAX_FORK_DEPTH = 10;
  * Default maximum number of active (uncompleted) spans
  */
 export const DEFAULT_MAX_ACTIVE_SPANS = 1000;
+
+/**
+ * Default maximum number of items logged for an array field. Longer arrays are truncated.
+ */
+export const DEFAULT_MAX_ARRAY_LENGTH = 100;

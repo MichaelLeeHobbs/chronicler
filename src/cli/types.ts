@@ -8,10 +8,25 @@ import type { LogLevel } from '../core/constants';
  * A field of a parsed event, reduced to plain data.
  */
 export interface ParsedField {
-  /** Field type: `string`, `number`, `boolean` or `error`. */
+  /** Field type: `string`, `number`, `boolean`, `error`, `enum` or `array`. */
   readonly type: string;
   readonly required: boolean;
   readonly doc: string;
+  /** Redacted before reaching the backend. */
+  readonly sensitive: boolean;
+  /** Allowed values of an `enum` field, or of the items of an array of enums. */
+  readonly values?: readonly string[];
+  /** Item type of an `array` field. */
+  readonly items?: string;
+}
+
+/** Display form of a field type: `string`, `'a' | 'b'`, `number[]`, `('a' | 'b')[]`. */
+export function formatFieldType(field: Pick<ParsedField, 'type' | 'values' | 'items'>): string {
+  const union = (field.values ?? []).map((v) => `'${v}'`).join(' | ');
+  if (field.type === 'enum') return union;
+  if (field.type === 'array')
+    return field.items === 'enum' ? `(${union})[]` : `${field.items ?? 'unknown'}[]`;
+  return field.type;
 }
 
 /**

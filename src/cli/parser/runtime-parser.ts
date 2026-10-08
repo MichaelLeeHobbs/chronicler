@@ -102,19 +102,41 @@ function selectCatalogs(mod: Record<string, unknown>, exportName?: string): Cata
   return catalogs.length > 0 ? { catalogs } : { error: noCatalogError(mod) };
 }
 
-/** Reduce a field builder (from any copy of the package) to plain data. */
+interface BuilderLike {
+  readonly _type?: unknown;
+  readonly _required?: unknown;
+  readonly _doc?: unknown;
+  readonly _sensitive?: unknown;
+  readonly _values?: unknown;
+  readonly _items?: BuilderLike;
+}
+
+const stringArray = (value: unknown): string[] | undefined =>
+  Array.isArray(value) && value.every((v) => typeof v === 'string') ? [...value] : undefined;
+
+/** Reduce one field builder to plain data. */
+function toParsedField(builder: BuilderLike & { _type: string }): ParsedField {
+  const items = builder._items;
+  const values = stringArray(builder._values) ?? stringArray(items?._values);
+  return {
+    type: builder._type,
+    required: builder._required === true,
+    doc: typeof builder._doc === 'string' ? builder._doc : '',
+    sensitive: builder._sensitive === true,
+    ...(values !== undefined ? { values } : {}),
+    ...(typeof items?._type === 'string' ? { items: items._type } : {}),
+  };
+}
+
+/** Reduce field builders (from any copy of the package) to plain data. */
 function toParsedFields(fields: unknown): Record<string, ParsedField> {
   const result: Record<string, ParsedField> = {};
   if (typeof fields !== 'object' || fields === null) return result;
   for (const [name, value] of Object.entries(fields)) {
     if (typeof value !== 'object' || value === null) continue;
-    const builder = value as { _type?: unknown; _required?: unknown; _doc?: unknown };
+    const builder = value as BuilderLike;
     if (typeof builder._type !== 'string') continue;
-    result[name] = {
-      type: builder._type,
-      required: builder._required === true,
-      doc: typeof builder._doc === 'string' ? builder._doc : '',
-    };
+    result[name] = toParsedField(builder as BuilderLike & { _type: string });
   }
   return result;
 }

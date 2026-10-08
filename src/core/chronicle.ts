@@ -10,6 +10,7 @@ import {
 import type { Chronicle, SpanHandle, SpanOptions } from './chronicle-types';
 import {
   DEFAULT_MAX_ACTIVE_SPANS,
+  DEFAULT_MAX_ARRAY_LENGTH,
   DEFAULT_MAX_CONTEXT_KEYS,
   DEFAULT_MAX_FORK_DEPTH,
   DEFAULT_REQUIRED_LEVELS,
@@ -31,6 +32,7 @@ import {
   type LifecycleEvents,
   lifecycleEvents,
 } from './events';
+import { createRedactor, type RedactionConfig, type Redactor } from './redaction';
 import { assertNoReservedKeys } from './reserved';
 import { SpanTimer } from './span-timer';
 import { formatTraceparent, parseTraceparent } from './traceparent';
@@ -54,6 +56,11 @@ export interface ChroniclerLimits {
    * counted, and their start event is flagged with `_validation.spanLimitExceeded`.
    */
   readonly maxActiveSpans?: number;
+  /**
+   * Maximum number of items logged for an array field. Longer arrays are truncated and listed
+   * in `_validation.truncatedFields`. Defaults to {@link DEFAULT_MAX_ARRAY_LENGTH}.
+   */
+  readonly maxArrayLength?: number;
 }
 
 export interface ChroniclerConfig<C extends object = object> {
@@ -78,6 +85,13 @@ export interface ChroniclerConfig<C extends object = object> {
   readonly spanIdGenerator?: () => string;
   readonly limits?: ChroniclerLimits;
   /**
+   * How sensitive values are redacted: fields marked `.sensitive()`, and any field or context key
+   * listed in `keys`. Redaction happens before the backend sees the payload.
+   *
+   * @throws {ChroniclerError} `INVALID_CONFIG` from `createChronicle` for `'hash'` without `hashKey`
+   */
+  readonly redact?: RedactionConfig;
+  /**
    * When `true`, throws a `ChroniclerError` with code `FIELD_VALIDATION`
    * for field validation errors (missing required fields, type mismatches).
    * Useful for CI/CD enforcement. Defaults to `false`.
@@ -96,6 +110,8 @@ interface ResolvedConfig {
   readonly maxContextKeys: number;
   readonly maxForkDepth: number;
   readonly maxActiveSpans: number;
+  readonly maxArrayLength: number;
+  readonly redactor: Redactor;
   readonly minLevel: number;
   readonly strict: boolean;
   readonly traceIdGenerator: () => string;
@@ -209,11 +225,12 @@ class Scope {
   ): void {
     const { config } = this.runtime;
     if (LOG_LEVELS[def.level] > config.minLevel) return;
-    const result = validateFields(def, fields);
+    const result = validateFields(def, fields, config.maxArrayLength);
     if (config.strict) assertValid(def, result);
     const validation = mergeValidation(buildValidationMetadata(result), extra);
+    const redacted = config.redactor.fields(def.fields, result.normalizedFields);
     const payload: LogPayload = {
-      ...this.basePayload(def.key, result.normalizedFields, reportedStatus),
+      ...this.basePayload(def.key, redacted, reportedStatus),
       ...(validation ? { _validation: validation } : {}),
     };
     callBackendMethod(this.runtime.backend(), def.level, def.message, payload);
@@ -226,7 +243,7 @@ class Scope {
     if (LOG_LEVELS[level] > config.minLevel) return;
     const validation = staleMetadata(staleId);
     const payload: LogPayload = {
-      ...this.basePayload('', sanitizeLogFields(fields), this.span?.status),
+      ...this.basePayload('', config.redactor.record(sanitizeLogFields(fields)), this.span?.status),
       ...(validation ? { _validation: validation } : {}),
     };
     callBackendMethod(this.runtime.backend(), level, message, payload);
@@ -345,7 +362,7 @@ class Scope {
       ...(span?.parentSpanId !== undefined ? { parentSpanId: span.parentSpanId } : {}),
       ...(status !== undefined && status !== 'active' ? { spanState: status } : {}),
       forkId: this.forkId,
-      metadata: this.context.snapshot(),
+      metadata: this.runtime.config.redactor.record(this.context.snapshot()),
       timestamp: new Date().toISOString(),
     };
   }
@@ -575,6 +592,8 @@ const resolveConfig = (config: ChroniclerConfig): ResolvedConfig => {
     maxContextKeys: config.limits?.maxContextKeys ?? DEFAULT_MAX_CONTEXT_KEYS,
     maxForkDepth: config.limits?.maxForkDepth ?? DEFAULT_MAX_FORK_DEPTH,
     maxActiveSpans: config.limits?.maxActiveSpans ?? DEFAULT_MAX_ACTIVE_SPANS,
+    maxArrayLength: config.limits?.maxArrayLength ?? DEFAULT_MAX_ARRAY_LENGTH,
+    redactor: createRedactor(config.redact),
     minLevel: LOG_LEVELS[config.minLevel ?? 'trace'],
     strict: config.strict ?? false,
     traceIdGenerator: config.traceIdGenerator ?? (() => randomHex(16)),
