@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-15
+
 2.0 redesigns how events are defined and logged, and renames correlations to spans with OpenTelemetry-style trace ids. See [Migrating from 1.x](README.md#migrating-from-1x).
 
 ### Breaking

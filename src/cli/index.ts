@@ -24,12 +24,16 @@ import { parseEventsFile } from './parser/runtime-parser';
 import { formatErrors, validateEventTree } from './parser/validator';
 import type { ParsedEventTree, ValidationError } from './types';
 
+// Injected from packages/cli/package.json by tsup; unset when run from source with tsx.
+declare const __CLI_VERSION__: string | undefined;
+const CLI_VERSION = typeof __CLI_VERSION__ === 'string' ? __CLI_VERSION__ : '0.0.0-dev';
+
 const program = new Command();
 
 program
-  .name('@ubercode/chronicler')
+  .name('chronicler')
   .description('Chronicler CLI for event validation, documentation and key lockfiles')
-  .version('0.1.0');
+  .version(CLI_VERSION);
 
 program
   .command('validate')
