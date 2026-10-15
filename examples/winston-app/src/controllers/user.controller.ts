@@ -4,8 +4,7 @@
 
 import type { Request, Response } from 'express';
 
-import { business } from '../events.js';
-import { chronicle } from '../services/chronicler.js';
+import { business, chronicle } from '../services/chronicler.js';
 
 // Mock user data store
 const users = new Map<string, { id: string; email: string; name: string }>();
@@ -42,10 +41,23 @@ export const createUser = (req: Request, res: Response) => {
   const user = { id, email, name };
   users.set(id, user);
 
-  // Log business event
-  chronicle.event(business.events.userCreated, {
+  // Log business event (carries the request's correlation id)
+  business.userCreated({
     userId: id,
     email,
+  });
+
+  // Background work that outlives the request: chronicle.run() detaches it from the request's
+  // correlation, so its events aren't logged against a correlation that has already completed.
+  chronicle.run(() => {
+    const startedAt = Date.now();
+    setTimeout(() => {
+      business.dataProcessed({
+        recordCount: users.size,
+        duration: Date.now() - startedAt,
+        success: true,
+      });
+    }, 50);
   });
 
   res.status(201).json(user);

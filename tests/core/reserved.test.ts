@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { assertNoReservedKeys, isReservedTopLevelField } from '../../src/core/reserved';
+import {
+  assertNoReservedKeys,
+  isReservedTopLevelField,
+  RESERVED_TOP_LEVEL_FIELDS,
+} from '../../src/core/reserved';
 
 describe('reserved fields', () => {
   it('detects top-level reserved fields', () => {
@@ -10,9 +14,17 @@ describe('reserved fields', () => {
     expect(isReservedTopLevelField('customField')).toBe(false);
   });
 
-  it('finds reserved keys within objects', () => {
-    const invalid = assertNoReservedKeys({ eventKey: 'x', custom: 1 });
+  it.each(['parentCorrelationId', 'rootCorrelationId', 'correlationState', 'correlationId'])(
+    'reserves the payload field %s',
+    (name) => {
+      expect(RESERVED_TOP_LEVEL_FIELDS).toContain(name);
+      expect(isReservedTopLevelField(name)).toBe(true);
+    },
+  );
 
-    expect(invalid).toEqual(['eventKey']);
+  it('finds reserved keys within objects', () => {
+    const invalid = assertNoReservedKeys({ eventKey: 'x', custom: 1, rootCorrelationId: 'y' });
+
+    expect(invalid).toEqual(['eventKey', 'rootCorrelationId']);
   });
 });

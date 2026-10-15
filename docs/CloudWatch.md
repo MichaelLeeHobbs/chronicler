@@ -4,6 +4,8 @@ These queries assume Chronicler emits structured JSON logs with top-level fields
 
 - eventKey, level, message
 - correlationId, forkId
+- parentCorrelationId (nested correlations only), rootCorrelationId (any correlated event)
+- correlationState (only on events logged after the correlation timed out, completed or failed)
 - timestamp
 - metadata (object)
 - fields (object)
@@ -57,6 +59,38 @@ Find timeouts:
 fields @timestamp, eventKey, correlationId
 | filter eventKey like /\.timeout$/
 | sort @timestamp desc
+```
+
+A whole request, including correlations nested inside it (database queries, jobs it started):
+
+```
+fields @timestamp, eventKey, correlationId, parentCorrelationId, forkId
+| filter rootCorrelationId = 'abc-123'
+| sort @timestamp asc
+```
+
+Events logged after their correlation ended (work outliving a timeout, or forks used after `complete()`):
+
+```
+fields @timestamp, eventKey, correlationId, correlationState
+| filter ispresent(correlationState)
+| stats count() by eventKey, correlationState
+```
+
+Leaked ambient work: events whose ambient correlation had already finished, so they were logged outside it. Wrap the code that logs them in `chronicle.run(...)`:
+
+```
+fields @timestamp, eventKey, _validation.staleCorrelationId
+| filter ispresent(_validation.staleCorrelationId)
+| stats count() by eventKey
+```
+
+Correlations started past `limits.maxActiveCorrelations` (often correlations that are never completed):
+
+```
+fields @timestamp, eventKey
+| filter ispresent(_validation.correlationLimitExceeded)
+| stats count() by eventKey
 ```
 
 ## Field Validation

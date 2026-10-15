@@ -1,11 +1,17 @@
-import type { EventDefinition, EventFields } from './events';
-import type { FieldBuilder } from './fields';
+import type { AnyEventDefinition } from './events';
 
 export interface ValidationMetadata {
   readonly missingFields?: string[];
   readonly typeErrors?: string[];
   readonly invalidValues?: string[];
   readonly unknownFields?: string[];
+  /**
+   * Set when the ambient correlation had already completed or failed, so the event was logged
+   * outside it. Usually a timer, pool or listener created during a request outliving the request.
+   */
+  readonly staleCorrelationId?: string;
+  /** Set on a correlation's start event when `limits.maxActiveCorrelations` was exceeded. */
+  readonly correlationLimitExceeded?: true;
 }
 
 interface FieldValidationResult {
@@ -72,20 +78,18 @@ const checkFieldType = (value: unknown, type: string): TypeCheckResult => {
  * @returns Validation result with missing fields, type errors, unknown fields, and normalized values
  */
 /* eslint-disable max-lines-per-function, complexity -- field validation checks missing/type/unknown/sanitization in one pass */
-export const validateFields = <
-  E extends EventDefinition<string, Record<string, FieldBuilder<string, boolean>>>,
->(
-  event: E,
-  payload: EventFields<E>,
+export const validateFields = (
+  event: AnyEventDefinition,
+  payload: Record<string, unknown> | undefined,
 ): FieldValidationResult => {
-  const providedFields = (payload ?? {}) as Record<string, unknown>;
+  const providedFields = payload ?? {};
   const normalizedFields: Record<string, unknown> = {};
   const missingFields: string[] = [];
   const typeErrors: string[] = [];
   const invalidValues: string[] = [];
   const unknownFields: string[] = [];
 
-  const fieldBuilders = event.fields ?? ({} as Record<string, FieldBuilder<string, boolean>>);
+  const fieldBuilders = event.fields;
   const definedFieldNames = new Set(Object.keys(fieldBuilders));
 
   for (const [name, builder] of Object.entries(fieldBuilders)) {

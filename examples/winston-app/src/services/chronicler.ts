@@ -8,30 +8,39 @@
  *   admin.*          → audit stream  (security / compliance)
  *   http.request.*   → http stream   (request lifecycle)
  *   everything else  → main stream   (application / business)
+ *
+ * The rest of the app imports the destructured namespaces and calls them directly:
+ *
+ *   import { admin } from '../services/chronicler.js';
+ *   admin.login({ userId, success });
  */
 
-import { createChronicle, createRouterBackend } from '@ubercode/chronicler';
+import { type Chronicle, createChronicle, createRouterBackend } from '@ubercode/chronicler';
 
 import { config } from '../config/index.js';
+import { events } from '../events.js';
 import { loggerAudit, loggerHttp, loggerMain, toBackend } from './logger.js';
 
-const mainBackend = toBackend(loggerMain);
-const auditBackend = toBackend(loggerAudit);
-const httpBackend = toBackend(loggerHttp);
+const isAudit = (eventKey: string) => eventKey.startsWith('admin.');
+const isHttp = (eventKey: string) => eventKey.startsWith('http.request.');
 
-export const chronicle = createChronicle({
-  backend: createRouterBackend([
-    { backend: auditBackend, filter: (_lvl, p) => p.eventKey.startsWith('admin.') },
-    { backend: httpBackend, filter: (_lvl, p) => p.eventKey.startsWith('http.request.') },
-    {
-      backend: mainBackend,
-      filter: (_lvl, p) =>
-        !p.eventKey.startsWith('admin.') && !p.eventKey.startsWith('http.request.'),
-    },
-  ]),
+export const chronicle: Chronicle<typeof events> = createChronicle({
+  events,
+  // A function backend is created lazily, on the first event.
+  backend: () =>
+    createRouterBackend([
+      { backend: toBackend(loggerAudit), filter: (_lvl, p) => isAudit(p.eventKey) },
+      { backend: toBackend(loggerHttp), filter: (_lvl, p) => isHttp(p.eventKey) },
+      {
+        backend: toBackend(loggerMain),
+        filter: (_lvl, p) => !isAudit(p.eventKey) && !isHttp(p.eventKey),
+      },
+    ]),
   metadata: {
     serviceName: config.app.name,
     appVersion: config.app.version,
     env: config.environment,
   },
 });
+
+export const { system, http, admin, business } = chronicle;

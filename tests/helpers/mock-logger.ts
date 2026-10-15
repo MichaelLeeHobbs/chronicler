@@ -61,10 +61,17 @@ export class MockLoggerBackend {
   }
 
   /**
-   * Get payloads excluding chronicler system events
+   * Get every captured log entry (level, message and payload), oldest first
    */
-  getUserPayloads(): LogPayload[] {
-    return this.getPayloads().filter((p) => !p.eventKey.startsWith('chronicler.'));
+  getEntries(): { level: string; message: string; payload: LogPayload }[] {
+    return [...this.logs];
+  }
+
+  /**
+   * Get the event keys of all captured payloads, oldest first
+   */
+  getKeys(): string[] {
+    return this.logs.map((log) => log.payload.eventKey);
   }
 
   /**

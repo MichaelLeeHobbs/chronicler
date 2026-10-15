@@ -3,8 +3,8 @@ export type ChroniclerErrorCode =
   | 'RESERVED_FIELD'
   | 'BACKEND_METHOD'
   | 'FORK_DEPTH_EXCEEDED'
-  | 'CORRELATION_LIMIT_EXCEEDED'
-  | 'FIELD_VALIDATION';
+  | 'FIELD_VALIDATION'
+  | 'INVALID_CATALOG';
 
 /**
  * Typed error class for Chronicler configuration and runtime failures.

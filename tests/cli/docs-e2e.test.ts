@@ -13,8 +13,8 @@ import type { ParsedEventTree } from '../../src/cli/types';
  * End-to-end test for the docs CLI pipeline:
  *   fixture file → parseEventsFile → generateDocs → verify output
  *
- * This uses a fixture with t.* field builders, system groups, correlation groups,
- * optional/required fields, and standalone events to cover every variation.
+ * This uses a fixture with every field builder, namespaces with group() docs, a correlation
+ * with a nested namespace, a mounted catalog, a key override and a root-level event.
  */
 describe('Docs CLI end-to-end', () => {
   const fixturesPath = path.join(__dirname, 'fixtures');
@@ -54,72 +54,81 @@ describe('Docs CLI end-to-end', () => {
       expect(errors).toHaveLength(0);
     });
 
-    it('extracts all flat events', () => {
-      // 1 standalone + 3 in system + 2 in http.request = 6
-      expect(tree.events).toHaveLength(6);
+    it('extracts all events, including lifecycle events', () => {
+      // 1 root + 3 system + 3 in http.request + 4 lifecycle + 1 billing = 12
+      expect(tree.events).toHaveLength(12);
+      expect(tree.events.filter((e) => e.lifecycle)).toHaveLength(4);
     });
 
-    it('extracts both groups', () => {
-      expect(tree.groups).toHaveLength(2);
-      const keys = tree.groups.map((g) => g.key);
-      expect(keys).toContain('system');
-      expect(keys).toContain('http.request');
+    it('extracts top-level namespaces', () => {
+      expect(tree.groups.map((g) => g.key)).toEqual(['system', 'http', 'billing']);
+      expect(tree.groups.map((g) => g.doc)).toEqual([
+        'System lifecycle events',
+        'HTTP server events',
+        '',
+      ]);
     });
 
-    it('extracts t.* field builder chains into FieldBuilder objects', () => {
+    it('uses the key override for the root event', () => {
+      expect(tree.rootEvents.map((e) => e.key)).toEqual(['app.healthCheck']);
+    });
+
+    it('extracts field builder chains into plain field data', () => {
       const startup = tree.events.find((e) => e.key === 'system.startup');
-      expect(startup?.fields?.port).toEqual({
-        _type: 'number',
-        _required: true,
-        _doc: 'Server port',
-      });
-      expect(startup?.fields?.env).toEqual({
-        _type: 'string',
-        _required: false,
-        _doc: 'Runtime environment',
+      expect(startup?.fields.port).toEqual({ type: 'number', required: true, doc: 'Server port' });
+      expect(startup?.fields.env).toEqual({
+        type: 'string',
+        required: false,
+        doc: 'Runtime environment',
       });
     });
 
     it('extracts all four field types (string, number, boolean, error)', () => {
       const error = tree.events.find((e) => e.key === 'system.error');
-      expect(error?.fields?.error?._type).toBe('error');
-      expect(error?.fields?.fatal?._type).toBe('boolean');
+      expect(error?.fields.error?.type).toBe('error');
+      expect(error?.fields.fatal?.type).toBe('boolean');
 
       const received = tree.events.find((e) => e.key === 'http.request.received');
-      expect(received?.fields?.method?._type).toBe('string');
-      expect(received?.fields?.path?._type).toBe('string');
+      expect(received?.fields.method?.type).toBe('string');
+      expect(received?.fields.path?.type).toBe('string');
 
       const completed = tree.events.find((e) => e.key === 'http.request.completed');
-      expect(completed?.fields?.statusCode?._type).toBe('number');
+      expect(completed?.fields.statusCode?.type).toBe('number');
     });
 
     it('distinguishes required vs optional fields', () => {
       const received = tree.events.find((e) => e.key === 'http.request.received');
-      expect(received?.fields?.method?._required).toBe(true);
-      expect(received?.fields?.ip?._required).toBe(false);
+      expect(received?.fields.method?.required).toBe(true);
+      expect(received?.fields.ip?.required).toBe(false);
     });
 
     it('extracts field doc strings', () => {
       const completed = tree.events.find((e) => e.key === 'http.request.completed');
-      expect(completed?.fields?.statusCode?._doc).toBe('Response status code');
-      expect(completed?.fields?.duration?._doc).toBe('Duration in ms');
+      expect(completed?.fields.statusCode?.doc).toBe('Response status code');
+      expect(completed?.fields.duration?.doc).toBe('Duration in ms');
     });
 
-    it('extracts correlation group timeout', () => {
-      const httpGroup = tree.groups.find((g) => g.key === 'http.request');
-      expect(httpGroup?.timeout).toBe(30000);
+    it('extracts the correlation with its timeout', () => {
+      const request = tree.groups.find((g) => g.key === 'http')!.groups.request;
+      expect(request?.kind).toBe('correlation');
+      expect(request?.timeout).toBe(30000);
+      expect(request?.doc).toBe('HTTP request lifecycle');
     });
 
-    it('extracts inline events inside groups', () => {
+    it('extracts events inside namespaces and correlations', () => {
       const systemGroup = tree.groups.find((g) => g.key === 'system');
-      expect(Object.keys(systemGroup!.events)).toEqual(
-        expect.arrayContaining(['startup', 'shutdown', 'error']),
-      );
+      expect(Object.keys(systemGroup!.events)).toEqual(['startup', 'shutdown', 'error']);
 
-      const httpGroup = tree.groups.find((g) => g.key === 'http.request');
-      expect(Object.keys(httpGroup!.events)).toEqual(
-        expect.arrayContaining(['received', 'completed']),
-      );
+      const request = tree.groups.find((g) => g.key === 'http')!.groups.request!;
+      expect(Object.keys(request.events)).toEqual(['received', 'completed']);
+      expect(request.groups.cache?.events.hit?.key).toBe('http.request.cache.hit');
+      expect(request.groups.cache?.events.hit?.correlationKey).toBe('http.request');
+    });
+
+    it('includes the mounted catalog once, under its mount point', () => {
+      expect(tree.catalogExports).toEqual(['events']);
+      const billing = tree.groups.find((g) => g.key === 'billing');
+      expect(Object.keys(billing!.events)).toEqual(['charge']);
     });
   });
 
@@ -137,22 +146,27 @@ describe('Docs CLI end-to-end', () => {
       markdown = fs.readFileSync(markdownPath, 'utf-8');
     });
 
+    it('matches the snapshot', () => {
+      expect(markdown).toMatchSnapshot();
+    });
+
     it('includes title and auto-generated notice', () => {
       expect(markdown).toContain('# Chronicler Events');
       expect(markdown).toContain('Auto-generated documentation');
     });
 
-    it('includes table of contents with all groups', () => {
+    it('includes table of contents with all top-level groups', () => {
       expect(markdown).toContain('## Table of Contents');
       expect(markdown).toContain('- [system]');
-      expect(markdown).toContain('- [http.request]');
+      expect(markdown).toContain('- [http]');
+      expect(markdown).toContain('- [billing]');
     });
 
     // ── System group ────────────────────────────────────────────
 
-    it('documents system group heading and description', () => {
-      expect(markdown).toContain('## system');
-      expect(markdown).toContain('System lifecycle events');
+    it('documents namespace headings and group() docs', () => {
+      expect(markdown).toContain('## system\n\nSystem lifecycle events');
+      expect(markdown).toContain('## http\n\nHTTP server events');
     });
 
     it('documents system.startup event with fields', () => {
@@ -185,31 +199,46 @@ describe('Docs CLI end-to-end', () => {
 
     // ── Correlation group ───────────────────────────────────────
 
-    it('documents correlation group type and timeout', () => {
-      expect(markdown).toContain('**Type:** Correlation Group');
-      expect(markdown).toContain('**Timeout:** 30000ms (activity-based)');
+    it('documents the correlation type and timeout under its namespace', () => {
+      expect(markdown).toContain(
+        '### http.request\n\n**Type:** Correlation\n**Timeout:** 30000ms (activity-based)\n\nHTTP request lifecycle',
+      );
     });
 
     it('lists auto-generated correlation events', () => {
       expect(markdown).toContain('**Auto-Generated Events:**');
-      expect(markdown).toContain('`http.request.start`');
-      expect(markdown).toContain('`http.request.complete`');
-      expect(markdown).toContain('`http.request.timeout`');
+      expect(markdown).toContain('`http.request.start` (`info`)');
+      expect(markdown).toContain('`http.request.complete` (`info`)');
+      expect(markdown).toContain('`http.request.fail` (`error`)');
+      expect(markdown).toContain('`http.request.timeout` (`warn`)');
+      // Lifecycle events are listed, not documented as separate events
+      expect(markdown).not.toContain('#### http.request.start');
     });
 
-    it('documents correlation group inline events with fields', () => {
-      expect(markdown).toContain('### http.request.received');
+    it('documents correlation events with fields', () => {
+      expect(markdown).toContain('#### http.request.received');
       expect(markdown).toContain('**`method`** (`string`, required): HTTP method');
       expect(markdown).toContain('**`ip`** (`string`, optional): Client IP');
 
-      expect(markdown).toContain('### http.request.completed');
+      expect(markdown).toContain('#### http.request.completed');
       expect(markdown).toContain('**`statusCode`** (`number`, required): Response status code');
       expect(markdown).toContain('**`duration`** (`number`, required): Duration in ms');
     });
 
+    it('documents namespaces nested inside a correlation', () => {
+      expect(markdown).toContain('#### http.request.cache');
+      expect(markdown).toContain('##### http.request.cache.hit');
+    });
+
+    it('documents the mounted catalog under its mount point', () => {
+      expect(markdown).toContain('## billing');
+      expect(markdown).toContain('### billing.charge');
+      expect(markdown).toContain('**`amount`** (`number`, required): Amount in cents');
+    });
+
     // ── Standalone events ───────────────────────────────────────
 
-    it('places standalone events in their own section', () => {
+    it('places root-level events in their own section', () => {
       expect(markdown).toContain('## Standalone Events');
       expect(markdown).toContain('### app.healthCheck');
       expect(markdown).toContain('**Level:** `debug`');
@@ -220,33 +249,33 @@ describe('Docs CLI end-to-end', () => {
   // ── JSON generation ──────────────────────────────────────────────
 
   describe('JSON generation', () => {
+    interface DocsEvent {
+      name?: string;
+      key: string;
+      level: string;
+      message: string;
+      doc: string;
+      fields: { name: string; type: string; required: boolean; doc: string }[];
+    }
+    interface DocsGroup {
+      name?: string;
+      key: string;
+      path: string;
+      type: string;
+      doc: string;
+      timeout?: number;
+      autoEvents?: string[];
+      lifecycleEvents?: DocsEvent[];
+      events: DocsEvent[];
+      groups: DocsGroup[];
+    }
     interface DocsJson {
       generated: string;
       eventCount: number;
+      lifecycleEventCount: number;
       groupCount: number;
-      groups: {
-        key: string;
-        type: string;
-        doc: string;
-        timeout?: number;
-        autoEvents?: string[];
-        events: {
-          name: string;
-          key: string;
-          level: string;
-          message: string;
-          doc: string;
-          fields: { name: string; type: string; required: boolean; doc: string }[];
-        }[];
-        groups: unknown[];
-      }[];
-      standaloneEvents: {
-        key: string;
-        level: string;
-        message: string;
-        doc: string;
-        fields: { name: string; type: string; required: boolean; doc: string }[];
-      }[];
+      groups: DocsGroup[];
+      standaloneEvents: DocsEvent[];
     }
 
     let json: DocsJson;
@@ -261,8 +290,9 @@ describe('Docs CLI end-to-end', () => {
     });
 
     it('includes correct top-level counts', () => {
-      expect(json.eventCount).toBe(6);
-      expect(json.groupCount).toBe(2);
+      expect(json.eventCount).toBe(8);
+      expect(json.lifecycleEventCount).toBe(4);
+      expect(json.groupCount).toBe(3);
     });
 
     it('includes a generated timestamp', () => {
@@ -274,7 +304,7 @@ describe('Docs CLI end-to-end', () => {
 
     it('serializes system group metadata', () => {
       const systemGroup = json.groups.find((g) => g.key === 'system')!;
-      expect(systemGroup.type).toBe('system');
+      expect(systemGroup.type).toBe('namespace');
       expect(systemGroup.doc).toBe('System lifecycle events');
       expect(systemGroup.autoEvents).toBeUndefined();
     });
@@ -315,16 +345,32 @@ describe('Docs CLI end-to-end', () => {
 
     // ── Correlation group ───────────────────────────────────────
 
-    it('serializes correlation group with timeout and auto-events', () => {
-      const httpGroup = json.groups.find((g) => g.key === 'http.request')!;
+    const findRequest = () =>
+      json.groups.find((g) => g.key === 'http')!.groups.find((g) => g.name === 'request')!;
+
+    it('serializes the correlation with timeout and auto-events', () => {
+      const httpGroup = findRequest();
+      expect(httpGroup.key).toBe('http.request');
+      expect(httpGroup.path).toBe('http.request');
       expect(httpGroup.type).toBe('correlation');
       expect(httpGroup.doc).toBe('HTTP request lifecycle');
       expect(httpGroup.timeout).toBe(30000);
       expect(httpGroup.autoEvents).toEqual(['start', 'complete', 'fail', 'timeout']);
+      expect(httpGroup.lifecycleEvents?.find((e) => e.key === 'http.request.fail')?.fields).toEqual(
+        [
+          {
+            name: 'duration',
+            type: 'number',
+            required: false,
+            doc: 'Duration of the correlation in milliseconds',
+          },
+          { name: 'error', type: 'error', required: false, doc: 'Error that caused the failure' },
+        ],
+      );
     });
 
-    it('serializes correlation group events with fields', () => {
-      const httpGroup = json.groups.find((g) => g.key === 'http.request')!;
+    it('serializes correlation events with fields', () => {
+      const httpGroup = findRequest();
       expect(httpGroup.events.length).toBe(2);
 
       const received = httpGroup.events.find((e) => e.name === 'received')!;
@@ -346,6 +392,12 @@ describe('Docs CLI end-to-end', () => {
       expect(json.standaloneEvents[0]!.level).toBe('debug');
       expect(json.standaloneEvents[0]!.doc).toBe('Periodic health check ping');
       expect(json.standaloneEvents[0]!.fields).toEqual([]);
+    });
+
+    it('serializes namespaces nested inside a correlation', () => {
+      const cache = findRequest().groups.find((g) => g.name === 'cache')!;
+      expect(cache.type).toBe('namespace');
+      expect(cache.events.map((e) => e.key)).toEqual(['http.request.cache.hit']);
     });
   });
 });

@@ -4,8 +4,7 @@
 
 import type { Request, Response } from 'express';
 
-import { admin } from '../events.js';
-import { chronicle } from '../services/chronicler.js';
+import { admin, chronicle } from '../services/chronicler.js';
 
 export const performAdminAction = (req: Request, res: Response) => {
   const { action, resource } = req.body;
@@ -15,11 +14,14 @@ export const performAdminAction = (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Action is required' });
   }
 
+  // Context added here applies to the rest of this request's correlation
+  chronicle.addContext({ userId });
+
   // Simulate admin action
   const success = Math.random() > 0.1; // 90% success rate
 
   // Log audit event
-  chronicle.event(admin.events.action, {
+  admin.action({
     action,
     userId,
     resource: resource || 'unknown',
@@ -49,7 +51,7 @@ export const loginAttempt = (req: Request, res: Response) => {
   const success = password === 'demo123';
 
   // Log audit event
-  chronicle.event(admin.events.login, {
+  admin.login({
     userId,
     success,
     ip,
