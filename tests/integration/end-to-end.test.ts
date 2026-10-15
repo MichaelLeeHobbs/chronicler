@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   type Chronicle,
-  correlation,
   createChronicle,
   createRouterBackend,
   defineEvents,
@@ -10,6 +9,7 @@ import {
   field,
   group,
   type HandleOf,
+  span,
 } from '../../src';
 import { sequentialIds, sleep } from '../helpers/fixtures';
 import { MockLoggerBackend } from '../helpers/mock-logger';
@@ -30,7 +30,7 @@ const adminEvents = defineEvents({
 });
 
 const apiEvents = defineEvents({
-  request: correlation({
+  request: span({
     doc: 'API request',
     timeout: 5000,
     complete: { status: field.number().optional() },
@@ -70,7 +70,7 @@ const events = defineEvents({
   admin: adminEvents,
   api: apiEvents,
   jobs: {
-    sync: correlation({
+    sync: span({
       timeout: 0,
       events: { batch: event({ level: 'info', message: 'batch', fields: { n: field.number() } }) },
     }),
@@ -85,7 +85,8 @@ const build = (backend = new MockLoggerBackend().backend) =>
     events,
     backend,
     metadata: { app: 'my-api' },
-    correlationIdGenerator: sequentialIds(),
+    traceIdGenerator: sequentialIds('t'),
+    spanIdGenerator: sequentialIds(),
   });
 
 describe('Integration Tests', () => {
@@ -114,7 +115,7 @@ describe('Integration Tests', () => {
       return { id };
     };
 
-    // a handler using its typed correlation handle
+    // a handler using its typed span handle
     const handle = async (req: Request, userId: string) => {
       req.validated({ method: 'POST', path: '/login' });
       const user = await findUser(userId);
@@ -137,18 +138,18 @@ describe('Integration Tests', () => {
     chronicle.system.startup({ port: 3001 });
 
     const payloads = mock.getPayloads();
-    expect(payloads[0]).toMatchObject({ eventKey: 'system.startup', correlationId: '' });
+    expect(payloads[0]).toMatchObject({ eventKey: 'system.startup' });
     expect(payloads.at(-1)).toMatchObject({
       eventKey: 'system.startup',
       metadata: { app: 'my-api' },
     });
     expect(payloads.at(-1)?.metadata).not.toHaveProperty('userId');
 
-    for (const [user, id] of [
-      ['u1', 'c1'],
-      ['u2', 'c2'],
+    for (const [user, id, trace] of [
+      ['u1', 'c1', 't1'],
+      ['u2', 'c2', 't2'],
     ] as const) {
-      const ofRequest = payloads.filter((p) => p.correlationId === id);
+      const ofRequest = payloads.filter((p) => p.spanId === id);
       expect(ofRequest.map((p) => p.eventKey)).toEqual([
         'api.request.start',
         'api.request.validated',
@@ -160,7 +161,7 @@ describe('Integration Tests', () => {
       ]);
       for (const p of ofRequest) {
         expect(p.metadata.requestId).toBe(`r-${user}`);
-        expect(p.rootCorrelationId).toBe(id);
+        expect(p.traceId).toBe(trace);
       }
       expect(ofRequest.find((p) => p.eventKey === 'admin.login')?.fields.userId).toBe(user);
       expect(ofRequest.at(-1)?.metadata.userId).toBe(user);
@@ -189,14 +190,12 @@ describe('Integration Tests', () => {
     await detached;
 
     const batches = mock.findAllByKey('jobs.sync.batch');
-    expect(
-      batches.map((p) => [p.correlationId, p.parentCorrelationId, p.rootCorrelationId]),
-    ).toEqual([
-      ['c2', 'c1', 'c1'],
-      ['c2', 'c1', 'c1'],
+    expect(batches.map((p) => [p.spanId, p.parentSpanId, p.traceId])).toEqual([
+      ['c2', 'c1', 't1'],
+      ['c2', 'c1', 't1'],
     ]);
     const late = mock.findByKey('system.startup');
-    expect(late?.correlationId).toBe('');
+    expect(late?.spanId).toBeUndefined();
     expect(late).not.toHaveProperty('_validation');
   });
 
@@ -302,7 +301,7 @@ describe('Integration Tests', () => {
       expect(errors.findAllByLevel('error')).toHaveLength(1);
     });
 
-    it('preserves shared context and correlation ids across routed backends', () => {
+    it('preserves shared context and span ids across routed backends', () => {
       const { http, chronicle } = routed();
       chronicle.addContext({ deploymentId: 'deploy-abc' });
       const req = chronicle.api.request.begin({ requestId: 'req-1' });
@@ -314,7 +313,7 @@ describe('Integration Tests', () => {
         deploymentId: 'deploy-abc',
         requestId: 'req-1',
       });
-      expect(new Set(http.getPayloads().map((p) => p.correlationId))).toEqual(new Set(['c1']));
+      expect(new Set(http.getPayloads().map((p) => p.spanId))).toEqual(new Set(['c1']));
     });
 
     it('routes lifecycle events (fail, timeout) to the correct backend', () => {

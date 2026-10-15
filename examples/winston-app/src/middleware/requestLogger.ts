@@ -1,6 +1,6 @@
 /**
  * HTTP request logging middleware
- * Runs every request inside an ambient `http.request` correlation
+ * Runs every request inside an ambient `http.request` span
  */
 
 import { randomUUID } from 'node:crypto';
@@ -12,17 +12,18 @@ import { http } from '../services/chronicler.js';
 /**
  * Request logger middleware
  *
- * `http.request.run()` starts the correlation and makes it ambient for everything downstream,
+ * `http.request.run()` starts the span and makes it ambient for everything downstream,
  * including async handlers. Controllers call `admin.login(...)` etc. and their events carry
- * this request's correlation id without receiving anything from the request object.
+ * this request's trace id without receiving anything from the request object.
  *
- * `run()` never completes the correlation on its own (the response is sent later), so it is
+ * `run()` never completes the span on its own (the response is sent later), so it is
  * completed when the response finishes. If the client disconnects first, it is failed.
  */
 export function requestLogger(req: Request, res: Response, next: NextFunction) {
   const requestId = req.get('x-request-id') ?? `req-${randomUUID()}`;
 
-  http.request.run({ requestId }, (request) => {
+  // Continue the caller's trace when it sent a W3C traceparent header
+  http.request.run({ requestId }, { traceparent: req.get('traceparent') }, (request) => {
     const startTime = Date.now();
 
     request.started({
@@ -32,8 +33,8 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
       userAgent: req.get('user-agent') ?? 'unknown',
     });
 
-    // Let clients and downstream services quote the correlation id
-    res.setHeader('x-correlation-id', request.correlationId);
+    // Let clients quote the trace id in bug reports
+    res.setHeader('x-trace-id', request.traceId);
 
     res.on('finish', () => {
       if (res.statusCode >= 400) {
@@ -52,7 +53,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
     });
 
     // 'close' also fires after 'finish'; only a connection closed before the response was sent
-    // fails the correlation (a second complete()/fail() is ignored anyway).
+    // fails the span (a second complete()/fail() is ignored anyway).
     res.on('close', () => {
       if (!res.writableFinished) {
         request.fail(new Error('Client closed the connection before the response was sent'));

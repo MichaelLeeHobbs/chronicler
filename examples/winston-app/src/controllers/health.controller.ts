@@ -24,7 +24,7 @@ export const healthDeep = async (_req: Request, res: Response) => {
   const dependencies = ['database', 'cache', 'external'] as const;
 
   // Probe dependencies in parallel. Each probe logs from its own fork of the request's
-  // correlation, so its events share the correlation id but get their own forkId (1, 2, 3).
+  // span, so its events share the span id but get their own forkId (1, 2, 3).
   const results = await Promise.all(
     dependencies.map(async (dependency) => {
       const fork = chronicle.fork({ dependency });

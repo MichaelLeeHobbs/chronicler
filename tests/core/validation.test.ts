@@ -118,6 +118,7 @@ describe('buildValidationMetadata', () => {
     typeErrors: [],
     invalidValues: [],
     unknownFields: [],
+    truncatedFields: [],
     normalizedFields: {},
   };
 

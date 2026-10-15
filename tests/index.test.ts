@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import * as api from '../src';
-import { correlation, createChronicle, defineEvents, event, field } from '../src';
+import { createChronicle, defineEvents, event, field, span } from '../src';
 import { MockLoggerBackend } from './helpers/mock-logger';
 
 describe('chronicler public API', () => {
@@ -16,7 +16,7 @@ describe('chronicler public API', () => {
           fields: { port: field.number().doc('port') },
         }),
       },
-      http: { request: correlation({ events: {} }) },
+      http: { request: span({ events: {} }) },
     });
     const chronicle = createChronicle({
       events,
@@ -38,7 +38,7 @@ describe('chronicler public API', () => {
       expect.arrayContaining([
         'ChroniclerError',
         'RESERVED_CATALOG_NAMES',
-        'correlation',
+        'span',
         'createBackend',
         'createChronicle',
         'createConsoleBackend',
@@ -48,7 +48,7 @@ describe('chronicler public API', () => {
         'field',
         'group',
         'isCatalog',
-        'isCorrelationDefinition',
+        'isSpanDefinition',
         'isEventDefinition',
         'walkCatalog',
       ]),
@@ -56,7 +56,7 @@ describe('chronicler public API', () => {
   });
 
   it('no longer exports the 1.x API', () => {
-    for (const removed of ['defineEvent', 'defineEventGroup', 'defineCorrelationGroup']) {
+    for (const removed of ['defineEvent', 'defineEventGroup', 'defineSpanGroup']) {
       expect(api).not.toHaveProperty(removed);
     }
   });
@@ -72,7 +72,9 @@ describe('chronicler public API', () => {
       'complete',
       'fail',
       'timeout',
-      'correlationId',
+      'traceId',
+      'spanId',
+      'traceparent',
       'then',
     ]);
   });

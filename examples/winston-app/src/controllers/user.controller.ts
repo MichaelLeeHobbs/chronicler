@@ -41,14 +41,14 @@ export const createUser = (req: Request, res: Response) => {
   const user = { id, email, name };
   users.set(id, user);
 
-  // Log business event (carries the request's correlation id)
+  // Log business event (carries the request's trace id; email is redacted)
   business.userCreated({
     userId: id,
     email,
   });
 
   // Background work that outlives the request: chronicle.run() detaches it from the request's
-  // correlation, so its events aren't logged against a correlation that has already completed.
+  // span, so its events aren't logged against a span that has already completed.
   chronicle.run(() => {
     const startedAt = Date.now();
     setTimeout(() => {

@@ -1,4 +1,4 @@
-import { DEFAULT_CORRELATION_TIMEOUT_MS, LOG_LEVELS, type LogLevel } from './constants';
+import { DEFAULT_SPAN_TIMEOUT_MS, LOG_LEVELS, type LogLevel } from './constants';
 import { ChroniclerError } from './errors';
 import { field, type FieldBuilder } from './fields';
 
@@ -10,8 +10,8 @@ export type NoFields = Record<never, never>;
 
 /** Discriminant stored on every event definition. A string, so it survives two copies of the package. */
 export const EVENT_KIND = 'chronicler:event';
-/** Discriminant stored on every correlation definition. */
-export const CORRELATION_KIND = 'chronicler:correlation';
+/** Discriminant stored on every span definition. */
+export const SPAN_KIND = 'chronicler:span';
 
 /** Non-enumerable marker on objects returned by `defineEvents()`. */
 const CATALOG_MARK = Symbol.for('chronicler.catalog');
@@ -41,14 +41,14 @@ export interface EventDefinition<F extends FieldDefs = FieldDefs> {
 /**
  * A unit of work with a lifecycle (`.start`, `.complete`, `.fail`, `.timeout`).
  *
- * Created with {@link correlation}. `events` holds the events that belong to it.
+ * Created with {@link span}. `events` holds the events that belong to it.
  */
-export interface CorrelationDefinition<
+export interface SpanDefinition<
   E extends object = object,
   CF extends FieldDefs = NoFields,
   FF extends FieldDefs = NoFields,
 > {
-  readonly kind: typeof CORRELATION_KIND;
+  readonly kind: typeof SPAN_KIND;
   readonly key: string;
   readonly keyOverride?: string;
   readonly doc?: string;
@@ -63,11 +63,11 @@ export interface CorrelationDefinition<
 
 /** Any event definition, whatever its fields. */
 export type AnyEventDefinition = EventDefinition<FieldDefs>;
-/** Any correlation definition, whatever its events. */
-export type AnyCorrelationDefinition = CorrelationDefinition<object, FieldDefs, FieldDefs>;
+/** Any span definition, whatever its events. */
+export type AnySpanDefinition = SpanDefinition<object, FieldDefs, FieldDefs>;
 
 /**
- * Names that can't be used for catalog entries, because the emitter tree, correlation handles
+ * Names that can't be used for catalog entries, because the emitter tree, span handles
  * or auto-generated lifecycle events already use them. `then` is reserved so a chronicle is never
  * mistaken for a promise.
  */
@@ -81,7 +81,9 @@ export const RESERVED_CATALOG_NAMES = [
   'complete',
   'fail',
   'timeout',
-  'correlationId',
+  'traceId',
+  'spanId',
+  'traceparent',
   'then',
 ] as const;
 
@@ -99,7 +101,7 @@ type AnyFunction = (...args: never[]) => unknown;
 export type CheckCatalog<C> = {
   readonly [K in keyof C]: K extends ReservedCatalogName
     ? never
-    : C[K] extends AnyEventDefinition | AnyCorrelationDefinition
+    : C[K] extends AnyEventDefinition | AnySpanDefinition
       ? C[K]
       : C[K] extends AnyFunction
         ? never
@@ -108,16 +110,16 @@ export type CheckCatalog<C> = {
           : never;
 };
 
-/** Like {@link CheckCatalog}, for a correlation's events: correlations can't contain correlations. */
-export type CheckCorrelationEvents<E> = {
+/** Like {@link CheckCatalog}, for a span's events: spans can't contain spans. */
+export type CheckSpanEvents<E> = {
   readonly [K in keyof E]: K extends ReservedCatalogName
     ? never
     : E[K] extends AnyEventDefinition
       ? E[K]
-      : E[K] extends AnyCorrelationDefinition | AnyFunction
+      : E[K] extends AnySpanDefinition | AnyFunction
         ? never
         : E[K] extends object
-          ? CheckCorrelationEvents<E[K]>
+          ? CheckSpanEvents<E[K]>
           : never;
 };
 
@@ -167,12 +169,12 @@ export function event(
 }
 
 /**
- * Define a correlation: a unit of work with a lifecycle and its own events.
+ * Define a span: a unit of work with a lifecycle and its own events.
  *
  * Lifecycle events `<key>.start`, `.complete`, `.fail` and `.timeout` are generated automatically.
  * The timeout defaults to 5 minutes, resets on any activity, and `0` disables it.
  */
-export function correlation<
+export function span<
   const E extends object,
   const CF extends FieldDefs = NoFields,
   const FF extends FieldDefs = NoFields,
@@ -180,18 +182,18 @@ export function correlation<
   readonly doc?: string;
   readonly timeout?: number;
   readonly key?: string;
-  readonly events: E & CheckCorrelationEvents<E>;
+  readonly events: E & CheckSpanEvents<E>;
   /** Extra fields for `complete()`, e.g. `{ statusCode: field.number() }`. Can't redefine `duration`. */
   readonly complete?: CF & Partial<Record<'duration', never>>;
   /** Extra fields for `fail()`. Can't redefine `duration` or `error`. */
   readonly fail?: FF & Partial<Record<'duration' | 'error', never>>;
-}): CorrelationDefinition<E, CF, FF> {
+}): SpanDefinition<E, CF, FF> {
   return {
-    kind: CORRELATION_KIND,
+    kind: SPAN_KIND,
     key: '',
     ...(options.key !== undefined ? { keyOverride: options.key } : {}),
     ...(options.doc !== undefined ? { doc: options.doc } : {}),
-    timeout: options.timeout ?? DEFAULT_CORRELATION_TIMEOUT_MS,
+    timeout: options.timeout ?? DEFAULT_SPAN_TIMEOUT_MS,
     events: options.events,
     completeFields: options.complete ?? ({} as CF),
     failFields: options.fail ?? ({} as FF),
@@ -211,11 +213,9 @@ export const group = <const C extends object>(
 export const isEventDefinition = (value: unknown): value is AnyEventDefinition =>
   typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === EVENT_KIND;
 
-/** Type guard for correlation definitions. Works across separate copies of the package. */
-export const isCorrelationDefinition = (value: unknown): value is AnyCorrelationDefinition =>
-  typeof value === 'object' &&
-  value !== null &&
-  (value as { kind?: unknown }).kind === CORRELATION_KIND;
+/** Type guard for span definitions. Works across separate copies of the package. */
+export const isSpanDefinition = (value: unknown): value is AnySpanDefinition =>
+  typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === SPAN_KIND;
 
 /** True for objects returned by {@link defineEvents}. */
 export const isCatalog = (value: unknown): value is object =>
@@ -229,20 +229,20 @@ export const isMountedCatalog = (value: unknown): boolean =>
 export const namespaceDoc = (value: object): string | undefined =>
   (value as Record<symbol, string | undefined>)[NAMESPACE_DOC];
 
-/** Field definitions for the auto-generated correlation lifecycle events. */
+/** Field definitions for the auto-generated span lifecycle events. */
 const LIFECYCLE_FIELDS = {
   start: {},
   complete: {
-    duration: field.number().optional().doc('Duration of the correlation in milliseconds'),
+    duration: field.number().optional().doc('Duration of the span in milliseconds'),
   },
   fail: {
-    duration: field.number().optional().doc('Duration of the correlation in milliseconds'),
+    duration: field.number().optional().doc('Duration of the span in milliseconds'),
     error: field.error().optional().doc('Error that caused the failure'),
   },
   timeout: {},
 } as const;
 
-/** The four auto-generated lifecycle events of a correlation. */
+/** The four auto-generated lifecycle events of a span. */
 export interface LifecycleEvents {
   readonly start: AnyEventDefinition;
   readonly complete: AnyEventDefinition;
@@ -250,53 +250,53 @@ export interface LifecycleEvents {
   readonly timeout: AnyEventDefinition;
 }
 
-/** Extra fields a correlation declares for its `.complete` and `.fail` events. */
+/** Extra fields a span declares for its `.complete` and `.fail` events. */
 export interface LifecycleExtras {
   readonly completeFields?: FieldDefs;
   readonly failFields?: FieldDefs;
 }
 
 /**
- * Build the lifecycle events for a correlation key.
+ * Build the lifecycle events for a span key.
  *
- * @param correlationKey - Full key of the correlation (e.g. `http.request`)
- * @param extras - Extra fields declared with `correlation({ complete, fail })`
+ * @param spanKey - Full key of the span (e.g. `http.request`)
+ * @param extras - Extra fields declared with `span({ complete, fail })`
  * @returns Event definitions for `.start`, `.complete`, `.fail` and `.timeout`
  */
 export const lifecycleEvents = (
-  correlationKey: string,
+  spanKey: string,
   extras: LifecycleExtras = {},
 ): LifecycleEvents => ({
   start: {
     kind: EVENT_KIND,
-    key: `${correlationKey}.start`,
+    key: `${spanKey}.start`,
     level: 'info',
-    message: `${correlationKey} started`,
-    doc: 'Auto-generated correlation start event',
+    message: `${spanKey} started`,
+    doc: 'Auto-generated span start event',
     fields: LIFECYCLE_FIELDS.start,
   },
   complete: {
     kind: EVENT_KIND,
-    key: `${correlationKey}.complete`,
+    key: `${spanKey}.complete`,
     level: 'info',
-    message: `${correlationKey} completed`,
-    doc: 'Auto-generated correlation completion event',
+    message: `${spanKey} completed`,
+    doc: 'Auto-generated span completion event',
     fields: { ...extras.completeFields, ...LIFECYCLE_FIELDS.complete },
   },
   fail: {
     kind: EVENT_KIND,
-    key: `${correlationKey}.fail`,
+    key: `${spanKey}.fail`,
     level: 'error',
-    message: `${correlationKey} failed`,
-    doc: 'Auto-generated correlation failure event',
+    message: `${spanKey} failed`,
+    doc: 'Auto-generated span failure event',
     fields: { ...extras.failFields, ...LIFECYCLE_FIELDS.fail },
   },
   timeout: {
     kind: EVENT_KIND,
-    key: `${correlationKey}.timeout`,
+    key: `${spanKey}.timeout`,
     level: 'warn',
-    message: `${correlationKey} timed out`,
-    doc: 'Auto-generated correlation timeout event',
+    message: `${spanKey} timed out`,
+    doc: 'Auto-generated span timeout event',
     fields: LIFECYCLE_FIELDS.timeout,
   },
 });
@@ -345,24 +345,24 @@ export type CatalogEntry =
       readonly key: string;
       readonly path: string;
       readonly definition: AnyEventDefinition;
-      /** Key of the correlation this event belongs to, if any. */
-      readonly correlationKey?: string;
+      /** Key of the span this event belongs to, if any. */
+      readonly spanKey?: string;
       /** True for auto-generated lifecycle events. */
       readonly lifecycle: boolean;
     }
   | {
-      readonly kind: 'correlation';
+      readonly kind: 'span';
       readonly key: string;
       readonly path: string;
-      readonly definition: AnyCorrelationDefinition;
+      readonly definition: AnySpanDefinition;
     }
   | {
       readonly kind: 'namespace';
       readonly key: string;
       readonly path: string;
       readonly doc?: string;
-      /** Key of the correlation this namespace sits in, if any. */
-      readonly correlationKey?: string;
+      /** Key of the span this namespace sits in, if any. */
+      readonly spanKey?: string;
     };
 
 interface WalkState {
@@ -384,11 +384,11 @@ const claimKey = (state: WalkState, key: string, path: string): void => {
 interface Placement {
   readonly path: string;
   readonly derivedKey: string;
-  readonly correlationKey: string | undefined;
+  readonly spanKey: string | undefined;
 }
 
 const walkEvent = (state: WalkState, def: AnyEventDefinition, at: Placement): void => {
-  const { path, correlationKey } = at;
+  const { path, spanKey } = at;
   if (!Object.hasOwn(LOG_LEVELS, def.level)) {
     throw catalogError(`Event ${describePath(path)} has an invalid level "${String(def.level)}".`);
   }
@@ -399,38 +399,38 @@ const walkEvent = (state: WalkState, def: AnyEventDefinition, at: Placement): vo
     key,
     path,
     definition: { ...def, key },
-    ...(correlationKey !== undefined ? { correlationKey } : {}),
+    ...(spanKey !== undefined ? { spanKey } : {}),
     lifecycle: false,
   });
 };
 
-const checkLifecycleExtras = (def: AnyCorrelationDefinition, path: string): void => {
+const checkLifecycleExtras = (def: AnySpanDefinition, path: string): void => {
   const clashes = [
     ...Object.keys(def.completeFields ?? {}).filter((name) => name === 'duration'),
     ...Object.keys(def.failFields ?? {}).filter((name) => name === 'duration' || name === 'error'),
   ];
   if (clashes.length > 0) {
     throw catalogError(
-      `Correlation ${describePath(path)} redefines built-in lifecycle field(s): ${clashes.join(', ')}.`,
+      `Span ${describePath(path)} redefines built-in lifecycle field(s): ${clashes.join(', ')}.`,
     );
   }
 };
 
-const walkCorrelation = (
+const walkSpan = (
   state: WalkState,
-  def: AnyCorrelationDefinition,
+  def: AnySpanDefinition,
   path: string,
   derivedKey: string,
 ): void => {
   if (!Number.isFinite(def.timeout) || def.timeout < 0) {
     throw catalogError(
-      `Correlation ${describePath(path)} has an invalid timeout ${def.timeout}. It must be a non-negative number.`,
+      `Span ${describePath(path)} has an invalid timeout ${def.timeout}. It must be a non-negative number.`,
     );
   }
   const key = def.keyOverride ?? derivedKey;
   checkKey(key);
   checkLifecycleExtras(def, path);
-  state.entries.push({ kind: 'correlation', key, path, definition: { ...def, key } });
+  state.entries.push({ kind: 'span', key, path, definition: { ...def, key } });
   const { start, complete, fail, timeout } = lifecycleEvents(key, def);
   for (const life of [start, complete, fail, timeout]) {
     claimKey(state, life.key, `${path} (lifecycle)`);
@@ -439,15 +439,15 @@ const walkCorrelation = (
       key: life.key,
       path: life.key,
       definition: life,
-      correlationKey: key,
+      spanKey: key,
       lifecycle: true,
     });
   }
-  walkChildren(state, def.events, { path, derivedKey: key, correlationKey: key });
+  walkChildren(state, def.events, { path, derivedKey: key, spanKey: key });
 };
 
 const walkNode = (state: WalkState, node: unknown, at: Placement): void => {
-  const { path, derivedKey: keyPrefix, correlationKey } = at;
+  const { path, derivedKey: keyPrefix, spanKey } = at;
   if (typeof node !== 'object' || node === null) {
     throw catalogError(
       `Catalog entry ${describePath(path)} is ${node === undefined ? 'undefined' : 'not an object'}. ` +
@@ -458,13 +458,13 @@ const walkNode = (state: WalkState, node: unknown, at: Placement): void => {
     walkEvent(state, node, at);
     return;
   }
-  if (isCorrelationDefinition(node)) {
-    if (correlationKey !== undefined) {
+  if (isSpanDefinition(node)) {
+    if (spanKey !== undefined) {
       throw catalogError(
-        `Correlation ${describePath(path)} is defined inside correlation "${correlationKey}". Correlations can't contain correlations; start one inside another at runtime instead.`,
+        `Span ${describePath(path)} is defined inside span "${spanKey}". Spans can't contain spans; start one inside another at runtime instead.`,
       );
     }
-    walkCorrelation(state, node, path, keyPrefix);
+    walkSpan(state, node, path, keyPrefix);
     return;
   }
   const doc = namespaceDoc(node);
@@ -473,35 +473,35 @@ const walkNode = (state: WalkState, node: unknown, at: Placement): void => {
     key: keyPrefix,
     path,
     ...(doc !== undefined ? { doc } : {}),
-    ...(correlationKey !== undefined ? { correlationKey } : {}),
+    ...(spanKey !== undefined ? { spanKey } : {}),
   });
   walkChildren(state, node, at);
 };
 
 const walkChildren = (state: WalkState, node: object, at: Placement): void => {
-  const { path, derivedKey, correlationKey } = at;
+  const { path, derivedKey, spanKey } = at;
   for (const [name, child] of Object.entries(node)) {
     checkName(name, path);
     walkNode(state, child as unknown, {
       path: path === '' ? name : `${path}.${name}`,
       derivedKey: derivedKey === '' ? name : `${derivedKey}.${name}`,
-      correlationKey,
+      spanKey,
     });
   }
 };
 
 /**
- * Walk a catalog and list every namespace, correlation and event with its resolved key.
- * Lifecycle events of each correlation are included with `lifecycle: true`.
+ * Walk a catalog and list every namespace, span and event with its resolved key.
+ * Lifecycle events of each span are included with `lifecycle: true`.
  *
  * @param catalog - A catalog object (from {@link defineEvents} or a plain nested object)
  * @returns Entries in definition order
  * @throws {ChroniclerError} `INVALID_CATALOG` for undefined entries (often a circular import),
- *   reserved or invalid names, invalid levels or timeouts, nested correlation definitions and duplicate keys
+ *   reserved or invalid names, invalid levels or timeouts, nested span definitions and duplicate keys
  */
 export const walkCatalog = (catalog: object): CatalogEntry[] => {
   const state: WalkState = { entries: [], keys: new Map() };
-  walkChildren(state, catalog, { path: '', derivedKey: '', correlationKey: undefined });
+  walkChildren(state, catalog, { path: '', derivedKey: '', spanKey: undefined });
   return state.entries;
 };
 
@@ -529,7 +529,7 @@ const stamp = (node: object, keyPrefix: string): object => {
   if (isEventDefinition(node)) {
     return { ...node, key: node.keyOverride ?? keyPrefix };
   }
-  if (isCorrelationDefinition(node)) {
+  if (isSpanDefinition(node)) {
     const key = node.keyOverride ?? keyPrefix;
     return { ...node, key, events: stampNamespace(node.events, key) };
   }
@@ -538,7 +538,7 @@ const stamp = (node: object, keyPrefix: string): object => {
 
 /**
  * Define an event catalog: a nested object whose leaves are {@link event} and
- * {@link correlation} definitions. Each definition's `key` is set from its path, so
+ * {@link span} definitions. Each definition's `key` is set from its path, so
  * `events.admin.login.key === 'admin.login'`.
  *
  * Catalogs compose: a catalog can be mounted inside another, and keys are re-derived from the

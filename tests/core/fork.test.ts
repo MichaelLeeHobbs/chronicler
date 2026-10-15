@@ -80,7 +80,7 @@ describe('Fork System', () => {
         fork.admin.heartbeat();
         req.complete();
       });
-      expect(mock.findByKey('admin.heartbeat')).toMatchObject({ forkId: '1', correlationId: '' });
+      expect(mock.findByKey('admin.heartbeat')).toMatchObject({ forkId: '1' });
     });
   });
 
@@ -145,21 +145,21 @@ describe('Fork System', () => {
 
     it('drops reserved keys passed to fork()', () => {
       const { mock, chronicle } = setup();
-      chronicle.fork({ correlationId: 'x', ok: 1 }).admin.heartbeat();
-      expect(mock.getLastPayload()).toMatchObject({ correlationId: '', metadata: { ok: 1 } });
+      chronicle.fork({ spanId: 'x', ok: 1 }).admin.heartbeat();
+      expect(mock.getLastPayload()).toMatchObject({ metadata: { ok: 1 } });
     });
   });
 
-  describe('forks of correlations', () => {
-    it('shares the correlation id and gets its own fork id', () => {
+  describe('forks of spans', () => {
+    it('shares the span id and gets its own fork id', () => {
       const { mock, chronicle } = setup();
       const req = chronicle.http.request.begin();
       const fork = req.fork({ parallel: 'task1' });
       req.ping();
       fork.ping();
       fork.received({ path: '/x' });
-      expect(fork.correlationId).toBe(req.correlationId);
-      expect(mock.getPayloads().map((p) => [p.forkId, p.correlationId])).toEqual([
+      expect(fork.spanId).toBe(req.spanId);
+      expect(mock.getPayloads().map((p) => [p.forkId, p.spanId])).toEqual([
         ['0', 'c1'],
         ['0', 'c1'],
         ['1', 'c1'],
@@ -168,7 +168,7 @@ describe('Fork System', () => {
       req.complete();
     });
 
-    it('has the correlation events but no lifecycle methods', () => {
+    it('has the span events but no lifecycle methods', () => {
       const { chronicle } = setup();
       const req = chronicle.http.request.begin();
       const fork = req.fork();
@@ -179,7 +179,7 @@ describe('Fork System', () => {
       req.complete();
     });
 
-    it('inherits correlation context and adds its own', () => {
+    it('inherits span context and adds its own', () => {
       const { mock, chronicle } = setup();
       const req = chronicle.http.request.begin({ workflowId: 'wf1' });
       req.fork({ parallelTask: 'task1' }).ping();
@@ -187,7 +187,7 @@ describe('Fork System', () => {
       req.complete();
     });
 
-    it('nests forks of correlation forks', () => {
+    it('nests forks of span forks', () => {
       const { mock, chronicle } = setup();
       const req = chronicle.http.request.begin();
       req.fork().fork().ping();
@@ -196,7 +196,7 @@ describe('Fork System', () => {
       req.complete();
     });
 
-    it('preserves the fork id of the scope a correlation started in', () => {
+    it('preserves the fork id of the scope a span started in', () => {
       const { mock, chronicle } = setup();
       const req = chronicle.fork().fork().http.request.begin();
       req.ping();
@@ -228,7 +228,7 @@ describe('Fork System', () => {
       expect(() => current.fork()).toThrow(ChroniclerError);
     });
 
-    it('throws from correlation forks too', () => {
+    it('throws from span forks too', () => {
       const { chronicle } = setup({ limits: { maxForkDepth: 1 } });
       const req = chronicle.http.request.begin();
       const fork = req.fork();
@@ -236,7 +236,7 @@ describe('Fork System', () => {
       req.complete();
     });
 
-    it('throws from an ambient fork() inside a correlation', () => {
+    it('throws from an ambient fork() inside a span', () => {
       const { chronicle } = setup({ limits: { maxForkDepth: 0 } });
       chronicle.http.request.run((req) => {
         expect(() => chronicle.fork()).toThrow(ChroniclerError);

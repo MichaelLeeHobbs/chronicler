@@ -2,10 +2,6 @@ import { describe, expectTypeOf, it } from 'vitest';
 
 import {
   type Chronicle,
-  correlation,
-  type CorrelationFork,
-  type CorrelationHandle,
-  type CorrelationStarter,
   createChronicle,
   defineEvents,
   type Emitter,
@@ -18,6 +14,10 @@ import {
   type HandleOf,
   type InferFields,
   type NoFields,
+  span,
+  type SpanFork,
+  type SpanHandle,
+  type SpanStarter,
 } from '../../src';
 import { createTestChronicle } from '../../src/testing';
 import { MockLoggerBackend } from '../helpers/mock-logger';
@@ -42,7 +42,7 @@ const events = defineEvents({
     },
   ),
   http: {
-    request: correlation({
+    request: span({
       timeout: 1000,
       complete: { status: field.number().optional() },
       fail: { status: field.number().optional() },
@@ -131,21 +131,21 @@ describe('Type Inference Tests', () => {
         defineEvents({ log: { a: event({ level: 'info', message: 'x' }) } });
         // @ts-expect-error -- reserved in a deeper namespace
         defineEvents({ a: { b: { then: event({ level: 'info', message: 'x' }) } } });
-        // @ts-expect-error -- reserved inside a correlation
-        correlation({ events: { complete: event({ level: 'info', message: 'x' }) } });
-        // @ts-expect-error -- reserved in a namespace inside a correlation
-        correlation({ events: { phase: { begin: event({ level: 'info', message: 'x' }) } } });
+        // @ts-expect-error -- reserved inside a span
+        span({ events: { complete: event({ level: 'info', message: 'x' }) } });
+        // @ts-expect-error -- reserved in a namespace inside a span
+        span({ events: { phase: { begin: event({ level: 'info', message: 'x' }) } } });
         // @ts-expect-error -- reserved at the root of createChronicle
         createChronicle({ events: { addContext: event({ level: 'info', message: 'x' }) } });
       });
     });
 
-    it('rejects a correlation nested in a correlation', () => {
-      const inner = correlation({ events: {} });
-      // @ts-expect-error -- correlation directly inside a correlation
-      correlation({ events: { inner } });
-      // @ts-expect-error -- correlation in a namespace inside a correlation
-      correlation({ events: { phase: { inner } } });
+    it('rejects a span nested in a span', () => {
+      const inner = span({ events: {} });
+      // @ts-expect-error -- span directly inside a span
+      span({ events: { inner } });
+      // @ts-expect-error -- span in a namespace inside a span
+      span({ events: { phase: { inner } } });
     });
 
     it('rejects functions and primitives as catalog entries', () => {
@@ -171,7 +171,7 @@ describe('Type Inference Tests', () => {
       >();
       expectTypeOf(chronicle.admin.login.key).toEqualTypeOf<string>();
       expectTypeOf(chronicle.http.request).toEqualTypeOf<
-        CorrelationStarter<
+        SpanStarter<
           (typeof events)['http']['request']['events'],
           (typeof events)['http']['request']['completeFields'],
           (typeof events)['http']['request']['failFields']
@@ -252,14 +252,14 @@ describe('Type Inference Tests', () => {
     });
   });
 
-  describe('correlations', () => {
+  describe('spans', () => {
     type Request = HandleOf<typeof chronicle.http.request>;
     type RequestEvents = (typeof events)['http']['request']['events'];
     type RequestDef = (typeof events)['http']['request'];
 
-    it('HandleOf gives the correlation handle', () => {
+    it('HandleOf gives the span handle', () => {
       expectTypeOf<Request>().toEqualTypeOf<
-        CorrelationHandle<RequestEvents, RequestDef['completeFields'], RequestDef['failFields']>
+        SpanHandle<RequestEvents, RequestDef['completeFields'], RequestDef['failFields']>
       >();
       expectTypeOf(chronicle.http.request.begin()).toEqualTypeOf<Request>();
       expectTypeOf<HandleOf<typeof chronicle.admin.login>>().toBeNever();
@@ -270,7 +270,7 @@ describe('Type Inference Tests', () => {
         const req = chronicle.http.request.begin({ requestId: 'r' });
         req.received({ path: '/' });
         req.ping();
-        expectTypeOf(req.correlationId).toEqualTypeOf<string>();
+        expectTypeOf(req.spanId).toEqualTypeOf<string>();
         req.complete();
         req.complete({ status: 200 });
         req.fail(new Error('x'), { status: 500 });
@@ -286,17 +286,17 @@ describe('Type Inference Tests', () => {
       });
     });
 
-    it('types correlation forks without lifecycle methods', () => {
+    it('types span forks without lifecycle methods', () => {
       typeOnly(() => {
         const fork = chronicle.http.request.begin().fork();
-        expectTypeOf(fork).toEqualTypeOf<CorrelationFork<RequestEvents>>();
+        expectTypeOf(fork).toEqualTypeOf<SpanFork<RequestEvents>>();
         fork.received({ path: '/' });
-        expectTypeOf(fork.correlationId).toEqualTypeOf<string>();
-        // @ts-expect-error -- forks cannot complete the correlation
+        expectTypeOf(fork.spanId).toEqualTypeOf<string>();
+        // @ts-expect-error -- forks cannot complete the span
         void fork.complete;
-        // @ts-expect-error -- forks cannot fail the correlation
+        // @ts-expect-error -- forks cannot fail the span
         void fork.fail;
-        expectTypeOf(fork.fork()).toEqualTypeOf<CorrelationFork<RequestEvents>>();
+        expectTypeOf(fork.fork()).toEqualTypeOf<SpanFork<RequestEvents>>();
       });
     });
 

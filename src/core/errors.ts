@@ -4,7 +4,8 @@ export type ChroniclerErrorCode =
   | 'BACKEND_METHOD'
   | 'FORK_DEPTH_EXCEEDED'
   | 'FIELD_VALIDATION'
-  | 'INVALID_CATALOG';
+  | 'INVALID_CATALOG'
+  | 'INVALID_CONFIG';
 
 /**
  * Typed error class for Chronicler configuration and runtime failures.

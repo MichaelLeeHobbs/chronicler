@@ -30,20 +30,23 @@ const LEVEL_FALLBACK_CHAINS: Record<LogLevel, readonly LogLevel[]> = {
   trace: ['debug', 'info'],
 };
 
-/** State of a correlation that is no longer active, as reported on its later events. */
-export type CorrelationState = 'timedOut' | 'completed' | 'failed';
+/** State of a span that is no longer active, as reported on its later events. */
+export type SpanState = 'timedOut' | 'completed' | 'failed';
 
 export interface LogPayload {
   readonly eventKey: string;
   readonly fields: Record<string, unknown>;
-  /** Innermost correlation id, or `''` outside any correlation. */
-  readonly correlationId: string;
-  /** Id of the enclosing correlation, when this correlation was started inside another. */
-  readonly parentCorrelationId?: string;
-  /** Id of the outermost correlation. Filter on it to see a whole request, including nested work. */
-  readonly rootCorrelationId?: string;
-  /** Present only when the correlation is no longer active (e.g. events after a timeout). */
-  readonly correlationState?: CorrelationState;
+  /**
+   * Trace id, shared by a top-level span and every span nested in it. Filter on
+   * it to see a whole request, including nested work. Absent outside any span.
+   */
+  readonly traceId?: string;
+  /** Span id of the innermost span. Absent outside any span. */
+  readonly spanId?: string;
+  /** Span id of the enclosing span, when this span was started inside another. */
+  readonly parentSpanId?: string;
+  /** Present only when the span is no longer active (e.g. events after a timeout). */
+  readonly spanState?: SpanState;
   readonly forkId: string;
   readonly metadata: Record<string, unknown>;
   readonly timestamp: string;

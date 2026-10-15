@@ -1,13 +1,13 @@
 /**
  * Comprehensive event catalog for testing the docs CLI pipeline end-to-end.
- * Exercises all field builder variations, namespaces with group() docs, correlations,
+ * Exercises all field builder variations, namespaces with group() docs, spans,
  * key overrides, mounted catalogs and edge cases.
  *
  * Imports the public entry point, which the CLI bundles as a separate copy of the package —
  * the same situation as a user's module importing the published package.
  */
 
-import { correlation, defineEvents, event, field, group } from '../../../src/index';
+import { defineEvents, event, field, group, span } from '../../../src/index';
 
 /**
  * A catalog mounted inside `events` below. The parser must skip this export because it is
@@ -61,11 +61,11 @@ export const events = defineEvents({
     },
   ),
 
-  /** Namespace holding a correlation with a timeout and a nested namespace. */
+  /** Namespace holding a span with a timeout and a nested namespace. */
   http: group(
     { doc: 'HTTP server events' },
     {
-      request: correlation({
+      request: span({
         doc: 'HTTP request lifecycle',
         timeout: 30000,
         events: {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setup } from '../helpers/fixtures';
 
-describe('correlation lifecycle', () => {
+describe('span lifecycle', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -26,14 +26,14 @@ describe('correlation lifecycle', () => {
     expect(complete?.payload.metadata).toEqual({ requestId: 'r1' });
   });
 
-  it('exposes the correlation id on the handle and on every event', () => {
+  it('exposes the span id on the handle and on every event', () => {
     const { mock, chronicle } = setup();
     const req = chronicle.http.request.begin();
     req.received({ path: '/a' });
     req.phase.parsed();
     req.complete();
-    expect(req.correlationId).toBe('c1');
-    expect(new Set(mock.getPayloads().map((p) => p.correlationId))).toEqual(new Set(['c1']));
+    expect(req.spanId).toBe('c1');
+    expect(new Set(mock.getPayloads().map((p) => p.spanId))).toEqual(new Set(['c1']));
     expect(mock.getKeys()).toEqual([
       'http.request.start',
       'http.request.received',
@@ -107,7 +107,7 @@ describe('correlation lifecycle', () => {
     expect(mock.getLastPayload()?.metadata).toEqual({ svc: 'api', env: 'test', requestId: 'r1' });
   });
 
-  it('does not leak correlation context to the root', () => {
+  it('does not leak span context to the root', () => {
     const { mock, chronicle } = setup();
     const req = chronicle.http.request.begin({ requestId: 'r1' });
     req.addContext({ userId: 'u1' });
@@ -124,23 +124,20 @@ describe('correlation lifecycle', () => {
     req.complete();
   });
 
-  it('gives each begin() its own correlation', () => {
+  it('gives each begin() its own span', () => {
     const { mock, chronicle } = setup();
     const a = chronicle.http.request.begin();
     const b = chronicle.http.request.begin();
     b.ping();
     a.ping();
-    expect(mock.findAllByKey('http.request.ping').map((p) => p.correlationId)).toEqual([
-      'c2',
-      'c1',
-    ]);
+    expect(mock.findAllByKey('http.request.ping').map((p) => p.spanId)).toEqual(['c2', 'c1']);
     // both are top-level: begin() from the root never nests
-    expect(mock.getPayloads().every((p) => p.parentCorrelationId === undefined)).toBe(true);
+    expect(mock.getPayloads().every((p) => p.parentSpanId === undefined)).toBe(true);
     a.complete();
     b.complete();
   });
 
-  it('starts correlations from a fork with the fork id', () => {
+  it('starts spans from a fork with the fork id', () => {
     const { mock, chronicle } = setup();
     const fork = chronicle.fork({ task: 'A' });
     const req = fork.http.request.begin({ workflowId: 'wf1' });
@@ -151,7 +148,7 @@ describe('correlation lifecycle', () => {
   });
 });
 
-describe('correlation timeout', () => {
+describe('span timeout', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -169,9 +166,9 @@ describe('correlation timeout', () => {
     const timeout = mock.getEntries()[1];
     expect(timeout?.level).toBe('warn');
     expect(timeout?.payload.fields).toEqual({});
-    expect(timeout?.payload.correlationId).toBe('c1');
+    expect(timeout?.payload.spanId).toBe('c1');
     // the timeout event reports the state before the timeout
-    expect(timeout?.payload).not.toHaveProperty('correlationState');
+    expect(timeout?.payload).not.toHaveProperty('spanState');
   });
 
   it('resets the timer on activity', () => {
@@ -218,7 +215,7 @@ describe('correlation timeout', () => {
     expect(mock.getKeys()).not.toContain('http.request.timeout');
   });
 
-  it('keeps the correlation id on later events with correlationState timedOut', () => {
+  it('keeps the span id on later events with spanState timedOut', () => {
     const { mock, chronicle } = setup();
     const req = chronicle.http.request.begin();
     vi.advanceTimersByTime(100);
@@ -229,8 +226,8 @@ describe('correlation timeout', () => {
     const late = mock.getPayloads().slice(2);
     expect(late).toHaveLength(3);
     for (const p of late) {
-      expect(p.correlationId).toBe('c1');
-      expect(p.correlationState).toBe('timedOut');
+      expect(p.spanId).toBe('c1');
+      expect(p.spanState).toBe('timedOut');
     }
   });
 
@@ -259,9 +256,9 @@ describe('correlation timeout', () => {
     ]);
     const complete = mock.findByKey('http.request.complete');
     expect(complete?.fields.duration).toBe(250);
-    expect(complete?.correlationId).toBe('c1');
-    expect(complete?.correlationState).toBe('timedOut');
-    expect(mock.findByKey('http.request.ping')?.correlationState).toBe('completed');
+    expect(complete?.spanId).toBe('c1');
+    expect(complete?.spanState).toBe('timedOut');
+    expect(mock.findByKey('http.request.ping')?.spanState).toBe('completed');
   });
 
   it('accepts a late fail() once and reports the real duration', () => {
@@ -273,10 +270,10 @@ describe('correlation timeout', () => {
     const fails = mock.findAllByKey('http.request.fail');
     expect(fails).toHaveLength(1);
     expect(fails[0]?.fields.duration).toBe(300);
-    expect(fails[0]?.correlationState).toBe('timedOut');
+    expect(fails[0]?.spanState).toBe('timedOut');
   });
 
-  it('fork activity keeps the parent correlation alive', () => {
+  it('fork activity keeps the parent span alive', () => {
     const { mock, chronicle } = setup();
     const req = chronicle.http.request.begin();
     const fork = req.fork();
@@ -290,8 +287,8 @@ describe('correlation timeout', () => {
   });
 });
 
-describe('correlation state after completion', () => {
-  it('explicit handles still log with ids and correlationState after complete/fail', () => {
+describe('span state after completion', () => {
+  it('explicit handles still log with ids and spanState after complete/fail', () => {
     const { mock, chronicle } = setup();
     const done = chronicle.http.request.begin();
     const doneFork = done.fork();
@@ -303,7 +300,7 @@ describe('correlation state after completion', () => {
     failed.ping();
 
     const pings = mock.findAllByKey('http.request.ping');
-    expect(pings.map((p) => [p.correlationId, p.correlationState])).toEqual([
+    expect(pings.map((p) => [p.spanId, p.spanState])).toEqual([
       ['c1', 'completed'],
       ['c1', 'completed'],
       ['c2', 'failed'],
@@ -311,7 +308,7 @@ describe('correlation state after completion', () => {
   });
 });
 
-describe('correlation minLevel filtering', () => {
+describe('span minLevel filtering', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -337,11 +334,11 @@ describe('correlation minLevel filtering', () => {
     vi.advanceTimersByTime(200);
     expect(mock.getKeys()).toEqual([]);
     req.log('error', 'after');
-    expect(mock.getLastPayload()?.correlationState).toBe('timedOut');
+    expect(mock.getLastPayload()?.spanState).toBe('timedOut');
   });
 });
 
-describe('correlation limits', () => {
+describe('span limits', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -349,8 +346,8 @@ describe('correlation limits', () => {
     vi.useRealTimers();
   });
 
-  it('never throws past maxActiveCorrelations and flags the start event', () => {
-    const { mock, chronicle } = setup({ limits: { maxActiveCorrelations: 2 } });
+  it('never throws past maxActiveSpans and flags the start event', () => {
+    const { mock, chronicle } = setup({ limits: { maxActiveSpans: 2 } });
     chronicle.http.request.begin();
     chronicle.http.request.begin();
     let third: ReturnType<typeof chronicle.http.request.begin> | undefined;
@@ -362,30 +359,30 @@ describe('correlation limits', () => {
     expect(starts.map((p) => p._validation)).toEqual([
       undefined,
       undefined,
-      { correlationLimitExceeded: true },
+      { spanLimitExceeded: true },
     ]);
 
-    // the untracked correlation still works normally
+    // the untracked span still works normally
     third?.received({ path: '/x' });
     third?.complete();
-    expect(mock.findAllByKey('http.request.received')[0]?.correlationId).toBe('c3');
-    expect(mock.findAllByKey('http.request.complete')[0]?.correlationId).toBe('c3');
+    expect(mock.findAllByKey('http.request.received')[0]?.spanId).toBe('c3');
+    expect(mock.findAllByKey('http.request.complete')[0]?.spanId).toBe('c3');
   });
 
-  it('flags correlations started with run() too, without throwing', () => {
-    const { mock, chronicle } = setup({ limits: { maxActiveCorrelations: 0 } });
+  it('flags spans started with run() too, without throwing', () => {
+    const { mock, chronicle } = setup({ limits: { maxActiveSpans: 0 } });
     const result = chronicle.http.request.run((req) => {
       req.complete();
       return 'ok';
     });
     expect(result).toBe('ok');
     expect(mock.findByKey('http.request.start')?._validation).toEqual({
-      correlationLimitExceeded: true,
+      spanLimitExceeded: true,
     });
   });
 
   it('frees a slot on complete(), fail() and timeout', () => {
-    const { mock, chronicle } = setup({ limits: { maxActiveCorrelations: 1 } });
+    const { mock, chronicle } = setup({ limits: { maxActiveSpans: 1 } });
     chronicle.http.request.begin().complete();
     chronicle.http.request.begin().fail();
     chronicle.http.request.begin();
@@ -397,7 +394,7 @@ describe('correlation limits', () => {
   });
 
   it('does not double-free on repeated or late ends', () => {
-    const { mock, chronicle } = setup({ limits: { maxActiveCorrelations: 2 } });
+    const { mock, chronicle } = setup({ limits: { maxActiveSpans: 2 } });
     const a = chronicle.http.request.begin();
     chronicle.http.request.begin();
     a.complete();
@@ -407,48 +404,44 @@ describe('correlation limits', () => {
     chronicle.http.request.begin(); // takes the one freed slot
     chronicle.http.request.begin(); // over the limit
     const flags = mock.findAllByKey('http.request.start').map((p) => p._validation);
-    expect(flags).toEqual([undefined, undefined, undefined, { correlationLimitExceeded: true }]);
+    expect(flags).toEqual([undefined, undefined, undefined, { spanLimitExceeded: true }]);
   });
 
-  it('does not free a slot when an untracked correlation ends', () => {
-    const { mock, chronicle } = setup({ limits: { maxActiveCorrelations: 1 } });
+  it('does not free a slot when an untracked span ends', () => {
+    const { mock, chronicle } = setup({ limits: { maxActiveSpans: 1 } });
     chronicle.http.request.begin(); // tracked
     const untracked = chronicle.http.request.begin(); // flagged
     untracked.complete();
     chronicle.http.request.begin(); // still over the limit
     const flags = mock.findAllByKey('http.request.start').map((p) => p._validation);
-    expect(flags).toEqual([
-      undefined,
-      { correlationLimitExceeded: true },
-      { correlationLimitExceeded: true },
-    ]);
+    expect(flags).toEqual([undefined, { spanLimitExceeded: true }, { spanLimitExceeded: true }]);
   });
 
-  it('shares the counter across forks and correlation types', () => {
-    const { mock, chronicle } = setup({ limits: { maxActiveCorrelations: 2 } });
+  it('shares the counter across forks and span types', () => {
+    const { mock, chronicle } = setup({ limits: { maxActiveSpans: 2 } });
     chronicle.http.request.begin();
     chronicle.fork().job.batch.begin();
     chronicle.http.request.begin();
     expect(mock.findAllByKey('http.request.start')[1]?._validation).toEqual({
-      correlationLimitExceeded: true,
+      spanLimitExceeded: true,
     });
   });
 
   it('does not share the counter between chronicles', () => {
-    const a = setup({ limits: { maxActiveCorrelations: 1 } });
-    const b = setup({ limits: { maxActiveCorrelations: 1 } });
+    const a = setup({ limits: { maxActiveSpans: 1 } });
+    const b = setup({ limits: { maxActiveSpans: 1 } });
     a.chronicle.http.request.begin();
     b.chronicle.http.request.begin();
     expect(b.mock.findByKey('http.request.start')?._validation).toBeUndefined();
   });
 });
 
-describe('correlation run()', () => {
-  it('starts the correlation, passes the handle and returns the result', () => {
+describe('span run()', () => {
+  it('starts the span, passes the handle and returns the result', () => {
     const { mock, chronicle } = setup();
     const result = chronicle.http.request.run((req) => {
       req.received({ path: '/a' });
-      return req.correlationId;
+      return req.spanId;
     });
     expect(result).toBe('c1');
     expect(mock.getKeys()).toEqual(['http.request.start', 'http.request.received']);
@@ -481,7 +474,7 @@ describe('correlation run()', () => {
     ).toThrow(boom);
     expect(mock.getKeys()).toEqual(['http.request.start', 'http.request.fail']);
     expect(mock.getLastPayload()?.fields.error).toContain('boom');
-    expect(mock.getLastPayload()?.correlationId).toBe('c1');
+    expect(mock.getLastPayload()?.spanId).toBe('c1');
   });
 
   it('auto-fails and propagates the rejection when fn rejects', async () => {
@@ -564,7 +557,7 @@ describe('correlation run()', () => {
       return 7;
     });
     expect(out).toBe(7);
-    expect(mock.findByKey('admin.heartbeat')?.correlationId).toBe('c1');
+    expect(mock.findByKey('admin.heartbeat')?.spanId).toBe('c1');
     req.complete();
   });
 });

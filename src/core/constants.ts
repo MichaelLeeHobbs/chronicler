@@ -30,9 +30,9 @@ export type LogLevel = keyof typeof LOG_LEVELS;
 export const DEFAULT_REQUIRED_LEVELS = Object.keys(LOG_LEVELS) as readonly LogLevel[];
 
 /**
- * Default correlation timeout in milliseconds (5 minutes)
+ * Default span timeout in milliseconds (5 minutes)
  */
-export const DEFAULT_CORRELATION_TIMEOUT_MS = 5 * 60 * 1000;
+export const DEFAULT_SPAN_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Root fork ID for the base chronicle instance
@@ -56,6 +56,11 @@ export const DEFAULT_MAX_CONTEXT_KEYS = 100;
 export const DEFAULT_MAX_FORK_DEPTH = 10;
 
 /**
- * Default maximum number of active (uncompleted) correlations
+ * Default maximum number of active (uncompleted) spans
  */
-export const DEFAULT_MAX_ACTIVE_CORRELATIONS = 1000;
+export const DEFAULT_MAX_ACTIVE_SPANS = 1000;
+
+/**
+ * Default maximum number of items logged for an array field. Longer arrays are truncated.
+ */
+export const DEFAULT_MAX_ARRAY_LENGTH = 100;

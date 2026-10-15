@@ -106,7 +106,7 @@ export const createTestChronicle = <const C extends object>(
 
 /**
  * Record the events of an existing chronicle, such as the one your app exports, instead of
- * sending them to its backend. Covers every emitter, fork and correlation of that chronicle.
+ * sending them to its backend. Covers every emitter, fork and span of that chronicle.
  * Call `restore()` when done (e.g. in `afterEach`). A lazy `backend` function is never called
  * while capturing, so tests don't create real transports.
  *

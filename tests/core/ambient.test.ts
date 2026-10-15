@@ -21,8 +21,8 @@ const leak = (fn: () => void): (() => Promise<void>) => {
   };
 };
 
-describe('ambient correlations', () => {
-  it('routes root emitters to the ambient correlation across awaits and setTimeout', async () => {
+describe('ambient spans', () => {
+  it('routes root emitters to the ambient span across awaits and setTimeout', async () => {
     const { mock, chronicle } = setup();
     const { admin } = chronicle;
 
@@ -48,8 +48,8 @@ describe('ambient correlations', () => {
     const beats = mock.findAllByKey('admin.heartbeat');
     expect(beats).toHaveLength(5);
     for (const p of beats) {
-      expect(p.correlationId).toBe('c1');
-      expect(p.rootCorrelationId).toBe('c1');
+      expect(p.spanId).toBe('c1');
+      expect(p.traceId).toBe('t1');
     }
   });
 
@@ -60,16 +60,16 @@ describe('ambient correlations', () => {
       req.complete();
     });
     chronicle.admin.heartbeat();
-    expect(mock.getLastPayload()?.correlationId).toBe('');
+    expect(mock.getLastPayload()?.spanId).toBeUndefined();
   });
 
-  it('routes log() to the ambient correlation', () => {
+  it('routes log() to the ambient span', () => {
     const { mock, chronicle } = setup();
     chronicle.http.request.run((req) => {
       chronicle.log('info', 'inside');
       req.complete();
     });
-    expect(mock.getPayloads()[1]).toMatchObject({ eventKey: '', correlationId: 'c1' });
+    expect(mock.getPayloads()[1]).toMatchObject({ eventKey: '', spanId: 'c1' });
   });
 
   it('never crosses ids between concurrent interleaved run() calls', async () => {
@@ -79,7 +79,7 @@ describe('ambient correlations', () => {
 
     const work = (user: string, delays: number[]) =>
       chronicle.http.request.run({ user }, async (req) => {
-        seen.set(user, req.correlationId);
+        seen.set(user, req.spanId);
         for (const ms of delays) {
           await sleep(ms);
           admin.login({ userId: user, success: true });
@@ -99,13 +99,13 @@ describe('ambient correlations', () => {
     expect(logins.slice(0, 3).map((p) => p.fields.userId)).not.toEqual(['alice', 'alice', 'alice']);
     for (const p of logins) {
       const user = p.fields.userId as string;
-      expect(p.correlationId).toBe(seen.get(user));
+      expect(p.spanId).toBe(seen.get(user));
       expect(p.metadata.user).toBe(user);
     }
     expect(new Set(seen.values()).size).toBe(3);
   });
 
-  it('root run() detaches from the ambient correlation', async () => {
+  it('root run() detaches from the ambient span', async () => {
     const { mock, chronicle } = setup({ metadata: { svc: 'api' } });
     await chronicle.http.request.run({ requestId: 'r1' }, async (req) => {
       const result = chronicle.run(() => {
@@ -128,13 +128,13 @@ describe('ambient correlations', () => {
     const [detached, background, inside] = mock
       .getPayloads()
       .filter((p) => p.eventKey.startsWith('admin.'));
-    expect(detached).toMatchObject({ correlationId: '', metadata: { svc: 'api' } });
-    expect(detached).not.toHaveProperty('rootCorrelationId');
-    expect(background).toMatchObject({ correlationId: '', metadata: { svc: 'api' } });
-    expect(inside).toMatchObject({ correlationId: 'c1', metadata: { requestId: 'r1' } });
+    expect(detached).toMatchObject({ metadata: { svc: 'api' } });
+    expect(detached).not.toHaveProperty('traceId');
+    expect(background).toMatchObject({ metadata: { svc: 'api' } });
+    expect(inside).toMatchObject({ spanId: 'c1', metadata: { requestId: 'r1' } });
   });
 
-  it('fork() inside an ambient correlation creates a fork of that correlation', () => {
+  it('fork() inside an ambient span creates a fork of that span', () => {
     const { mock, chronicle } = setup();
     chronicle.http.request.run({ requestId: 'r1' }, (req) => {
       const fork = chronicle.fork({ step: 'x' });
@@ -144,15 +144,15 @@ describe('ambient correlations', () => {
     });
     const [heartbeat, note] = [mock.findByKey('admin.heartbeat'), mock.findByKey('admin.note')];
     expect(heartbeat).toMatchObject({
-      correlationId: 'c1',
+      spanId: 'c1',
       forkId: '1',
       metadata: { requestId: 'r1', step: 'x' },
     });
-    expect(heartbeat).not.toHaveProperty('correlationState');
-    expect(note).toMatchObject({ correlationId: 'c1', correlationState: 'completed' });
+    expect(heartbeat).not.toHaveProperty('spanState');
+    expect(note).toMatchObject({ spanId: 'c1', spanState: 'completed' });
   });
 
-  it('addContext() inside an ambient correlation adds to that correlation only', () => {
+  it('addContext() inside an ambient span adds to that span only', () => {
     const { mock, chronicle } = setup();
     chronicle.http.request.run((req) => {
       const result = chronicle.addContext({ user: 'bob' });
@@ -178,7 +178,7 @@ describe('ambient correlations', () => {
     expect(mock.getLastPayload()).toMatchObject({ forkId: '1', metadata: { worker: 'w1' } });
   });
 
-  it('a correlation fork made ambient with run() receives root emitter calls', () => {
+  it('a span fork made ambient with run() receives root emitter calls', () => {
     const { mock, chronicle } = setup();
     const req = chronicle.http.request.begin();
     const fork = req.fork({ part: 'a' });
@@ -186,14 +186,14 @@ describe('ambient correlations', () => {
       chronicle.admin.heartbeat();
     });
     expect(mock.getLastPayload()).toMatchObject({
-      correlationId: 'c1',
+      spanId: 'c1',
       forkId: '1',
       metadata: { part: 'a' },
     });
     req.complete();
   });
 
-  it('explicit handles stay bound to their own correlation inside another ambient correlation', () => {
+  it('explicit handles stay bound to their own span inside another ambient span', () => {
     const { mock, chronicle } = setup();
     const outer = chronicle.http.request.begin();
     chronicle.job.batch.run((batch) => {
@@ -201,14 +201,14 @@ describe('ambient correlations', () => {
       batch.step({ n: 1 });
       batch.complete();
     });
-    expect(mock.findByKey('http.request.ping')?.correlationId).toBe('c1');
-    expect(mock.findByKey('job.batch.step')?.correlationId).toBe('c2');
+    expect(mock.findByKey('http.request.ping')?.spanId).toBe('c1');
+    expect(mock.findByKey('job.batch.step')?.spanId).toBe('c2');
     outer.complete();
   });
 });
 
-describe('nested correlations', () => {
-  it('a correlation started inside another gets parent and root ids', async () => {
+describe('nested spans', () => {
+  it('a span started inside another gets parent and root ids', async () => {
     const { mock, chronicle } = setup();
     await chronicle.http.request.run(async (req) => {
       await chronicle.job.batch.run(async (batch) => {
@@ -227,26 +227,26 @@ describe('nested correlations', () => {
 
     const byKey = (key: string) => mock.findAllByKey(key);
     expect(byKey('job.batch.start')[0]).toMatchObject({
-      correlationId: 'c2',
-      parentCorrelationId: 'c1',
-      rootCorrelationId: 'c1',
+      spanId: 'c2',
+      parentSpanId: 'c1',
+      traceId: 't1',
     });
     expect(byKey('admin.heartbeat')[0]).toMatchObject({
-      correlationId: 'c2',
-      parentCorrelationId: 'c1',
+      spanId: 'c2',
+      parentSpanId: 'c1',
     });
     expect(byKey('http.request.ping')[0]).toMatchObject({
-      correlationId: 'c3',
-      parentCorrelationId: 'c2',
-      rootCorrelationId: 'c1',
+      spanId: 'c3',
+      parentSpanId: 'c2',
+      traceId: 't1',
     });
-    // back in the outer correlation after the nested one returns
+    // back in the outer span after the nested one returns
     const note = byKey('admin.note')[0];
-    expect(note).toMatchObject({ correlationId: 'c1', rootCorrelationId: 'c1' });
-    expect(note).not.toHaveProperty('parentCorrelationId');
+    expect(note).toMatchObject({ spanId: 'c1', traceId: 't1' });
+    expect(note).not.toHaveProperty('parentSpanId');
   });
 
-  it('begin() from a fork inside a correlation nests', () => {
+  it('begin() from a fork inside a span nests', () => {
     const { mock, chronicle } = setup();
     chronicle.http.request.run((req) => {
       const fork = chronicle.fork();
@@ -256,9 +256,9 @@ describe('nested correlations', () => {
       req.complete();
     });
     expect(mock.findByKey('job.batch.step')).toMatchObject({
-      correlationId: 'c2',
-      parentCorrelationId: 'c1',
-      rootCorrelationId: 'c1',
+      spanId: 'c2',
+      parentSpanId: 'c1',
+      traceId: 't1',
       forkId: '1',
     });
   });
@@ -291,7 +291,7 @@ describe('nested correlations', () => {
       'http.request.ping',
       'http.request.complete',
     ]);
-    expect(mock.findByKey('http.request.ping')).not.toHaveProperty('correlationState');
+    expect(mock.findByKey('http.request.ping')).not.toHaveProperty('spanState');
   });
 
   it('a child can outlive its parent', async () => {
@@ -307,12 +307,12 @@ describe('nested correlations', () => {
 
     const step = mock.findByKey('job.batch.step');
     expect(step).toMatchObject({
-      correlationId: 'c2',
-      parentCorrelationId: 'c1',
-      rootCorrelationId: 'c1',
+      spanId: 'c2',
+      parentSpanId: 'c1',
+      traceId: 't1',
     });
-    expect(step).not.toHaveProperty('correlationState');
-    expect(mock.findByKey('job.batch.complete')).not.toHaveProperty('correlationState');
+    expect(step).not.toHaveProperty('spanState');
+    expect(mock.findByKey('job.batch.complete')).not.toHaveProperty('spanState');
   });
 
   it('a child keeps working ambiently after its parent completes', async () => {
@@ -326,7 +326,7 @@ describe('nested correlations', () => {
       });
     });
     const beat = mock.findByKey('admin.heartbeat');
-    expect(beat).toMatchObject({ correlationId: 'c2', parentCorrelationId: 'c1' });
+    expect(beat).toMatchObject({ spanId: 'c2', parentSpanId: 'c1' });
     expect(beat).not.toHaveProperty('_validation');
   });
 
@@ -342,14 +342,14 @@ describe('nested correlations', () => {
       vi.advanceTimersByTime(100);
       batch!.step({ n: 1 });
       expect(mock.findByKey('http.request.timeout')).toBeDefined();
-      expect(mock.findByKey('job.batch.step')).not.toHaveProperty('correlationState');
+      expect(mock.findByKey('job.batch.step')).not.toHaveProperty('spanState');
       batch!.complete();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('a correlation started after the ambient one finished is not nested under it', async () => {
+  it('a span started after the ambient one finished is not nested under it', async () => {
     const { mock, chronicle } = setup();
     let later: (() => Promise<void>) | undefined;
     chronicle.http.request.run((req) => {
@@ -362,17 +362,17 @@ describe('nested correlations', () => {
     });
     await later!();
     const start = mock.findByKey('job.batch.start');
-    expect(start).toMatchObject({ correlationId: 'c2', rootCorrelationId: 'c2' });
-    expect(start).not.toHaveProperty('parentCorrelationId');
+    expect(start).toMatchObject({ spanId: 'c2', traceId: 't2' });
+    expect(start).not.toHaveProperty('parentSpanId');
   });
 });
 
-describe('stale ambient correlations', () => {
+describe('stale ambient spans', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('logs in the outer scope with _validation.staleCorrelationId', async () => {
+  it('logs in the outer scope with _validation.staleSpanId', async () => {
     const { mock, chronicle } = setup();
     let leaked: () => Promise<void> = () => Promise.resolve();
     chronicle.http.request.run((req) => {
@@ -385,10 +385,10 @@ describe('stale ambient correlations', () => {
     await leaked();
 
     const [beat, raw] = mock.getPayloads().slice(-2);
-    expect(beat).toMatchObject({ eventKey: 'admin.heartbeat', correlationId: '' });
-    expect(beat?._validation).toEqual({ staleCorrelationId: 'c1' });
-    expect(beat).not.toHaveProperty('correlationState');
-    expect(raw?._validation).toEqual({ staleCorrelationId: 'c1' });
+    expect(beat).toMatchObject({ eventKey: 'admin.heartbeat' });
+    expect(beat?._validation).toEqual({ staleSpanId: 'c1' });
+    expect(beat).not.toHaveProperty('spanState');
+    expect(raw?._validation).toEqual({ staleSpanId: 'c1' });
   });
 
   it('a timer outliving its request is flagged as stale', async () => {
@@ -404,10 +404,10 @@ describe('stale ambient correlations', () => {
       req.complete();
     });
     await fired;
-    expect(mock.findByKey('admin.heartbeat')?._validation).toEqual({ staleCorrelationId: 'c1' });
+    expect(mock.findByKey('admin.heartbeat')?._validation).toEqual({ staleSpanId: 'c1' });
   });
 
-  it('merges staleCorrelationId with field validation issues', async () => {
+  it('merges staleSpanId with field validation issues', async () => {
     const { mock, chronicle } = setup();
     let leaked: () => Promise<void> = () => Promise.resolve();
     chronicle.http.request.run((req) => {
@@ -417,11 +417,11 @@ describe('stale ambient correlations', () => {
     await leaked();
     expect(mock.getLastPayload()?._validation).toEqual({
       missingFields: ['port'],
-      staleCorrelationId: 'c1',
+      staleSpanId: 'c1',
     });
   });
 
-  it('falls back to the enclosing active correlation and reports the innermost stale id', async () => {
+  it('falls back to the enclosing active span and reports the innermost stale id', async () => {
     const { mock, chronicle } = setup();
     let leaked: () => Promise<void> = () => Promise.resolve();
     await chronicle.http.request.run(async (outer) => {
@@ -433,21 +433,21 @@ describe('stale ambient correlations', () => {
       outer.complete();
     });
     const beat = mock.findByKey('admin.heartbeat');
-    expect(beat).toMatchObject({ correlationId: 'c1', _validation: { staleCorrelationId: 'c2' } });
+    expect(beat).toMatchObject({ spanId: 'c1', _validation: { staleSpanId: 'c2' } });
   });
 
-  it('a timed-out ambient correlation is not stale: events keep its id with correlationState', () => {
+  it('a timed-out ambient span is not stale: events keep its id with spanState', () => {
     vi.useFakeTimers();
     const { mock, chronicle } = setup();
     const req = chronicle.http.request.begin();
     vi.advanceTimersByTime(100);
     req.run(() => chronicle.admin.heartbeat());
     const beat = mock.findByKey('admin.heartbeat');
-    expect(beat).toMatchObject({ correlationId: 'c1', correlationState: 'timedOut' });
+    expect(beat).toMatchObject({ spanId: 'c1', spanState: 'timedOut' });
     expect(beat).not.toHaveProperty('_validation');
   });
 
-  it('fork() and addContext() on a stale ambient correlation use the outer scope', async () => {
+  it('fork() and addContext() on a stale ambient span use the outer scope', async () => {
     const { mock, chronicle } = setup();
     let leaked: () => Promise<void> = () => Promise.resolve();
     chronicle.http.request.run({ requestId: 'r1' }, (req) => {
@@ -459,7 +459,6 @@ describe('stale ambient correlations', () => {
     });
     await leaked();
     expect(mock.getLastPayload()).toMatchObject({
-      correlationId: '',
       forkId: '1',
       metadata: { late: true },
     });

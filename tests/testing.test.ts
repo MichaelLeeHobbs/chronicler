@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { correlation, createChronicle, defineEvents, event, field } from '../src';
+import { createChronicle, defineEvents, event, field, span } from '../src';
 import { captureEvents, createTestChronicle } from '../src/testing';
 
 const events = defineEvents({
@@ -13,7 +13,7 @@ const events = defineEvents({
     heartbeat: event({ level: 'debug', message: 'tick' }),
   },
   http: {
-    request: correlation({
+    request: span({
       events: {
         received: event({ level: 'info', message: 'received', fields: { path: field.string() } }),
       },
@@ -56,7 +56,7 @@ describe('createTestChronicle', () => {
     expect(t.eventsOf(events.http.request.events.received)).toEqual([]);
   });
 
-  it('eventsOf() finds correlation events and lifecycle events by key', () => {
+  it('eventsOf() finds span events and lifecycle events by key', () => {
     const t = createTestChronicle(events);
     t.chronicle.http.request.run((req) => {
       req.received({ path: '/x' });
@@ -178,7 +178,7 @@ describe('captureEvents', () => {
     capture.restore();
   });
 
-  it('covers forks and correlations of the chronicle', async () => {
+  it('covers forks and spans of the chronicle', async () => {
     const { app } = makeApp();
     const capture = captureEvents(app);
     app.fork({ step: 'a' }).admin.heartbeat();

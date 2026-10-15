@@ -58,17 +58,17 @@ HTTP server events
 
 ### http.request
 
-**Type:** Correlation
+**Type:** Span
 **Timeout:** 30000ms (activity-based)
 
 HTTP request lifecycle
 
 **Auto-Generated Events:**
 
-- \`http.request.start\` (\`info\`) - Logged when correlation starts
-- \`http.request.complete\` (\`info\`) - Logged when correlation completes (includes \`duration\` field)
-- \`http.request.fail\` (\`error\`) - Logged when correlation fails (includes \`duration\` and \`error\` fields)
-- \`http.request.timeout\` (\`warn\`) - Logged when correlation times out due to inactivity
+- \`http.request.start\` (\`info\`) - Logged when span starts
+- \`http.request.complete\` (\`info\`) - Logged when span completes (includes \`duration\` field)
+- \`http.request.fail\` (\`error\`) - Logged when span fails (includes \`duration\` and \`error\` fields)
+- \`http.request.timeout\` (\`warn\`) - Logged when span times out due to inactivity
 
 #### http.request.received
 

@@ -9,7 +9,7 @@ import { system } from '../services/chronicler.js';
 /**
  * Global error handler
  * Logs errors and returns appropriate response.
- * Runs inside the request's ambient correlation, so the event carries its correlation id.
+ * Runs inside the request's ambient span, so the event carries its span id.
  */
 export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction) {
   system.error({

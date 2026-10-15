@@ -16,7 +16,7 @@ import {
   writeLockfile,
 } from '../../src/cli/keys';
 import { parseEventsFile, parseEventsModule } from '../../src/cli/parser/runtime-parser';
-import { correlation, defineEvents, event, field } from '../../src/index';
+import { defineEvents, event, field, span } from '../../src/index';
 
 const lockOf = (catalog: object): KeyLockfile => buildLockfile(parseEventsModule({ catalog }));
 
@@ -29,7 +29,7 @@ const base = defineEvents({
     }),
     logout: event({ level: 'info', message: 'Logout' }),
   },
-  job: correlation({ events: { step: event({ level: 'debug', message: 'Step' }) } }),
+  job: span({ events: { step: event({ level: 'debug', message: 'Step' }) } }),
 });
 
 describe('keys lockfile', () => {
@@ -81,7 +81,7 @@ describe('keys lockfile', () => {
   describe('serializeLockfile', () => {
     it('is stable regardless of definition order', () => {
       const reordered = defineEvents({
-        job: correlation({ events: { step: event({ level: 'debug', message: 'Step' }) } }),
+        job: span({ events: { step: event({ level: 'debug', message: 'Step' }) } }),
         user: {
           logout: event({ level: 'info', message: 'Logout' }),
           login: event({
@@ -170,7 +170,7 @@ describe('keys lockfile', () => {
     it('treats a rename as removed + added (breaking), including lifecycle keys', () => {
       const renamed = defineEvents({
         user: base.user,
-        batch: correlation({ events: { step: event({ level: 'debug', message: 'Step' }) } }),
+        batch: span({ events: { step: event({ level: 'debug', message: 'Step' }) } }),
       });
 
       const diff = diffAgainstBase(renamed);
@@ -195,7 +195,7 @@ describe('keys lockfile', () => {
     it('keeps a key stable across a rename with a key override', () => {
       const renamed = defineEvents({
         user: base.user,
-        batch: correlation({
+        batch: span({
           key: 'job',
           events: { step: event({ level: 'debug', message: 'Step' }) },
         }),
@@ -227,7 +227,7 @@ describe('keys lockfile', () => {
           }),
           logout: event({ level: 'info', message: 'Logout' }),
         },
-        job: correlation({
+        job: span({
           events: {
             step: event({ level: 'debug', message: 'Step', fields: { n: field.number() } }),
           },

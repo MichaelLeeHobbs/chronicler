@@ -19,7 +19,7 @@ describe('Backend Validation', () => {
       const payload: LogPayload = {
         eventKey: 'test',
         fields: {},
-        correlationId: 'corr-123',
+        spanId: 'corr-123',
         forkId: '0',
         metadata: {},
         timestamp: '2025-11-16T00:00:00Z',
@@ -42,7 +42,7 @@ describe('Backend Validation', () => {
       const payload: LogPayload = {
         eventKey: 'test',
         fields: {},
-        correlationId: 'corr-123',
+        spanId: 'corr-123',
         forkId: '0',
         metadata: {},
         timestamp: '2025-11-16T00:00:00Z',
@@ -61,7 +61,7 @@ describe('Backend Validation', () => {
       const payload: LogPayload = {
         eventKey: 'test',
         fields: {},
-        correlationId: 'corr-123',
+        spanId: 'corr-123',
         forkId: '0',
         metadata: {},
         timestamp: '2025-11-16T00:00:00Z',
@@ -78,7 +78,7 @@ describe('Backend Validation', () => {
       const payload: LogPayload = {
         eventKey: 'test.event',
         fields: { userId: '123', action: 'test' },
-        correlationId: 'corr-456',
+        spanId: 'corr-456',
         forkId: '1.2',
         metadata: { service: 'test-service' },
         timestamp: '2025-11-16T00:00:00Z',
@@ -109,7 +109,7 @@ const ALL_LEVELS: LogLevel[] = [
 const testPayload: LogPayload = {
   eventKey: 'test',
   fields: {},
-  correlationId: 'c-1',
+  spanId: 'c-1',
   forkId: '0',
   metadata: {},
   timestamp: '2025-01-01T00:00:00Z',
