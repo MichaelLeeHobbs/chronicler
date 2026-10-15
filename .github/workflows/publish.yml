@@ -21,10 +21,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run check
       - run: pnpm run build
+      # Trusted publishing (OIDC) needs npm 11.5.1 or later
+      - run: npm install -g npm@^11.5.1
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      # pnpm publish rewrites the CLI's workspace:* devDependency on the core package
-      - run: pnpm --filter @ubercode/chronicler-cli publish --provenance --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # pnpm pack rewrites the CLI's workspace:* devDependency on the core package;
+      # npm publish then uploads the tarball through trusted publishing
+      - run: pnpm --filter @ubercode/chronicler-cli pack --pack-destination "$RUNNER_TEMP"
+      - run: npm publish "$RUNNER_TEMP"/ubercode-chronicler-cli-*.tgz --provenance --access public

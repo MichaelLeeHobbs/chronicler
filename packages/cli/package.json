@@ -1,6 +1,6 @@
 {
   "name": "@ubercode/chronicler-cli",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "CLI for Chronicler: validate event catalogs, generate event documentation and lock event keys",
   "keywords": [
     "logging",
